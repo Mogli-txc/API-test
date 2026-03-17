@@ -1,5 +1,17 @@
 const jwt = require('jsonwebtoken');
 
+/**
+ * Middleware de autenticação JWT
+ * Este middleware verifica se o cabeçalho de autorização contém um token JWT válido.
+ * 
+ * Fluxo:
+ * 1. Verifica se o cabeçalho de autorização está presente.
+ * 2. Extrai o token do cabeçalho.
+ * 3. Valida o token usando o segredo JWT.
+ * 4. Em caso de sucesso, adiciona os dados do usuário ao objeto `req`.
+ * 5. Em caso de falha, retorna um erro apropriado.
+ */
+
 module.exports = (req, res, next) => {
     const authHeader = req.headers['authorization'];
 

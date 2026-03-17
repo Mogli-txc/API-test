@@ -26,6 +26,20 @@ router.post('/enviar', authMiddleware, MensagemController.enviarMensagem);
  * Acesso: PROTEGIDO - Apenas participantes da carona podem ver
  * Parâmetros: caro_id (via URL)
  * Retorno: Status 200 com array de mensagens ordenadas por data
+ * Exemplo de Resposta:
+{
+  "message": "Mensagens recuperadas com sucesso",
+  "mensagens": [
+    {
+      "mens_id": 1,
+      "caro_id": 1,
+      "remetente_id": 2,
+      "destinatario_id": 3,
+      "mens_texto": "Olá, tudo bem?",
+      "criado_em": "2026-03-17T12:00:00.000Z"
+    }
+  ]
+}
  */
 router.get('/carona/:caro_id', authMiddleware, MensagemController.listarConversa);
 

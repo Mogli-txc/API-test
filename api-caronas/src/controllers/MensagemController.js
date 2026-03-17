@@ -1,55 +1,68 @@
 /**
  * CONTROLLER DE MENSAGENS - Gerenciamento de Chat de Caronas
- * Responsável por: enviar, listar, editar e deletar mensagens
- * Segurança: Usuários só podem editar/deletar suas próprias mensagens
+ * ResponsÃ¡vel por: enviar, listar, editar e deletar mensagens
+ * SeguranÃ§a: UsuÃ¡rios sÃ³ podem editar/deletar suas prÃ³prias mensagens
  * MER: Tabela MENSAGENS (mens_id, caro_id, remetente_id, destinatario_id, mens_texto, mens_id_resposta, criado_em)
  */
 
 class MensagemController {
 
     /**
-     * MÉTODO: enviarMensagem
-     * Descrição: Envia uma nova mensagem em um chat de carona
-     * Campos esperados: caro_id, remetente_id, destinatario_id, mens_texto
-     * Opcional: mens_id_resposta (para respostas em thread)
-     * Acesso: PROTEGIDO
-     * Retorno: Status 201 com dados da mensagem criada
+     * MÃ‰TODO: enviarMensagem
+     * DescriÃ§Ã£o: Envia uma nova mensagem em um chat de carona.
+     * 
+     * ExplicaÃ§Ã£o para estudantes:
+     * Este mÃ©todo valida os dados de entrada e cria uma nova mensagem.
+     * Em um sistema real, os dados seriam salvos em um banco de dados.
+     * 
+     * Exemplo de resposta:
+     * {
+     *   "message": "Mensagem enviada com sucesso!",
+     *   "mensagem": {
+     *     "mens_id": 12345,
+     *     "caro_id": 1,
+     *     "remetente_id": 2,
+     *     "destinatario_id": 3,
+     *     "mens_texto": "OlÃ¡, tudo bem?",
+     *     "criado_em": "2026-03-17T12:00:00.000Z"
+     *   }
+     * }
      */
     async enviarMensagem(req, res) {
         try {
-            // PASSO 1: Desestrutura os dados da requisição
+            // PASSO 1: Desestrutura os dados da requisiÃ§Ã£o
             const { caro_id, remetente_id, destinatario_id, mens_texto, mens_id_resposta } = req.body;
 
-            // PASSO 2: Validação de campos obrigatórios
+            // PASSO 2: ValidaÃ§Ã£o de campos obrigatÃ³rios
             if (!caro_id || !remetente_id || !destinatario_id || !mens_texto) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: caro_id, remetente_id, destinatario_id, mens_texto."
+                    error: "Campos obrigatÃ³rios: caro_id, remetente_id, destinatario_id, mens_texto."
                 });
             }
 
-            // PASSO 3: Validação de tipos numéricos
+            // PASSO 3: ValidaÃ§Ã£o de tipos numÃ©ricos
             if (isNaN(caro_id) || isNaN(remetente_id) || isNaN(destinatario_id)) {
                 return res.status(400).json({
-                    error: "IDs devem ser numéricos."
+                    error: "IDs devem ser numÃ©ricos."
                 });
             }
 
-            // PASSO 4: Validação do comprimento da mensagem
+            // PASSO 4: ValidaÃ§Ã£o do comprimento da mensagem
             if (mens_texto.length < 1 || mens_texto.length > 1000) {
                 return res.status(400).json({
                     error: "Mensagem deve ter entre 1 e 1000 caracteres."
                 });
             }
 
-            // PASSO 5: Prevenção: usuário não pode enviar para si mesmo
+            // PASSO 5: PrevenÃ§Ã£o: usuÃ¡rio nÃ£o pode enviar para si mesmo
             if (remetente_id === destinatario_id) {
                 return res.status(400).json({
-                    error: "Não é possível enviar mensagem para si mesmo."
+                    error: "NÃ£o Ã© possÃ­vel enviar mensagem para si mesmo."
                 });
             }
 
-            // PASSO 6: Criação da mensagem (SIMULAÇÃO)
-            // Em produção: INSERT INTO MENSAGENS (caro_id, remetente_id, destinatario_id, mens_texto, mens_id_resposta, criado_em)
+            // PASSO 6: CriaÃ§Ã£o da mensagem (SIMULAÃ‡ÃƒO)
+            // Em produÃ§Ã£o: INSERT INTO MENSAGENS (caro_id, remetente_id, destinatario_id, mens_texto, mens_id_resposta, criado_em)
             //             VALUES (?, ?, ?, ?, ?, GETDATE())
             const novaMensagem = {
                 mens_id: Math.floor(Math.random() * 100000),
@@ -77,9 +90,9 @@ class MensagemController {
     }
 
     /**
-     * MÉTODO: listarConversa
-     * Descrição: Lista todas as mensagens de uma carona (thread completa)
-     * Parâmetros: caro_id (via URL)
+     * Mï¿½TODO: listarConversa
+     * Descriï¿½ï¿½o: Lista todas as mensagens de uma carona (thread completa)
+     * Parï¿½metros: caro_id (via URL)
      * Acesso: PROTEGIDO - Apenas participants da carona podem ver
      * Retorno: Status 200 com array de mensagens ordenadas por data (crescente)
      */
@@ -88,23 +101,23 @@ class MensagemController {
             // PASSO 1: Extrai o ID da carona
             const { caro_id } = req.params;
 
-            // PASSO 2: Validação do ID
+            // PASSO 2: Validaï¿½ï¿½o do ID
             if (!caro_id || isNaN(caro_id)) {
                 return res.status(400).json({
-                    error: "ID de carona inválido."
+                    error: "ID de carona invï¿½lido."
                 });
             }
 
-            // PASSO 3: Busca no banco (SIMULAÇÃO)
-            // Em produção: SELECT * FROM MENSAGENS WHERE caro_id = ? ORDER BY criado_em ASC
+            // PASSO 3: Busca no banco (SIMULAï¿½ï¿½O)
+            // Em produï¿½ï¿½o: SELECT * FROM MENSAGENS WHERE caro_id = ? ORDER BY criado_em ASC
             const mensagens = [
                 {
                     mens_id: 1,
                     caro_id: parseInt(caro_id),
                     remetente_id: 1,
-                    remetente_nome: "Motorista João",
+                    remetente_nome: "Motorista Joï¿½o",
                     destinatario_id: 2,
-                    mens_texto: "Oi, já saiu de casa?",
+                    mens_texto: "Oi, jï¿½ saiu de casa?",
                     criado_em: "2024-03-20 07:45"
                 },
                 {
@@ -136,10 +149,10 @@ class MensagemController {
     }
 
     /**
-     * MÉTODO: editarMensagem
-     * Descrição: Edita uma mensagem já enviada (apenas o remetente)
-     * Parâmetros: mens_id (via URL)
-     * Campos atualizáveis: mens_texto
+     * Mï¿½TODO: editarMensagem
+     * Descriï¿½ï¿½o: Edita uma mensagem jï¿½ enviada (apenas o remetente)
+     * Parï¿½metros: mens_id (via URL)
+     * Campos atualizï¿½veis: mens_texto
      * Acesso: PROTEGIDO - Apenas o remetente pode editar
      * Retorno: Status 200 com mensagem atualizada
      */
@@ -149,22 +162,22 @@ class MensagemController {
             const { mens_id } = req.params;
             const { mens_texto } = req.body;
 
-            // PASSO 2: Validação do ID
+            // PASSO 2: Validaï¿½ï¿½o do ID
             if (!mens_id || isNaN(mens_id)) {
                 return res.status(400).json({
-                    error: "ID de mensagem inválido."
+                    error: "ID de mensagem invï¿½lido."
                 });
             }
 
-            // PASSO 3: Validação do novo texto
+            // PASSO 3: Validaï¿½ï¿½o do novo texto
             if (!mens_texto || mens_texto.length < 1 || mens_texto.length > 1000) {
                 return res.status(400).json({
                     error: "Mensagem deve ter entre 1 e 1000 caracteres."
                 });
             }
 
-            // PASSO 4: Atualização no banco (SIMULAÇÃO)
-            // Em produção: UPDATE MENSAGENS SET mens_texto = ?, atualizado_em = GETDATE() WHERE mens_id = ?
+            // PASSO 4: Atualizaï¿½ï¿½o no banco (SIMULAï¿½ï¿½O)
+            // Em produï¿½ï¿½o: UPDATE MENSAGENS SET mens_texto = ?, atualizado_em = GETDATE() WHERE mens_id = ?
             const mensagemAtualizada = {
                 mens_id: parseInt(mens_id),
                 mens_texto: mens_texto,
@@ -188,27 +201,27 @@ class MensagemController {
     }
 
     /**
-     * MÉTODO: deletarMensagem
-     * Descrição: Deleta uma mensagem (soft delete recomendado)
-     * Parâmetros: mens_id (via URL)
+     * Mï¿½TODO: deletarMensagem
+     * Descriï¿½ï¿½o: Deleta uma mensagem (soft delete recomendado)
+     * Parï¿½metros: mens_id (via URL)
      * Acesso: PROTEGIDO - Apenas o remetente pode deletar
      * Retorno: Status 204 (No Content)
-     * OBS: Recomenda-se soft delete para preservar thread histórica
+     * OBS: Recomenda-se soft delete para preservar thread histï¿½rica
      */
     async deletarMensagem(req, res) {
         try {
             // PASSO 1: Extrai o ID
             const { mens_id } = req.params;
 
-            // PASSO 2: Validação do ID
+            // PASSO 2: Validaï¿½ï¿½o do ID
             if (!mens_id || isNaN(mens_id)) {
                 return res.status(400).json({
-                    error: "ID de mensagem inválido."
+                    error: "ID de mensagem invï¿½lido."
                 });
             }
 
             // PASSO 3: Soft Delete no banco (recomendado)
-            // Em produção: UPDATE MENSAGENS SET deletada = 1, deletado_em = GETDATE() WHERE mens_id = ?
+            // Em produï¿½ï¿½o: UPDATE MENSAGENS SET deletada = 1, deletado_em = GETDATE() WHERE mens_id = ?
             // Ou Hard Delete: DELETE FROM MENSAGENS WHERE mens_id = ?
 
             // PASSO 4: Resposta de sucesso (204 No Content)

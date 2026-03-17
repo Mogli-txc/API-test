@@ -21,12 +21,25 @@ class CaronaController {
      * MÉTODO: listarTodas
      * Descrição: Recupera todas as caronas disponíveis no sistema.
      * 
-     * Acesso: Público - Qualquer pessoa pode visualizar as caronas.
-     * Retorno: Status 200 com um array de caronas disponíveis.
+     * Explicação para estudantes:
+     * Este método simula a busca de caronas em um banco de dados. Em um sistema real, 
+     * seria necessário substituir os dados simulados por uma consulta ao banco.
      * 
-     * Fluxo:
-     * 1. Simula uma busca no banco de dados para obter caronas ativas.
-     * 2. Retorna a lista de caronas com uma mensagem de sucesso.
+     * Exemplo de resposta:
+     * {
+     *   "message": "Lista de caronas recuperada com sucesso",
+     *   "total": 1,
+     *   "caronas": [
+     *     {
+     *       "caro_id": 1,
+     *       "caro_desc": "Carona para o Centro",
+     *       "caro_data": "2024-03-20 08:00",
+     *       "caro_vagasDispo": 3,
+     *       "cur_usu_id": 1,
+     *       "vei_id": 1
+     *     }
+     *   ]
+     * }
      */
     async listarTodas(req, res) {
         try {
@@ -53,9 +66,9 @@ class CaronaController {
 
         } catch (error) {
             // PASSO 3: Tratamento de erros
-            console.error("[ERRO] listarTodas:", error);
+            console.error("[ERRO listarTodas]:", error);
             return res.status(500).json({
-                error: "Erro ao recuperar lista de caronas."
+                error: "Erro interno ao recuperar lista de caronas."
             });
         }
     }
@@ -64,16 +77,24 @@ class CaronaController {
      * MÉTODO: obterPorId
      * Descrição: Recupera os detalhes de uma carona específica.
      * 
-     * Parâmetros: caro_id (via URL) - ID da carona a ser recuperada.
+     * Explicação para estudantes:
+     * Este método recebe um ID de carona como parâmetro e retorna os detalhes da carona correspondente.
+     * Caso o ID seja inválido ou a carona não exista, uma mensagem de erro será retornada.
      * 
-     * Acesso: Público - Qualquer pessoa pode visualizar os detalhes da carona.
-     * Retorno: Status 200 com os dados da carona ou 404 se não encontrada.
-     * 
-     * Fluxo:
-     * 1. Extrai o ID da carona da URL.
-     * 2. Valida o ID informado.
-     * 3. Simula uma busca no banco de dados para obter os detalhes da carona.
-     * 4. Retorna os detalhes da carona encontrada ou uma mensagem de erro.
+     * Exemplo de resposta:
+     * {
+     *   "message": "Detalhes da carona recuperados",
+     *   "carona": {
+     *     "caro_id": 1,
+     *     "caro_desc": "Carona para o Centro",
+     *     "caro_data": "2024-03-20 08:00",
+     *     "caro_vagasDispo": 2,
+     *     "cur_usu_id": 1,
+     *     "vei_id": 1,
+     *     "caro_status": "Ativa",
+     *     "criado_em": "2024-03-19 15:30"
+     *   }
+     * }
      */
     async obterPorId(req, res) {
         try {
@@ -83,7 +104,7 @@ class CaronaController {
             // PASSO 1: Validação do ID
             if (!caro_id || isNaN(caro_id)) {
                 return res.status(400).json({
-                    error: "ID de carona inválido."
+                    error: "ID de carona inválido. Deve ser um número válido."
                 });
             }
 
@@ -115,9 +136,9 @@ class CaronaController {
 
         } catch (error) {
             // Captura erros inesperados
-            console.error("[ERRO] Obter carona por ID:", error);
+            console.error("[ERRO obterPorId]:", error);
             return res.status(500).json({
-                error: "Erro ao recuperar carona."
+                error: "Erro interno ao recuperar carona."
             });
         }
     }
@@ -147,26 +168,26 @@ class CaronaController {
             // PASSO 2: Valida��o de campos obrigat�rios
             if (!cur_usu_id || !vei_id || !caro_desc || !caro_data || !caro_vagasDispo) {
                 return res.status(400).json({
-                    error: "Campos obrigat�rios: cur_usu_id, vei_id, caro_desc, caro_data, caro_vagasDispo."
+                    error: "Campos obrigatórios: cur_usu_id, vei_id, caro_desc, caro_data, caro_vagasDispo."
                 });
             }
 
             // Valida��o de tipos de dados
             if (typeof caro_desc !== 'string') {
                 return res.status(400).json({
-                    error: "Descrição da carona deve ser uma string."
+                    error: "Descrição da carona deve ser uma string válida."
                 });
             }
 
             if (isNaN(caro_vagasDispo) || caro_vagasDispo <= 0) {
                 return res.status(400).json({
-                    error: "Vagas dispon�veis devem ser um n�mero maior que zero."
+                    error: "Vagas disponíveis devem ser um número maior que zero."
                 });
             }
 
             if (isNaN(Date.parse(caro_data))) {
                 return res.status(400).json({
-                    error: "Data da carona deve ser uma data v�lida."
+                    error: "Data da carona deve ser uma data válida."
                 });
             }
 
@@ -186,15 +207,15 @@ class CaronaController {
 
             // PASSO 4: Resposta de sucesso
             return res.status(201).json({
-                message: "Carona oferecida com sucesso!",
+                message: "Carona criada com sucesso!",
                 carona: novaCarona
             });
 
         } catch (error) {
             // Captura erros inesperados
-            console.error("[ERRO] Criar carona:", error);
+            console.error("[ERRO criar]:", error);
             return res.status(500).json({
-                error: "Erro ao criar carona."
+                error: "Erro interno ao criar carona."
             });
         }
     }
@@ -267,7 +288,7 @@ class CaronaController {
             // Captura erros inesperados
             console.error("[ERRO] Atualizar carona:", error);
             return res.status(500).json({
-                error: "Erro ao atualizar carona."
+                error: "Erro interno ao atualizar carona."
             });
         }
     }
@@ -312,7 +333,7 @@ class CaronaController {
             // Captura erros inesperados
             console.error("[ERRO] Deletar carona:", error);
             return res.status(500).json({
-                error: "Erro ao deletar carona."
+                error: "Erro interno ao deletar carona."
             });
         }
     }
@@ -348,21 +369,21 @@ class CaronaController {
             // PASSO 2: Valida��o de campos obrigat�rios
             if (!caro_id || !usua_id || !soli_vagaSolicitadas) {
                 return res.status(400).json({
-                    error: "Campos obrigat�rios: caro_id, usua_id, soli_vagaSolicitadas."
+                    error: "Campos obrigatórios: caro_id, usua_id, soli_vagaSolicitadas."
                 });
             }
 
             // PASSO 3: Valida��o de tipos num�ricos
             if (isNaN(caro_id) || isNaN(usua_id) || isNaN(soli_vagaSolicitadas)) {
                 return res.status(400).json({
-                    error: "Campos num�ricos inv�lidos."
+                    error: "Campos numéricos inválidos."
                 });
             }
 
             // PASSO 4: Valida��o de vagas solicitadas
             if (soli_vagaSolicitadas <= 0) {
                 return res.status(400).json({
-                    error: "N�mero de vagas solicitadas deve ser maior que zero."
+                    error: "Número de vagas solicitadas deve ser maior que zero."
                 });
             }
 
@@ -412,7 +433,7 @@ class CaronaController {
             // Captura erros inesperados
             console.error("[ERRO] Solicitar carona:", error);
             return res.status(500).json({
-                error: "Erro ao processar solicita��o de carona."
+                error: "Erro interno ao processar solicita��o de carona."
             });
         }
     }
@@ -481,7 +502,7 @@ class CaronaController {
             // Captura erros inesperados
             console.error("[ERRO] Responder solicita��o:", error);
             return res.status(500).json({
-                error: "Erro ao responder solicita��o."
+                error: "Erro interno ao responder solicita��o."
             });
         }
     }

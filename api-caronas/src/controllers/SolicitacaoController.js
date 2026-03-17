@@ -18,11 +18,24 @@ class SolicitacaoController {
 
     /**
      * M�TODO: solicitarCarona
-     * Descri��o: Passageiro cria uma solicita��o de participa��o em carona
-     * Campos esperados: caro_id, usua_id, soli_vagaSolicitadas
-     * Acesso: PROTEGIDO
-     * Retorno: Status 201 com dados da solicita��o criada
-     * Status Inicial: 'Pendente'
+     * Descri��o: Passageiro cria uma solicita��o de participa��o em carona.
+     * 
+     * Explica��o para estudantes:
+     * Este m�todo valida os dados de entrada e cria uma nova solicita��o de carona.
+     * Em um sistema real, os dados seriam salvos em um banco de dados.
+     * 
+     * Exemplo de resposta:
+     * {
+     *   "message": "Solicita��o de carona criada com sucesso!",
+     *   "solicitacao": {
+     *     "soli_id": 12345,
+     *     "caro_id": 1,
+     *     "usua_id": 2,
+     *     "soli_vagaSolicitadas": 1,
+     *     "soli_status": "Pendente",
+     *     "criado_em": "2026-03-17T12:00:00.000Z"
+     *   }
+     * }
      */
     async solicitarCarona(req, res) {
         try {

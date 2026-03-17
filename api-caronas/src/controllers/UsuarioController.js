@@ -28,18 +28,23 @@ class UsuarioController {
      * MÉTODO: cadastrar
      * Descrição: Realiza o cadastro de um novo usuário no sistema.
      * 
-     * Acesso: Público - Qualquer pessoa pode se cadastrar.
-     * Retorno: Status 201 com os dados do usuário cadastrado.
+     * Explicação para estudantes:
+     * Este método valida os dados de entrada e adiciona um novo usuário à lista simulada.
+     * Em um sistema real, os dados seriam salvos em um banco de dados.
      * 
-     * Fluxo:
-     * 1. Valida os campos obrigatórios (nome, email, senha).
-     * 2. Gera um ID único para o novo usuário.
-     * 3. Adiciona o usuário à lista simulada.
-     * 4. Retorna uma mensagem de sucesso com os dados do usuário.
+     * Exemplo de resposta:
+     * {
+     *   "message": "Usuário cadastrado com sucesso!",
+     *   "usuario": {
+     *     "usua_id": 2,
+     *     "usua_nome": "João Silva",
+     *     "usua_email": "joao@teste.com"
+     *   }
+     * }
      */
     cadastrar = async (req, res) => {
         try {
-            const { usua_nome, usua_email, usua_senha, usua_matricula } = req.body;
+            const { usua_nome, usua_email, usua_senha } = req.body;
 
             // PASSO 1: Validação de campos obrigatórios
             if (!usua_email || !usua_senha || !usua_nome) {
@@ -65,7 +70,11 @@ class UsuarioController {
             // PASSO 4: Retorna sucesso
             return res.status(201).json({
                 message: "Usuário cadastrado com sucesso!",
-                usuario: novoUsuario
+                usuario: {
+                    usua_id: novoUsuario.usua_id,
+                    usua_nome: novoUsuario.usua_nome,
+                    usua_email: novoUsuario.usua_email
+                }
             });
 
         } catch (error) {

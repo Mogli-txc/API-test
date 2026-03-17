@@ -59,12 +59,73 @@ api-caronas/
      ```env
      JWT_SECRET=CHAVE_SUPER_SECRETA_API_CARONAS
      PORT=3000
+     DB_NAME=nome_do_banco
+     DB_USER=usuario
+     DB_PASSWORD=senha
+     DB_HOST=localhost
      ```
 
 4. Inicie o servidor:
    ```bash
    npm run dev
    ```
+
+---
+
+## Exemplos de Rotas
+
+### Caronas
+
+#### Listar todas as caronas
+- **Rota**: `GET /api/caronas`
+- **Descrição**: Retorna todas as caronas disponíveis.
+- **Exemplo de Resposta**:
+  ```json
+  {
+    "message": "Lista de caronas recuperada com sucesso",
+    "total": 1,
+    "caronas": [
+      {
+        "caro_id": 1,
+        "caro_desc": "Carona para o Centro",
+        "caro_data": "2024-03-20 08:00",
+        "caro_vagasDispo": 3,
+        "cur_usu_id": 1,
+        "vei_id": 1
+      }
+    ]
+  }
+  ```
+
+#### Criar uma nova carona
+- **Rota**: `POST /api/caronas`
+- **Descrição**: Cria uma nova carona.
+- **Campos esperados**:
+  ```json
+  {
+    "cur_usu_id": 1,
+    "vei_id": 1,
+    "caro_desc": "Carona para o Centro",
+    "caro_data": "2024-03-20 08:00",
+    "caro_vagasDispo": 3
+  }
+  ```
+- **Exemplo de Resposta**:
+  ```json
+  {
+    "message": "Carona criada com sucesso!",
+    "carona": {
+      "caro_id": 1234,
+      "cur_usu_id": 1,
+      "vei_id": 1,
+      "caro_desc": "Carona para o Centro",
+      "caro_data": "2024-03-20 08:00",
+      "caro_vagasDispo": 3,
+      "caro_status": "Ativa",
+      "criado_em": "2026-03-17T12:00:00.000Z"
+    }
+  }
+  ```
 
 ---
 
