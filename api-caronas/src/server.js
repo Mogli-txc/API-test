@@ -2,18 +2,18 @@
  * ARQUIVO PRINCIPAL DA API - Sistema de Caronas
  * Configuração do Express, Middlewares e Roteamento
  * Port: 3000 (padrão) ou variável de ambiente PORT
- * 
- * Rotas Implementadas:
- * - POST /api/usuarios/cadastro - Registrar novo usuário
- * - POST /api/usuarios/login - Autenticar usuário (gera JWT)
- * - GET /api/usuarios/perfil/:id - Recuperar dados do perfil
- * - GET /api/caronas - Listar caronas disponíveis
- * - POST /api/caronas/oferecer - Criar nova carona (PROTEGIDO)
- * - POST /api/caronas/solicitar - Solicitar participação (PROTEGIDO)
- * - POST /api/mensagens/enviar - Enviar mensagem (PROTEGIDO)
- * - GET /api/mensagens/carona/:caro_id - Listar chat (PROTEGIDO)
- * - POST /api/solicitacoes/criar - Criar solicitação (PROTEGIDO)
- * - PUT /api/solicitacoes/:soli_id/responder - Motorista responde (PROTEGIDO)
+ *
+ * Grupos de Rotas:
+ * - /api/usuarios     → Cadastro, login, perfil, atualizar, deletar
+ * - /api/caronas      → Listar, criar, atualizar, cancelar caronas
+ * - /api/solicitacoes → Solicitar, aceitar, recusar, cancelar vagas
+ * - /api/mensagens    → Chat entre motorista e passageiro
+ * - /api/veiculos     → Cadastro e listagem de veículos
+ * - /api/pontos       → Pontos de encontro de uma carona
+ * - /api/passageiros  → Passageiros confirmados em uma carona
+ * - /api/sugestoes    → Sugestões e denúncias dos usuários
+ * - /api/matriculas   → Inscrição de usuários em cursos
+ * - /api/infra        → Escolas e cursos disponíveis (público)
  */
 
 // Importação das dependências externas
@@ -22,13 +22,16 @@ const cors = require('cors');
 require('dotenv').config(); // Carrega variáveis de ambiente do arquivo .env
 
 // Importação das rotas
-const usuarioRoutes = require('./routes/usuarioRoutes');
-const caronaRoutes = require('./routes/caronaRoutes');
-const veiculoRoutes = require('./routes/veiculoRoutes');
-const infraRoutes = require('./routes/infraRoutes');
+const usuarioRoutes      = require('./routes/usuarioRoutes');
+const caronaRoutes       = require('./routes/caronaRoutes');
+const veiculoRoutes      = require('./routes/veiculoRoutes');
+const infraRoutes        = require('./routes/infraRoutes');
 const pontoEncontroRoutes = require('./routes/pontoEncontroRoutes');
-const mensagensRoutes = require('./routes/mensagensRoutes');
-const solicitacaoRoutes = require('./routes/solicitacaoRoutes');
+const mensagensRoutes    = require('./routes/mensagensRoutes');
+const solicitacaoRoutes  = require('./routes/solicitacaoRoutes');
+const caronaPessoasRoutes = require('./routes/caronaPessoasRoutes'); // Passageiros confirmados na carona
+const sugestaoRoutes     = require('./routes/sugestaoRoutes');       // Sugestões e denúncias
+const matriculaRoutes    = require('./routes/matriculaRoutes');      // Matrículas em cursos
 
 // Instancia a aplicação Express
 const app = express();
@@ -109,6 +112,27 @@ app.use('/api/mensagens', mensagensRoutes);
  * Motorista responde (aceita/recusa), passageiro cancela
  */
 app.use('/api/solicitacoes', solicitacaoRoutes);
+
+/**
+ * Rotas de Passageiros Confirmados: Passageiros que participam de uma carona
+ * Base URL: /api/passageiros
+ * Tabela: CARONA_PESSOAS
+ */
+app.use('/api/passageiros', caronaPessoasRoutes);
+
+/**
+ * Rotas de Sugestões e Denúncias: Feedback dos usuários
+ * Base URL: /api/sugestoes
+ * Tabela: SUGESTAO_DENUNCIA
+ */
+app.use('/api/sugestoes', sugestaoRoutes);
+
+/**
+ * Rotas de Matrículas: Inscrição de usuários em cursos
+ * Base URL: /api/matriculas
+ * Tabela: CURSOS_USUARIOS — o cur_usu_id é usado ao criar caronas
+ */
+app.use('/api/matriculas', matriculaRoutes);
 
 // ========== TRATAMENTO DE ERROS ==========
 

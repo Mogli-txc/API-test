@@ -1,42 +1,317 @@
+/**
+ * TESTES DE ENDPOINTS - API de Caronas
+ *
+ * O que mudou:
+ * - Corrigidos nomes de campos: usua_* → usu_*, caro_* → car_*
+ * - Adicionados campos obrigatórios que faltavam no cadastro
+ * - Adicionados testes para veículos, matrículas, pontos, mensagens e solicitações
+ *
+ * Executar: npm test
+ */
+
 const request = require('supertest');
-const app = require('../src/server');
+const app     = require('../src/server');
 
-describe('Testes de Endpoints da API', () => {
-  it('Deve retornar 200 em /api/usuarios/login', async () => {
-    const response = await request(app)
-      .post('/api/usuarios/login')
-      .send({
-        usua_email: 'admin@escola.com',
-        usua_senha: '123456'
-      });
-    expect(response.status).toBe(200);
-    expect(response.body).toHaveProperty('token');
-  });
+// Token compartilhado entre testes que precisam de autenticação
+let tokenTeste = '';
 
-  it('Deve retornar 201 em /api/usuarios/cadastro', async () => {
-    const response = await request(app)
-      .post('/api/usuarios/cadastro')
-      .send({
-        usua_nome: 'Teste',
-        usua_email: 'teste@teste.com',
-        usua_senha: '123456'
-      });
-    expect(response.status).toBe(201);
-    expect(response.body).toHaveProperty('message', 'Usuário cadastrado com sucesso!');
-  });
+// ========== USUÁRIOS ==========
 
-  it('Deve retornar 401 para /api/caronas/oferecer com token inválido', async () => {
-    const response = await request(app)
-      .post('/api/caronas/oferecer')
-      .set('Authorization', 'Bearer token_invalido') // Token inválido
-      .send({
-        cur_usu_id: 1,
-        vei_id: 1,
-        caro_desc: true,
-        caro_data: '2026-03-18',
-        caro_vagasDispo: 3
-      });
-    expect(response.status).toBe(401); // Alterado de 400 para 401
-    expect(response.body).toHaveProperty('error', 'Token inválido ou expirado.');
-  });
+describe('Usuários', () => {
+
+    it('POST /cadastro — deve retornar 201', async () => {
+        const res = await request(app)
+            .post('/api/usuarios/cadastro')
+            .send({
+                usu_nome:           'Usuário Teste',
+                usu_email:          `teste_${Date.now()}@escola.edu.br`, // email único por execução
+                usu_senha:          'senha123',
+                usu_telefone:       '11999990000',
+                usu_matricula:      '2024001',
+                usu_endereco:       'Rua Teste, 100',
+                usu_endereco_geom:  '-23.5505,-46.6333'
+            });
+        expect(res.status).toBe(201);
+        expect(res.body).toHaveProperty('message', 'Usuário cadastrado com sucesso!');
+        expect(res.body.usuario).toHaveProperty('usu_id');
+    });
+
+    it('POST /cadastro — deve retornar 400 se faltar campo obrigatório', async () => {
+        const res = await request(app)
+            .post('/api/usuarios/cadastro')
+            .send({ usu_nome: 'Incompleto' }); // faltam campos
+        expect(res.status).toBe(400);
+    });
+
+    it('POST /login — deve retornar 200 e token', async () => {
+        const res = await request(app)
+            .post('/api/usuarios/login')
+            .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('token');
+        tokenTeste = res.body.token; // salva para os próximos testes
+    });
+
+    it('POST /login — deve retornar 401 com credenciais erradas', async () => {
+        const res = await request(app)
+            .post('/api/usuarios/login')
+            .send({ usu_email: 'naoexiste@escola.com', usu_senha: 'errada' });
+        expect(res.status).toBe(401);
+    });
+
+    it('GET /perfil/:id — deve retornar 200 para ID existente', async () => {
+        const res = await request(app).get('/api/usuarios/perfil/1');
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('user');
+    });
+
+    it('GET /perfil/:id — deve retornar 404 para ID inexistente', async () => {
+        const res = await request(app).get('/api/usuarios/perfil/999999');
+        expect(res.status).toBe(404);
+    });
+
+});
+
+// ========== AUTENTICAÇÃO / SEGURANÇA ==========
+
+describe('Segurança JWT', () => {
+
+    it('Rota protegida SEM token — deve retornar 403', async () => {
+        const res = await request(app)
+            .post('/api/caronas/oferecer')
+            .send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('Rota protegida com token INVÁLIDO — deve retornar 401', async () => {
+        const res = await request(app)
+            .post('/api/caronas/oferecer')
+            .set('Authorization', 'Bearer token_invalido')
+            .send({});
+        expect(res.status).toBe(401);
+    });
+
+});
+
+// ========== INFRAESTRUTURA (Público) ==========
+
+describe('Infraestrutura', () => {
+
+    it('GET /api/infra/escolas — deve retornar 200', async () => {
+        const res = await request(app).get('/api/infra/escolas');
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('escolas');
+    });
+
+    it('GET /api/infra/escolas/1/cursos — deve retornar 200', async () => {
+        const res = await request(app).get('/api/infra/escolas/1/cursos');
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('cursos');
+    });
+
+    it('GET /api/infra/escolas/abc/cursos — ID inválido deve retornar 400', async () => {
+        const res = await request(app).get('/api/infra/escolas/abc/cursos');
+        expect(res.status).toBe(400);
+    });
+
+});
+
+// ========== CARONAS ==========
+
+describe('Caronas', () => {
+
+    it('GET /api/caronas — deve retornar 200 (público)', async () => {
+        const res = await request(app).get('/api/caronas');
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('caronas');
+    });
+
+    it('GET /api/caronas/publica — deve retornar 200 (público)', async () => {
+        const res = await request(app).get('/api/caronas/publica');
+        expect(res.status).toBe(200);
+    });
+
+    it('POST /api/caronas/oferecer — deve retornar 400 se faltar campo (com token)', async () => {
+        const res = await request(app)
+            .post('/api/caronas/oferecer')
+            .set('Authorization', `Bearer ${tokenTeste}`)
+            .send({ vei_id: 1 }); // faltam campos obrigatórios
+        expect(res.status).toBe(400);
+    });
+
+    it('GET /api/caronas/999999 — deve retornar 404 para ID inexistente', async () => {
+        const res = await request(app).get('/api/caronas/999999');
+        expect(res.status).toBe(404);
+    });
+
+    it('GET /api/caronas/abc — ID inválido deve retornar 400', async () => {
+        const res = await request(app).get('/api/caronas/abc');
+        expect(res.status).toBe(400);
+    });
+
+});
+
+// ========== VEÍCULOS ==========
+
+describe('Veículos', () => {
+
+    it('POST /api/veiculos — sem token deve retornar 403', async () => {
+        const res = await request(app).post('/api/veiculos/').send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('POST /api/veiculos — deve retornar 400 se faltar campo (com token)', async () => {
+        const res = await request(app)
+            .post('/api/veiculos/')
+            .set('Authorization', `Bearer ${tokenTeste}`)
+            .send({ usu_id: 1 }); // faltam campos
+        expect(res.status).toBe(400);
+    });
+
+    it('GET /api/veiculos/usuario/:id — sem token deve retornar 403', async () => {
+        const res = await request(app).get('/api/veiculos/usuario/1');
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/veiculos/usuario/:id — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/veiculos/usuario/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('veiculos');
+    });
+
+});
+
+// ========== MATRÍCULAS ==========
+
+describe('Matrículas', () => {
+
+    it('POST /api/matriculas — sem token deve retornar 403', async () => {
+        const res = await request(app).post('/api/matriculas/').send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/matriculas/usuario/:id — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/matriculas/usuario/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('matriculas');
+    });
+
+});
+
+// ========== SOLICITAÇÕES ==========
+
+describe('Solicitações', () => {
+
+    it('POST /api/solicitacoes/criar — sem token deve retornar 403', async () => {
+        const res = await request(app).post('/api/solicitacoes/criar').send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/solicitacoes/carona/:id — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/solicitacoes/carona/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('solicitacoes');
+    });
+
+    it('GET /api/solicitacoes/usuario/:id — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/solicitacoes/usuario/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('solicitacoes');
+    });
+
+});
+
+// ========== MENSAGENS ==========
+
+describe('Mensagens', () => {
+
+    it('POST /api/mensagens/enviar — sem token deve retornar 403', async () => {
+        const res = await request(app).post('/api/mensagens/enviar').send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/mensagens/carona/:id — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/mensagens/carona/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('mensagens');
+    });
+
+});
+
+// ========== PONTOS DE ENCONTRO ==========
+
+describe('Pontos de Encontro', () => {
+
+    it('POST /api/pontos — sem token deve retornar 403', async () => {
+        const res = await request(app).post('/api/pontos/').send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/pontos/carona/:id — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/pontos/carona/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('pontos');
+    });
+
+});
+
+// ========== SUGESTÕES ==========
+
+describe('Sugestões e Denúncias', () => {
+
+    it('POST /api/sugestoes — sem token deve retornar 403', async () => {
+        const res = await request(app).post('/api/sugestoes/').send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/sugestoes — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/sugestoes/')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('sugestoes');
+    });
+
+});
+
+// ========== PASSAGEIROS ==========
+
+describe('Passageiros Confirmados', () => {
+
+    it('POST /api/passageiros — sem token deve retornar 403', async () => {
+        const res = await request(app).post('/api/passageiros/').send({});
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/passageiros/carona/:id — deve retornar 200 com token', async () => {
+        const res = await request(app)
+            .get('/api/passageiros/carona/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('passageiros');
+    });
+
+});
+
+// ========== ROTA INEXISTENTE ==========
+
+describe('Rota não encontrada', () => {
+
+    it('GET /api/rota-inexistente — deve retornar 404', async () => {
+        const res = await request(app).get('/api/rota-inexistente');
+        expect(res.status).toBe(404);
+    });
+
 });

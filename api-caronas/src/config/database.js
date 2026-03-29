@@ -1,15 +1,23 @@
 /**
- * Configuração do Banco de Dados
- * Este arquivo configura a conexão com o banco de dados usando um ORM ou driver.
- * Certifique-se de preencher as credenciais e detalhes do banco de dados.
+ * CONFIGURAÇÃO DO BANCO DE DADOS
+ *
+ * Usa mysql2/promise com pool de conexões:
+ * em vez de abrir e fechar uma conexão por consulta,
+ * o pool mantém até 10 conexões abertas e reutilizáveis.
+ *
+ * Variáveis de ambiente lidas do .env: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
  */
 
-const { Sequelize } = require('sequelize');
+const mysql = require('mysql2/promise');
 
-// Configuração da conexão com o banco de dados
-const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASSWORD, {
-  host: process.env.DB_HOST,
-  dialect: 'mysql', // Altere para o dialeto do seu banco de dados (ex.: postgres, sqlite, etc.)
+// Cria o pool de conexões com as configurações do .env
+const pool = mysql.createPool({
+    host:     process.env.DB_HOST     || 'localhost', // Endereço do servidor MySQL
+    user:     process.env.DB_USER,                    // Usuário do banco
+    password: process.env.DB_PASSWORD,                // Senha do banco
+    database: process.env.DB_NAME,                    // Nome do banco: bd_tcc_des_125_caronas
+    waitForConnections: true, // Espera uma conexão ficar livre se todas estiverem ocupadas
+    connectionLimit:    10,   // Máximo de 10 conexões simultâneas
 });
 
-module.exports = sequelize;
+module.exports = pool;

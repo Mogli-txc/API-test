@@ -1,509 +1,343 @@
 /**
- * CONTROLLER DE CARONAS - Gerenciamento de Caronas e Solicitações
- * Este arquivo contém métodos para gerenciar caronas e solicitações relacionadas.
- * 
- * Funções principais:
- * - Listar todas as caronas disponíveis.
- * - Criar, atualizar e deletar caronas.
- * - Gerenciar solicitações de participação em caronas.
- * 
- * Segurança:
- * - Métodos POST, PUT e DELETE exigem autenticação JWT.
- * - Apenas usuários autenticados podem modificar dados.
- * 
- * MER (Modelo Entidade-Relacionamento):
- * - Tabelas envolvidas: CARONAS, SOLICITACOES_CARONA.
+ * CONTROLLER DE CARONAS
+ *
+ *
+ * Valores de car_status no banco:
+ *   1 = Aberta | 2 = Em espera | 0 = Cancelada | 3 = Finalizada
+ *
+ * Valores de sol_status no banco:
+ *   1 = Enviado | 2 = Aceito | 3 = Negado | 0 = Cancelado
+ *
+ * Colunas principais da tabela CARONAS:
+ *   car_id, vei_id, cur_usu_id, car_desc, car_data,
+ *   car_hor_saida, car_vagas_dispo, car_status
  */
+
+const db = require('../config/database'); // Pool de conexão MySQL
 
 class CaronaController {
 
     /**
      * MÉTODO: listarTodas
-     * Descrição: Recupera todas as caronas disponíveis no sistema.
-     * 
-     * Explicação para estudantes:
-     * Este método simula a busca de caronas em um banco de dados. Em um sistema real, 
-     * seria necessário substituir os dados simulados por uma consulta ao banco.
-     * 
-     * Exemplo de resposta:
-     * {
-     *   "message": "Lista de caronas recuperada com sucesso",
-     *   "total": 1,
-     *   "caronas": [
-     *     {
-     *       "caro_id": 1,
-     *       "caro_desc": "Carona para o Centro",
-     *       "caro_data": "2024-03-20 08:00",
-     *       "caro_vagasDispo": 3,
-     *       "cur_usu_id": 1,
-     *       "vei_id": 1
-     *     }
-     *   ]
-     * }
+     * Retorna todas as caronas com status Aberta (car_status = 1),
+     * junto com dados do veículo, motorista e curso.
+     *
+     * Tabelas: CARONAS + VEICULOS + CURSOS_USUARIOS + USUARIOS + CURSOS (JOINs)
      */
-    async listarTodas(req, res) {
+    async listarTodas(_req, res) { // _req: parâmetro não utilizado neste método
         try {
-            // PASSO 1: Busca no banco (SIMULAÇÃO)
-            // Em produção: SELECT caro_id, caro_desc, caro_data, caro_vagasDispo, 
-            //                     cur_usu_id, vei_id FROM CARONAS WHERE caro_status = 'Ativa'
-            const caronas = [
-                {
-                    caro_id: 1,
-                    caro_desc: "Carona para o Centro",
-                    caro_data: "2024-03-20 08:00",
-                    caro_vagasDispo: 3,
-                    cur_usu_id: 1,
-                    vei_id: 1
-                }
-            ];
+            // JOIN entre várias tabelas para trazer informações completas da carona
+            const [caronas] = await db.query(
+                `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
+                        c.car_vagas_dispo, c.car_status,
+                        v.vei_marca_modelo AS veiculo,
+                        u.usu_nome         AS motorista,
+                        cur.cur_nome       AS curso_motorista
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS       v   ON c.vei_id     = v.vei_id
+                 INNER JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
+                 INNER JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
+                 INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
+                 WHERE c.car_status = 1`
+            );
 
-            // PASSO 2: Resposta de sucesso
             return res.status(200).json({
                 message: "Lista de caronas recuperada com sucesso",
-                total: caronas.length,
-                caronas: caronas
+                total:   caronas.length,
+                caronas
             });
 
         } catch (error) {
-            // PASSO 3: Tratamento de erros
-            console.error("[ERRO listarTodas]:", error);
-            return res.status(500).json({
-                error: "Erro interno ao recuperar lista de caronas."
-            });
+            console.error("[ERRO] listarTodas:", error);
+            return res.status(500).json({ error: "Erro ao recuperar lista de caronas." });
         }
     }
 
     /**
      * MÉTODO: obterPorId
-     * Descrição: Recupera os detalhes de uma carona específica.
-     * 
-     * Explicação para estudantes:
-     * Este método recebe um ID de carona como parâmetro e retorna os detalhes da carona correspondente.
-     * Caso o ID seja inválido ou a carona não exista, uma mensagem de erro será retornada.
-     * 
-     * Exemplo de resposta:
-     * {
-     *   "message": "Detalhes da carona recuperados",
-     *   "carona": {
-     *     "caro_id": 1,
-     *     "caro_desc": "Carona para o Centro",
-     *     "caro_data": "2024-03-20 08:00",
-     *     "caro_vagasDispo": 2,
-     *     "cur_usu_id": 1,
-     *     "vei_id": 1,
-     *     "caro_status": "Ativa",
-     *     "criado_em": "2024-03-19 15:30"
-     *   }
-     * }
+     * Retorna os detalhes de uma carona específica pelo ID.
+     *
+     * Tabela: CARONAS
+     * Parâmetro: caro_id (via URL)
      */
     async obterPorId(req, res) {
         try {
-            // Validação: Extrai o ID da URL
             const { caro_id } = req.params;
 
-            // PASSO 1: Validação do ID
             if (!caro_id || isNaN(caro_id)) {
-                return res.status(400).json({
-                    error: "ID de carona inválido. Deve ser um número válido."
-                });
+                return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 2: Busca no banco (SIMULAÇÃO)
-            // Em produção: SELECT * FROM CARONAS WHERE caro_id = ?
-            const carona = {
-                caro_id: parseInt(caro_id),
-                caro_desc: "Carona para o Centro",
-                caro_data: "2024-03-20 08:00",
-                caro_vagasDispo: 2,
-                cur_usu_id: 1,
-                vei_id: 1,
-                caro_status: "Ativa",
-                criado_em: "2024-03-19 15:30"
-            };
+            const [rows] = await db.query(
+                `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
+                        c.car_vagas_dispo, c.car_status, c.vei_id, c.cur_usu_id,
+                        v.vei_marca_modelo AS veiculo,
+                        u.usu_nome         AS motorista
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS       v  ON c.vei_id     = v.vei_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
+                 WHERE c.car_id = ?`,
+                [caro_id]
+            );
 
-            // PASSO 3: Verificação se carona existe
-            if (!carona) {
-                return res.status(404).json({
-                    error: "Carona não encontrada."
-                });
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
             }
 
-            // PASSO 4: Resposta de sucesso
             return res.status(200).json({
                 message: "Detalhes da carona recuperados",
-                carona: carona
+                carona:  rows[0]
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO obterPorId]:", error);
-            return res.status(500).json({
-                error: "Erro interno ao recuperar carona."
-            });
+            console.error("[ERRO] obterPorId:", error);
+            return res.status(500).json({ error: "Erro ao recuperar carona." });
         }
     }
 
     /**
      * MÉTODO: criar
-     * Descrição: Cria uma nova carona (oferecida por um usuário).
-     * 
-     * Campos esperados: cur_usu_id, vei_id, caro_desc, caro_data, caro_vagasDispo.
-     * 
-     * Acesso: PROTEGIDO - Requer autenticação JWT.
-     * Retorno: Status 201 com os dados da nova carona criada.
-     * 
-     * MER: Tabela CARONAS.
-     * 
-     * Fluxo:
-     * 1. Desestrutura os dados da requisição.
-     * 2. Valida os campos obrigatórios e seus tipos.
-     * 3. Simula a criação da nova carona no banco de dados.
-     * 4. Retorna os dados da nova carona criada com uma mensagem de sucesso.
+     * Insere uma nova carona no banco com status Aberta (car_status = 1).
+     *
+     * Tabela: CARONAS (INSERT)
+     * Campos obrigatórios no body: cur_usu_id, vei_id, car_desc, car_data,
+     *   car_hor_saida, car_vagas_dispo
      */
     async criar(req, res) {
         try {
-            // PASSO 1: Desestrutura os dados da requisi��o
-            const { cur_usu_id, vei_id, caro_desc, caro_data, caro_vagasDispo } = req.body;
+            const { cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo } = req.body;
 
-            // PASSO 2: Valida��o de campos obrigat�rios
-            if (!cur_usu_id || !vei_id || !caro_desc || !caro_data || !caro_vagasDispo) {
+            if (!cur_usu_id || !vei_id || !car_desc || !car_data || !car_hor_saida || !car_vagas_dispo) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: cur_usu_id, vei_id, caro_desc, caro_data, caro_vagasDispo."
+                    error: "Campos obrigatórios: cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo."
                 });
             }
 
-            // Valida��o de tipos de dados
-            if (typeof caro_desc !== 'string') {
-                return res.status(400).json({
-                    error: "Descrição da carona deve ser uma string válida."
-                });
+            if (isNaN(car_vagas_dispo) || car_vagas_dispo <= 0) {
+                return res.status(400).json({ error: "Vagas disponíveis devem ser maior que zero." });
             }
 
-            if (isNaN(caro_vagasDispo) || caro_vagasDispo <= 0) {
-                return res.status(400).json({
-                    error: "Vagas disponíveis devem ser um número maior que zero."
-                });
-            }
+            // Insere a carona com status 1 (Aberta)
+            const [resultado] = await db.query(
+                `INSERT INTO CARONAS
+                    (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status)
+                 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+                [vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo]
+            );
 
-            if (isNaN(Date.parse(caro_data))) {
-                return res.status(400).json({
-                    error: "Data da carona deve ser uma data válida."
-                });
-            }
-
-            // PASSO 3: Cria��o da carona (SIMULA��O)
-            // Em produ��o: INSERT INTO CARONAS (cur_usu_id, vei_id, caro_desc, caro_data, caro_vagasDispo, caro_status)
-            //             VALUES (?, ?, ?, ?, ?, 'Ativa')
-            const novaCarona = {
-                caro_id: Math.floor(Math.random() * 10000),
-                cur_usu_id: parseInt(cur_usu_id),
-                vei_id: parseInt(vei_id),
-                caro_desc: caro_desc,
-                caro_data: caro_data,
-                caro_vagasDispo: parseInt(caro_vagasDispo),
-                caro_status: "Ativa",
-                criado_em: new Date().toISOString()
-            };
-
-            // PASSO 4: Resposta de sucesso
             return res.status(201).json({
                 message: "Carona criada com sucesso!",
-                carona: novaCarona
+                carona: {
+                    car_id: resultado.insertId,
+                    cur_usu_id, vei_id, car_desc, car_data,
+                    car_hor_saida, car_vagas_dispo, car_status: 1
+                }
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO criar]:", error);
-            return res.status(500).json({
-                error: "Erro interno ao criar carona."
-            });
+            console.error("[ERRO] criar:", error);
+            return res.status(500).json({ error: "Erro ao criar carona." });
         }
     }
 
     /**
      * MÉTODO: atualizar
-     * Descrição: Atualiza os dados de uma carona existente.
-     * 
-     * Parâmetros: caro_id (via URL) - ID da carona a ser atualizada.
-     * 
-     * Campos atualizáveis: caro_desc, caro_data, caro_vagasDispo.
-     * 
-     * Acesso: PROTEGIDO - Apenas o proprietário (cur_usu_id) pode atualizar.
-     * Retorno: Status 200 com os dados atualizados da carona.
-     * 
-     * Fluxo:
-     * 1. Extrai o ID e os novos dados da carona da requisição.
-     * 2. Valida o ID e os dados para atualização.
-     * 3. Simula a atualização da carona no banco de dados.
-     * 4. Retorna os dados da carona atualizada com uma mensagem de sucesso.
+     * Atualiza os campos de uma carona existente.
+     *
+     * Tabela: CARONAS (UPDATE)
+     * Parâmetro: caro_id (via URL)
+     * Campos opcionais no body: car_desc, car_data, car_vagas_dispo, car_status
+     * car_status: 0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada
      */
     async atualizar(req, res) {
         try {
-            // PASSO 1: Extrai ID e dados da requisi��o
             const { caro_id } = req.params;
-            const { caro_desc, caro_data, caro_vagasDispo } = req.body;
+            const { car_desc, car_data, car_vagas_dispo, car_status } = req.body;
 
-            // PASSO 2: Valida��o do ID
             if (!caro_id || isNaN(caro_id)) {
-                return res.status(400).json({
-                    error: "ID de carona inv�lido."
-                });
+                return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 3: Valida��o de dados para atualiza��o
-            if (!caro_desc && !caro_data && !caro_vagasDispo) {
-                return res.status(400).json({
-                    error: "Nenhum campo foi informado para atualiza��o."
-                });
+            if (!car_desc && !car_data && !car_vagas_dispo && car_status === undefined) {
+                return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
             }
 
-            // PASSO 4: Valida��o de data (se informada)
-            if (caro_data) {
-                const dataCarona = new Date(caro_data);
-                const agora = new Date();
-                if (dataCarona <= agora) {
-                    return res.status(400).json({
-                        error: "A data da carona deve ser no futuro."
-                    });
-                }
+            // Valida car_status se enviado (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
+            if (car_status !== undefined && ![0, 1, 2, 3].includes(parseInt(car_status))) {
+                return res.status(400).json({ error: "car_status inválido. Use 0, 1, 2 ou 3." });
             }
 
-            // PASSO 5: Atualiza��o no banco (SIMULA��O)
-            // Em produ��o: UPDATE CARONAS SET caro_desc = ?, caro_data = ?, ... WHERE caro_id = ?
-            const caronaAtualizada = {
-                caro_id: parseInt(caro_id),
-                caro_desc: caro_desc || "Descri��o anterior",
-                caro_data: caro_data || "2024-03-20 08:00",
-                caro_vagasDispo: caro_vagasDispo || 3,
-                atualizado_em: new Date().toISOString()
-            };
+            // Monta a query com apenas os campos enviados
+            const campos = [];
+            const valores = [];
 
-            // PASSO 6: Resposta de sucesso
-            return res.status(200).json({
-                message: "Carona atualizada com sucesso!",
-                carona: caronaAtualizada
-            });
+            if (car_desc)              { campos.push('car_desc = ?');        valores.push(car_desc); }
+            if (car_data)              { campos.push('car_data = ?');        valores.push(car_data); }
+            if (car_vagas_dispo)       { campos.push('car_vagas_dispo = ?'); valores.push(car_vagas_dispo); }
+            if (car_status !== undefined) { campos.push('car_status = ?');   valores.push(parseInt(car_status)); }
+
+            valores.push(caro_id); // WHERE car_id = ?
+
+            await db.query(
+                `UPDATE CARONAS SET ${campos.join(', ')} WHERE car_id = ?`,
+                valores
+            );
+
+            return res.status(200).json({ message: "Carona atualizada com sucesso!" });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Atualizar carona:", error);
-            return res.status(500).json({
-                error: "Erro interno ao atualizar carona."
-            });
+            console.error("[ERRO] atualizar:", error);
+            return res.status(500).json({ error: "Erro ao atualizar carona." });
         }
     }
 
     /**
      * MÉTODO: deletar
-     * Descrição: Deleta/Cancela uma carona do sistema.
-     * 
-     * Parâmetros: caro_id (via URL) - ID da carona a ser deletada.
-     * 
-     * Acesso: PROTEGIDO - Apenas o proprietário (cur_usu_id) pode deletar.
-     * Retorno: Status 204 (No Content) em caso de sucesso.
-     * 
-     * OBS: Recomenda-se Soft Delete (UPDATE status = 'Cancelada').
-     * 
-     * Fluxo:
-     * 1. Extrai o ID da carona da URL.
-     * 2. Valida o ID informado.
-     * 3. Realiza o soft delete da carona no banco de dados.
-     * 4. Retorna um status 204 em caso de sucesso.
+     * Cancela a carona (soft delete: car_status = 0).
+     * Não remove do banco para preservar histórico.
+     *
+     * Tabela: CARONAS (UPDATE car_status)
      */
     async deletar(req, res) {
         try {
-            // PASSO 1: Extrai ID da URL
             const { caro_id } = req.params;
 
-            // PASSO 2: Valida��o do ID
             if (!caro_id || isNaN(caro_id)) {
-                return res.status(400).json({
-                    error: "ID de carona inv�lido."
-                });
+                return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 3: Soft Delete no banco (recomendado)
-            // Em produ��o: UPDATE CARONAS SET caro_status = 'Cancelada', cancelado_em = GETDATE() WHERE caro_id = ?
-            // Ou Hard Delete: DELETE FROM CARONAS WHERE caro_id = ?
+            // Soft delete: muda status para 0 (Cancelada)
+            await db.query(
+                'UPDATE CARONAS SET car_status = 0 WHERE car_id = ?',
+                [caro_id]
+            );
 
-            // PASSO 4: Resposta de sucesso (204 No Content)
             return res.status(204).send();
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Deletar carona:", error);
-            return res.status(500).json({
-                error: "Erro interno ao deletar carona."
-            });
+            console.error("[ERRO] deletar:", error);
+            return res.status(500).json({ error: "Erro ao cancelar carona." });
         }
     }
 
     /**
      * MÉTODO: solicitar
-     * Descrição: Cria uma solicitação de participação em uma carona.
-     * 
-     * Campos esperados: caro_id, usua_id, soli_vagaSolicitadas.
-     * 
-     * Acesso: PROTEGIDO - Requer autenticação JWT.
-     * Retorno: Status 201 com os dados da solicitação criada.
-     * 
-     * MER: Tabela SOLICITACOES_CARONA.
-     * 
-     * IMPORTANTE: soli_status começa como 'Pendente' e pode mudar para:
-     * - 'Aceito' (motorista aprovou)
-     * - 'Recusado' (motorista recusou)
-     * - 'Cancelado' (passageiro cancelou)
-     * 
-     * Fluxo:
-     * 1. Desestrutura os dados da requisição.
-     * 2. Valida os campos obrigatórios e seus tipos.
-     * 3. Verifica a disponibilidade de vagas na carona.
-     * 4. Simula a criação da nova solicitação no banco de dados.
-     * 5. Retorna os dados da nova solicitação criada com uma mensagem de sucesso.
+     * Cria uma solicitação de participação em uma carona.
+     * Verifica se há vagas disponíveis antes de inserir.
+     *
+     * Tabela: SOLICITACOES_CARONA (INSERT) com sol_status = 1 (Enviado)
+     * Campos no body: car_id, usu_id_passageiro, sol_vaga_soli
      */
     async solicitar(req, res) {
         try {
-            // PASSO 1: Desestrutura os dados da requisi��o
-            const { caro_id, usua_id, soli_vagaSolicitadas } = req.body;
+            const { car_id, usu_id_passageiro, sol_vaga_soli } = req.body;
 
-            // PASSO 2: Valida��o de campos obrigat�rios
-            if (!caro_id || !usua_id || !soli_vagaSolicitadas) {
+            if (!car_id || !usu_id_passageiro || !sol_vaga_soli) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: caro_id, usua_id, soli_vagaSolicitadas."
+                    error: "Campos obrigatórios: car_id, usu_id_passageiro, sol_vaga_soli."
                 });
             }
 
-            // PASSO 3: Valida��o de tipos num�ricos
-            if (isNaN(caro_id) || isNaN(usua_id) || isNaN(soli_vagaSolicitadas)) {
-                return res.status(400).json({
-                    error: "Campos numéricos inválidos."
-                });
+            if (isNaN(sol_vaga_soli) || sol_vaga_soli <= 0) {
+                return res.status(400).json({ error: "Vagas solicitadas devem ser maior que zero." });
             }
 
-            // PASSO 4: Valida��o de vagas solicitadas
-            if (soli_vagaSolicitadas <= 0) {
-                return res.status(400).json({
-                    error: "Número de vagas solicitadas deve ser maior que zero."
-                });
+            // Verifica as vagas disponíveis da carona no banco
+            const [carona] = await db.query(
+                'SELECT car_vagas_dispo FROM CARONAS WHERE car_id = ? AND car_status = 1',
+                [car_id]
+            );
+
+            if (carona.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada ou não está aberta." });
             }
 
-            // PASSO 5: Verifica��o de vagas dispon�veis (SIMULA��O)
-            // Em produ��o: SELECT caro_vagasDispo FROM CARONAS WHERE caro_id = ?
-            const vagasDisponiveis = 3; // Simula��o
-            if (soli_vagaSolicitadas > vagasDisponiveis) {
+            if (sol_vaga_soli > carona[0].car_vagas_dispo) {
                 return res.status(409).json({
-                    error: `Apenas ${vagasDisponiveis} vagas dispon�veis.`
+                    error: `Apenas ${carona[0].car_vagas_dispo} vagas disponíveis.`
                 });
             }
 
-            // PASSO 5.1: Verificar se o veículo existe (SIMULAÇÃO)
-            const veiculoExiste = true; // Substituir por consulta ao banco
-            if (!veiculoExiste) {
-                return res.status(404).json({
-                    error: "Veículo não encontrado."
-                });
-            }
+            // Insere a solicitação com status 1 (Enviado)
+            const [resultado] = await db.query(
+                `INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli)
+                 VALUES (?, ?, 1, ?)`,
+                [usu_id_passageiro, car_id, sol_vaga_soli]
+            );
 
-            // PASSO 5.2: Verificar se o número de vagas solicitadas excede a capacidade
-            if (caro_vagasDispo <= 0) {
-                return res.status(400).json({
-                    error: "Número de vagas deve ser maior que zero."
-                });
-            }
-
-            // PASSO 6: Cria��o da solicita��o (SIMULA��O)
-            // Em produ��o: INSERT INTO SOLICITACOES_CARONA (caro_id, usua_id, soli_vagaSolicitadas, soli_status)
-            //             VALUES (?, ?, ?, 'Pendente')
-            const novaSolicitacao = {
-                soli_id: Math.floor(Math.random() * 10000),
-                caro_id: parseInt(caro_id),
-                usua_id: parseInt(usua_id),
-                soli_vagaSolicitadas: parseInt(soli_vagaSolicitadas),
-                soli_status: "Pendente", // Status inicial
-                criado_em: new Date().toISOString()
-            };
-
-            // PASSO 7: Resposta de sucesso
             return res.status(201).json({
-                message: "Solicita��o de carona criada com sucesso!",
-                solicitacao: novaSolicitacao
+                message: "Solicitação de carona criada com sucesso!",
+                solicitacao: {
+                    sol_id: resultado.insertId,
+                    car_id, usu_id_passageiro, sol_vaga_soli, sol_status: 1
+                }
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Solicitar carona:", error);
-            return res.status(500).json({
-                error: "Erro interno ao processar solicita��o de carona."
-            });
+            console.error("[ERRO] solicitar:", error);
+            return res.status(500).json({ error: "Erro ao processar solicitação de carona." });
         }
     }
 
     /**
      * MÉTODO: responderSolicitacao
-     * Descrição: Motorista responde uma solicitação (aceita ou recusa).
-     * 
-     * Parâmetros: soli_id (via URL) - ID da solicitação a ser respondida.
-     * 
-     * Campos esperados: novo_status ('Aceito' ou 'Recusado').
-     * 
-     * Acesso: PROTEGIDO - Apenas o motorista (cur_usu_id) pode responder.
-     * Retorno: Status 200 com a atualização da solicitação.
-     * 
-     * LÓGICA:
-     * - Se 'Aceito': Subtrai vagas de CARONAS.caro_vagasDispo.
-     * - Se 'Recusado': Mantém vagas intactas.
-     * 
-     * Fluxo:
-     * 1. Extrai o ID da solicitação e o novo status da requisição.
-     * 2. Valida o ID e o novo status informado.
-     * 3. Simula a atualização da solicitação no banco de dados.
-     * 4. Retorna os dados da solicitação atualizada com uma mensagem de sucesso.
+     * Motorista aceita (sol_status = 2) ou recusa (sol_status = 3) uma solicitação.
+     * Se aceito, subtrai as vagas da carona.
+     *
+     * Tabelas: SOLICITACOES_CARONA (UPDATE) + CARONAS (UPDATE vagas se aceito)
+     * Parâmetro: soli_id (via URL)
+     * Campo no body: novo_status ('Aceito' ou 'Recusado')
      */
     async responderSolicitacao(req, res) {
         try {
-            // PASSO 1: Extrai ID e novo status
             const { soli_id } = req.params;
             const { novo_status } = req.body;
 
-            // PASSO 2: Valida��o do ID
             if (!soli_id || isNaN(soli_id)) {
-                return res.status(400).json({
-                    error: "ID de solicita��o inv�lido."
-                });
+                return res.status(400).json({ error: "ID de solicitação inválido." });
             }
 
-            // PASSO 3: Valida��o do novo status
             const statusValidos = ["Aceito", "Recusado"];
             if (!novo_status || !statusValidos.includes(novo_status)) {
-                return res.status(400).json({
-                    error: "Status inv�lido. Use 'Aceito' ou 'Recusado'."
-                });
+                return res.status(400).json({ error: "Status inválido. Use 'Aceito' ou 'Recusado'." });
             }
 
-            // PASSO 4: Atualiza��o no banco (SIMULA��O)
-            // Em produ��o: 
-            // 1. UPDATE SOLICITACOES_CARONA SET soli_status = ? WHERE soli_id = ?
-            // 2. Se novo_status = 'Aceito':
-            //    UPDATE CARONAS SET caro_vagasDispo = caro_vagasDispo - soli_vagaSolicitadas WHERE caro_id = ?
+            // Converte o texto para o código numérico do banco
+            const statusCodigo = novo_status === 'Aceito' ? 2 : 3;
 
-            const solicitacaoAtualizada = {
-                soli_id: parseInt(soli_id),
-                soli_status: novo_status,
-                respondido_em: new Date().toISOString()
-            };
+            // Busca a solicitação para saber quantas vagas foram pedidas
+            const [sol] = await db.query(
+                'SELECT sol_vaga_soli, car_id FROM SOLICITACOES_CARONA WHERE sol_id = ?',
+                [soli_id]
+            );
 
-            // PASSO 5: Resposta de sucesso
+            if (sol.length === 0) {
+                return res.status(404).json({ error: "Solicitação não encontrada." });
+            }
+
+            // Atualiza o status da solicitação
+            await db.query(
+                'UPDATE SOLICITACOES_CARONA SET sol_status = ? WHERE sol_id = ?',
+                [statusCodigo, soli_id]
+            );
+
+            // Se aceito: subtrai as vagas da carona
+            if (statusCodigo === 2) {
+                await db.query(
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo - ? WHERE car_id = ?',
+                    [sol[0].sol_vaga_soli, sol[0].car_id]
+                );
+            }
+
             return res.status(200).json({
-                message: `Solicita��o ${novo_status.toLowerCase()} com sucesso!`,
-                solicitacao: solicitacaoAtualizada
+                message: `Solicitação ${novo_status.toLowerCase()} com sucesso!`,
+                solicitacao: { sol_id: parseInt(soli_id), sol_status: statusCodigo }
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Responder solicita��o:", error);
-            return res.status(500).json({
-                error: "Erro interno ao responder solicita��o."
-            });
+            console.error("[ERRO] responderSolicitacao:", error);
+            return res.status(500).json({ error: "Erro ao responder solicitação." });
         }
     }
 }
