@@ -1,227 +1,209 @@
--- -----------------------------------------------------
--- Arquivo: caronas_queries.sql
--- Descrição: Consultas de seleção simples e com JOINs
---            para o esquema de caronas.
--- -----------------------------------------------------
+-- =====================================================
+-- Arquivo: select.sql
+-- Descrição: Consultas simples e com JOINs para todas
+--            as tabelas do banco de dados de caronas.
+-- =====================================================
 
 -- =====================================================
--- 1. Tabela ESCOLAS
+-- 1. ESCOLAS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM ESCOLAS;
 
--- (Não possui chaves estrangeiras para JOIN)
-
 -- =====================================================
--- 2. Tabela CURSOS
+-- 2. CURSOS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM CURSOS;
 
--- Seleção com Relacionamento (Escola)
-SELECT 
-    c.Cur_id,
-    c.Cur_nome,
-    c.Cur_periodo,
-    e.Esc_nome AS Nome_Escola
+-- Cursos com nome da escola
+SELECT
+    c.cur_id,
+    c.cur_nome,
+    c.cur_semestre,
+    e.esc_nome AS escola
 FROM CURSOS c
-INNER JOIN ESCOLAS e ON c.Esc_id = e.Esc_id;
+INNER JOIN ESCOLAS e ON c.esc_id = e.esc_id;
 
 -- =====================================================
--- 3. Tabela USUARIOS
+-- 3. USUARIOS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM USUARIOS;
 
--- (Geralmente é a tabela "pai", mas podemos verificar relacionamentos inversos se necessário no futuro)
-
 -- =====================================================
--- 4. Tabela USUARIOS_REGISTROS
+-- 4. USUARIOS_REGISTROS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM USUARIOS_REGISTROS;
 
--- Seleção com Relacionamento (Usuário)
-SELECT 
-    ur.usuario_id,
+-- Registros com dados do usuário
+SELECT
+    ur.usu_id,
     u.usu_nome,
     u.usu_email,
     ur.usu_criado_em,
-    ur.usu_data_login
+    ur.usu_data_login,
+    ur.usu_atualizado_em
 FROM USUARIOS_REGISTROS ur
-INNER JOIN USUARIOS u ON ur.usuario_id = u.usu_id;
+INNER JOIN USUARIOS u ON ur.usu_id = u.usu_id;
+
 
 -- =====================================================
--- 5. Tabela DISPOSITIVOS
+-- 6. PERFIL
 -- =====================================================
--- Seleção Simples
-SELECT * FROM DISPOSITIVOS;
-
--- Seleção com Relacionamento (Usuário)
-SELECT 
-    d.dis_id,
-    d.Dis_plataforma,
-    d.Dis_mac,
-    u.usu_nome AS Dono_Dispositivo
-FROM DISPOSITIVOS d
-INNER JOIN USUARIOS u ON d.Usuario_id = u.usu_id;
-
--- =====================================================
--- 6. Tabela PERFIL
--- =====================================================
--- Seleção Simples
 SELECT * FROM PERFIL;
 
--- Seleção com Relacionamento (Usuário)
-SELECT 
-    p.Per_id,
-    p.Per_nome,
-    u.usu_nome AS Usuario,
-    p.Per_data
+-- Perfis com nome do usuário
+SELECT
+    p.per_id,
+    u.usu_nome  AS usuario,
+    p.per_nome,
+    p.per_tipo,
+    p.per_habilitado,
+    p.per_data
 FROM PERFIL p
-INNER JOIN USUARIOS u ON p.Usu_id = u.usu_id;
+INNER JOIN USUARIOS u ON p.usu_id = u.usu_id;
 
 -- =====================================================
--- 7. Tabela CURSOS_USUARIOS
+-- 7. CURSOS_USUARIOS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM CURSOS_USUARIOS;
 
--- Seleção com Relacionamento (Usuário e Curso)
-SELECT 
-    cu.Cur_usu_id,
-    u.usu_nome AS Aluno,
-    c.Cur_nome AS Curso,
-    e.Esc_nome AS Escola,
-    cu.Cur_usu_dataFinal
+-- Matrículas com dados do aluno, curso e escola
+SELECT
+    cu.cur_usu_id,
+    u.usu_nome        AS aluno,
+    c.cur_nome        AS curso,
+    c.cur_semestre    AS semestre,
+    e.esc_nome        AS escola,
+    cu.cur_usu_dataFinal AS data_conclusao
 FROM CURSOS_USUARIOS cu
-INNER JOIN USUARIOS u ON cu.Usu_id = u.usu_id
-INNER JOIN CURSOS c ON cu.Cur_id = c.Cur_id
-INNER JOIN ESCOLAS e ON c.Esc_id = e.Esc_id; -- Join extra para contexto
+INNER JOIN USUARIOS u ON cu.usu_id = u.usu_id
+INNER JOIN CURSOS   c ON cu.cur_id = c.cur_id
+INNER JOIN ESCOLAS  e ON c.esc_id  = e.esc_id;
 
 -- =====================================================
--- 8. Tabela SUGESTAO_DENUNCIA
+-- 8. SUGESTAO_DENUNCIA
 -- =====================================================
--- Seleção Simples
 SELECT * FROM SUGESTAO_DENUNCIA;
 
--- Seleção com Relacionamento (Usuário Autor e Usuário Resposta)
-SELECT 
-    sd.Sug_id,
-    sd.Sug_tipo,
-    sd.Sug_texto,
-    u_autor.usu_nome AS Autor,
-    sd.Sug_status,
-    sd.Sug_resposta,
-    u_resp.usu_nome AS Respondido_Por
+-- Sugestões/denúncias com autor e quem respondeu
+SELECT
+    sd.sug_id,
+    sd.sug_tipo,
+    sd.sug_texto,
+    u_autor.usu_nome  AS enviado_por,
+    sd.sug_data,
+    sd.sug_status,
+    sd.sug_resposta,
+    u_resp.usu_nome   AS respondido_por
 FROM SUGESTAO_DENUNCIA sd
-INNER JOIN USUARIOS u_autor ON sd.Usu_id = u_autor.usu_id
-LEFT JOIN USUARIOS u_resp ON sd.Sug_id_resposta = u_resp.usu_id; -- LEFT JOIN pois resposta pode ser NULL
+INNER JOIN USUARIOS u_autor ON sd.usu_id         = u_autor.usu_id
+LEFT  JOIN USUARIOS u_resp  ON sd.sug_id_resposta = u_resp.usu_id;  -- LEFT JOIN pois resposta pode ser NULL
 
 -- =====================================================
--- 9. Tabela VEICULOS
+-- 9. VEICULOS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM VEICULOS;
 
--- Seleção com Relacionamento (Dono)
-SELECT 
-    v.Vei_id,
-    v.Vei_marca_modelo,
-    v.Vei_cor,
-    u.usu_nome AS Proprietario,
-    v.Vei_vagas
+-- Veículos com nome do proprietário
+SELECT
+    v.vei_id,
+    u.usu_nome          AS proprietario,
+    v.vei_marca_modelo,
+    v.vei_cor,
+    v.vei_tipo,
+    v.vei_vagas,
+    v.vei_status
 FROM VEICULOS v
-INNER JOIN USUARIOS u ON v.Usu_id = u.usu_id;
+INNER JOIN USUARIOS u ON v.usu_id = u.usu_id;
 
 -- =====================================================
--- 10. Tabela CARONAS
+-- 10. CARONAS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM CARONAS;
 
--- Seleção com Relacionamento (Veículo e Motorista via Curso_Usuario)
-SELECT 
-    c.Car_id,
-    c.Car_desc,
-    c.Car_data,
-    c.Car_hor_saida,
-    v.Vei_marca_modelo AS Veiculo,
-    u.usu_nome AS Motorista,
-    curso.Cur_nome AS Curso_Motorista
+-- Caronas com dados do veículo, motorista e curso
+SELECT
+    c.car_id,
+    c.car_desc,
+    c.car_data,
+    c.car_hor_saida,
+    c.car_vagas_dispo,
+    c.car_status,
+    v.vei_marca_modelo  AS veiculo,
+    u.usu_nome          AS motorista,
+    cur.cur_nome        AS curso_motorista
 FROM CARONAS c
-INNER JOIN VEICULOS v ON c.Vei_id = v.Vei_id
-INNER JOIN CURSOS_USUARIOS cu ON c.Cur_usu_id = cu.Cur_usu_id
-INNER JOIN USUARIOS u ON cu.Usu_id = u.usu_id
-INNER JOIN CURSOS curso ON cu.Cur_id = curso.Cur_id;
+INNER JOIN VEICULOS       v   ON c.vei_id     = v.vei_id
+INNER JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
+INNER JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
+INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id;
 
 -- =====================================================
--- 11. Tabela PONTO_ENCONTROS
+-- 11. PONTO_ENCONTROS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM PONTO_ENCONTROS;
 
--- Seleção com Relacionamento (Carona)
-SELECT 
-    pe.Pon_id,
-    pe.Pon_nome,
-    pe.Pon_endereco,
-    pe.Pon_tipo, -- 0=Motorista, 1=Passageiro
-    c.Car_desc AS Descricao_Carona,
-    c.Car_data
+-- Pontos de encontro com descrição da carona
+SELECT
+    pe.pon_id,
+    pe.pon_nome,
+    pe.pon_endereco,
+    pe.pon_tipo,   -- 0=Motorista, 1=Passageiro
+    pe.pon_ordem,
+    pe.pon_status,
+    c.car_desc     AS descricao_carona,
+    c.car_data     AS data_carona
 FROM PONTO_ENCONTROS pe
-INNER JOIN CARONAS c ON pe.Car_id = c.Car_id;
+INNER JOIN CARONAS c ON pe.car_id = c.car_id;
 
 -- =====================================================
--- 12. Tabela MENSAGENS
+-- 12. MENSAGENS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM MENSAGENS;
 
--- Seleção com Relacionamento (Carona, Remetente, Destinatário)
-SELECT 
-    m.Men_id,
-    c.Car_desc AS Carona_Contexto,
-    u_rem.usu_nome AS Remetente,
-    u_dest.usu_nome AS Destinatario,
-    m.Men_texto,
-    m.Men_status
+-- Mensagens com contexto da carona, remetente e destinatário
+SELECT
+    m.men_id,
+    c.car_desc          AS carona_contexto,
+    u_rem.usu_nome      AS remetente,
+    u_dest.usu_nome     AS destinatario,
+    m.men_texto,
+    m.men_status,
+    m.men_id_resposta
 FROM MENSAGENS m
-INNER JOIN CARONAS c ON m.Car_id = c.Car_id
-INNER JOIN USUARIOS u_rem ON m.Usu_id_remetente = u_rem.usu_id
-INNER JOIN USUARIOS u_dest ON m.Usu_id_destinatario = u_dest.usu_id;
+INNER JOIN CARONAS  c      ON m.car_id              = c.car_id
+INNER JOIN USUARIOS u_rem  ON m.usu_id_remetente    = u_rem.usu_id
+INNER JOIN USUARIOS u_dest ON m.usu_id_destinatario = u_dest.usu_id;
 
 -- =====================================================
--- 13. Tabela SOLICITACOES_CARONA
+-- 13. SOLICITACOES_CARONA
 -- =====================================================
--- Seleção Simples
 SELECT * FROM SOLICITACOES_CARONA;
 
--- Seleção com Relacionamento (Passageiro e Carona)
-SELECT 
-    s.Sol_id,
-    u.usu_nome AS Passageiro_Solicitante,
-    c.Car_desc AS Carona_Solicitada,
-    c.Car_data AS Data_Carona,
-    s.Sol_status,
-    s.Sol_vaga_soli
+-- Solicitações com dados do passageiro e da carona
+SELECT
+    s.sol_id,
+    u.usu_nome     AS passageiro_solicitante,
+    c.car_desc     AS carona_solicitada,
+    c.car_data     AS data_carona,
+    s.sol_status,
+    s.sol_vaga_soli
 FROM SOLICITACOES_CARONA s
-INNER JOIN USUARIOS u ON s.Usu_id_passageiro = u.usu_id
-INNER JOIN CARONAS c ON s.Car_id = c.Car_id;
+INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
+INNER JOIN CARONAS  c ON s.car_id            = c.car_id;
 
 -- =====================================================
--- 14. Tabela CARONA_PESSOAS
+-- 14. CARONA_PESSOAS
 -- =====================================================
--- Seleção Simples
 SELECT * FROM CARONA_PESSOAS;
 
--- Seleção com Relacionamento (Passageiro Confirmado e Carona)
-SELECT 
-    cp.Car_pes_id,
-    u.usu_nome AS Passageiro,
-    c.Car_desc AS Carona,
-    cp.Car_pes_data AS Data_Entrada,
-    cp.Car_pes_status
+-- Passageiros confirmados com dados da carona
+SELECT
+    cp.car_pes_id,
+    u.usu_nome       AS passageiro,
+    c.car_desc       AS carona,
+    c.car_data,
+    cp.car_pes_data  AS data_entrada,
+    cp.car_pes_status
 FROM CARONA_PESSOAS cp
-INNER JOIN USUARIOS u ON cp.Usu_id = u.usu_id
-INNER JOIN CARONAS c ON cp.Car_id = c.Car_id;
+INNER JOIN USUARIOS u ON cp.usu_id = u.usu_id
+INNER JOIN CARONAS  c ON cp.car_id = c.car_id;

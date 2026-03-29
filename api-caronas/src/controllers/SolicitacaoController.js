@@ -1,428 +1,350 @@
 /**
- * CONTROLLER DE SOLICITA��ES DE CARONA
- * Gerencia o ciclo completo de solicita��es de participa��o em caronas
- * Respons�vel por: criar, listar, aceitar, recusar e cancelar solicita��es
- * Seguran�a: Valida��es rigorosas de propriedade (motorista vs passageiro)
- * MER: Tabela SOLICITACOES_CARONA
- * 
- * Estados poss�veis de uma solicita��o:
- * - 'Pendente': Aguardando resposta do motorista
- * - 'Aceito': Motorista aceitou a solicita��o
- * - 'Recusado': Motorista recusou
- * - 'Cancelado': Passageiro cancelou
- * - 'Confirmado': Passageiro entrou na carona
- * - 'Conclu�do': Carona foi completada
+ * CONTROLLER DE SOLICITAÇÕES DE CARONA
+ *
+ * O que mudou:
+ * - Antes: dados simulados, nenhuma persistência real.
+ * - Agora: consultas reais na tabela SOLICITACOES_CARONA.
+ *
+ * Valores de sol_status no banco:
+ *   1 = Enviado | 2 = Aceito | 3 = Negado | 0 = Cancelado
+ *
+ * Colunas da tabela SOLICITACOES_CARONA:
+ *   sol_id, usu_id_passageiro, car_id, sol_status, sol_vaga_soli
  */
+
+const db = require('../config/database'); // Pool de conexão MySQL
 
 class SolicitacaoController {
 
     /**
-     * M�TODO: solicitarCarona
-     * Descri��o: Passageiro cria uma solicita��o de participa��o em carona.
-     * 
-     * Explica��o para estudantes:
-     * Este m�todo valida os dados de entrada e cria uma nova solicita��o de carona.
-     * Em um sistema real, os dados seriam salvos em um banco de dados.
-     * 
-     * Exemplo de resposta:
-     * {
-     *   "message": "Solicita��o de carona criada com sucesso!",
-     *   "solicitacao": {
-     *     "soli_id": 12345,
-     *     "caro_id": 1,
-     *     "usua_id": 2,
-     *     "soli_vagaSolicitadas": 1,
-     *     "soli_status": "Pendente",
-     *     "criado_em": "2026-03-17T12:00:00.000Z"
-     *   }
-     * }
+     * MÉTODO: solicitarCarona
+     * Passageiro cria uma solicitação de participação em uma carona.
+     * Verifica vagas disponíveis e se já existe solicitação ativa.
+     *
+     * Tabela: SOLICITACOES_CARONA (INSERT) com sol_status = 1 (Enviado)
+     * Campos no body: car_id, usu_id_passageiro, sol_vaga_soli
      */
     async solicitarCarona(req, res) {
         try {
-            // PASSO 1: Desestrutura os dados da requisi��o
-            const { caro_id, usua_id, soli_vagaSolicitadas } = req.body;
+            const { car_id, usu_id_passageiro, sol_vaga_soli } = req.body;
 
-            // PASSO 2: Valida��o de campos obrigat�rios
-            if (!caro_id || !usua_id || !soli_vagaSolicitadas) {
+            if (!car_id || !usu_id_passageiro || !sol_vaga_soli) {
                 return res.status(400).json({
-                    error: "Campos obrigat�rios: caro_id, usua_id, soli_vagaSolicitadas."
+                    error: "Campos obrigatórios: car_id, usu_id_passageiro, sol_vaga_soli."
                 });
             }
 
-            // PASSO 3: Valida��o de tipos num�ricos
-            if (isNaN(caro_id) || isNaN(usua_id) || isNaN(soli_vagaSolicitadas)) {
-                return res.status(400).json({
-                    error: "IDs e vagas devem ser num�ricos."
-                });
+            if (isNaN(sol_vaga_soli) || sol_vaga_soli <= 0) {
+                return res.status(400).json({ error: "Número de vagas deve ser positivo." });
             }
 
-            // PASSO 4: Valida��o de vagas
-            if (soli_vagaSolicitadas <= 0) {
-                return res.status(400).json({
-                    error: "N�mero de vagas deve ser positivo."
-                });
+            // Verifica as vagas disponíveis da carona
+            const [carona] = await db.query(
+                'SELECT car_vagas_dispo FROM CARONAS WHERE car_id = ? AND car_status = 1',
+                [car_id]
+            );
+
+            if (carona.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada ou não está aberta." });
             }
 
-            // PASSO 5: Verifica��o de vagas dispon�veis (SIMULA��O)
-            // Em produ��o: SELECT caro_vagasDispo FROM CARONAS WHERE caro_id = ?
-            const vagasDisponiveis = 3;
-            if (soli_vagaSolicitadas > vagasDisponiveis) {
+            if (sol_vaga_soli > carona[0].car_vagas_dispo) {
                 return res.status(409).json({
-                    error: `Apenas ${vagasDisponiveis} vagas dispon�veis na carona.`
+                    error: `Apenas ${carona[0].car_vagas_dispo} vagas disponíveis na carona.`
                 });
             }
 
-            // PASSO 6: Verifica��o de solicita��o duplicada (SIMULA��O)
-            // Em produ��o: SELECT * FROM SOLICITACOES_CARONA WHERE caro_id = ? AND usua_id = ? AND soli_status IN ('Pendente', 'Aceito')
-            const jaTemSolicitacao = false; // Simula��o
-            if (jaTemSolicitacao) {
+            // Verifica se o passageiro já tem uma solicitação ativa para essa carona
+            // sol_status 1 (Enviado) ou 2 (Aceito) = solicitação ativa
+            const [jaExiste] = await db.query(
+                `SELECT sol_id FROM SOLICITACOES_CARONA
+                 WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status IN (1, 2)`,
+                [car_id, usu_id_passageiro]
+            );
+
+            if (jaExiste.length > 0) {
                 return res.status(409).json({
-                    error: "Voc� j� tem uma solicita��o ativa para esta carona."
+                    error: "Você já tem uma solicitação ativa para esta carona."
                 });
             }
 
-            // PASSO 7: Cria��o da solicita��o (SIMULA��O)
-            // Em produ��o: INSERT INTO SOLICITACOES_CARONA (caro_id, usua_id, soli_vagaSolicitadas, soli_status)
-            //             VALUES (?, ?, ?, 'Pendente')
-            const novaSolicitacao = {
-                soli_id: Math.floor(Math.random() * 100000),
-                caro_id: parseInt(caro_id),
-                usua_id: parseInt(usua_id),
-                soli_vagaSolicitadas: parseInt(soli_vagaSolicitadas),
-                soli_status: "Pendente",
-                criado_em: new Date().toISOString()
-            };
+            // Insere a solicitação com status 1 (Enviado)
+            const [resultado] = await db.query(
+                `INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli)
+                 VALUES (?, ?, 1, ?)`,
+                [usu_id_passageiro, car_id, sol_vaga_soli]
+            );
 
-            // PASSO 8: Resposta de sucesso
             return res.status(201).json({
-                message: "Solicita��o de carona criada com sucesso!",
-                solicitacao: novaSolicitacao
+                message: "Solicitação de carona criada com sucesso!",
+                solicitacao: {
+                    sol_id: resultado.insertId,
+                    car_id, usu_id_passageiro, sol_vaga_soli, sol_status: 1
+                }
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Solicitar carona:", error);
-            return res.status(500).json({
-                error: "Erro ao processar solicita��o de carona."
-            });
+            console.error("[ERRO] solicitarCarona:", error);
+            return res.status(500).json({ error: "Erro ao processar solicitação de carona." });
         }
     }
 
     /**
-     * M�TODO: obterPorId
-     * Descri��o: Recupera os detalhes de uma solicita��o espec�fica
-     * Par�metros: soli_id (via URL)
-     * Acesso: PROTEGIDO - Apenas motorista ou passageiro envolvido
-     * Retorno: Status 200 com dados da solicita��o
+     * MÉTODO: obterPorId
+     * Retorna os detalhes de uma solicitação específica.
+     *
+     * Tabela: SOLICITACOES_CARONA (SELECT)
+     * Parâmetro: soli_id (via URL)
      */
     async obterPorId(req, res) {
         try {
-            // PASSO 1: Extrai o ID
             const { soli_id } = req.params;
 
-            // PASSO 2: Valida��o do ID
             if (!soli_id || isNaN(soli_id)) {
-                return res.status(400).json({
-                    error: "ID de solicita��o inv�lido."
-                });
+                return res.status(400).json({ error: "ID de solicitação inválido." });
             }
 
-            // PASSO 3: Busca no banco (SIMULA��O)
-            // Em produ��o: SELECT * FROM SOLICITACOES_CARONA WHERE soli_id = ?
-            const solicitacao = {
-                soli_id: parseInt(soli_id),
-                caro_id: 1,
-                usua_id: 2,
-                soli_vagaSolicitadas: 2,
-                soli_status: "Pendente",
-                criado_em: "2024-03-20 08:00",
-                respondido_em: null
-            };
+            const [rows] = await db.query(
+                `SELECT s.sol_id, s.car_id, s.usu_id_passageiro,
+                        s.sol_vaga_soli, s.sol_status,
+                        u.usu_nome AS passageiro,
+                        c.car_desc AS carona
+                 FROM SOLICITACOES_CARONA s
+                 INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
+                 INNER JOIN CARONAS  c ON s.car_id            = c.car_id
+                 WHERE s.sol_id = ?`,
+                [soli_id]
+            );
 
-            // PASSO 4: Verifica��o se existe
-            if (!solicitacao) {
-                return res.status(404).json({
-                    error: "Solicita��o n�o encontrada."
-                });
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "Solicitação não encontrada." });
             }
 
-            // PASSO 5: Resposta de sucesso
             return res.status(200).json({
-                message: "Solicita��o recuperada com sucesso",
-                solicitacao: solicitacao
+                message: "Solicitação recuperada com sucesso",
+                solicitacao: rows[0]
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Obter solicita��o:", error);
-            return res.status(500).json({
-                error: "Erro ao recuperar solicita��o."
-            });
+            console.error("[ERRO] obterPorId:", error);
+            return res.status(500).json({ error: "Erro ao recuperar solicitação." });
         }
     }
 
     /**
-     * M�TODO: listarPorCarona
-     * Descri��o: Lista todas as solicita��es de uma carona (apenas motorista)
-     * Par�metros: caro_id (via URL)
-     * Acesso: PROTEGIDO - Apenas motorista da carona
-     * Retorno: Status 200 com array de solicita��es
+     * MÉTODO: listarPorCarona
+     * Lista todas as solicitações de uma carona (visível para o motorista).
+     *
+     * Tabela: SOLICITACOES_CARONA + USUARIOS (JOIN)
+     * Parâmetro: caro_id (via URL)
      */
     async listarPorCarona(req, res) {
         try {
-            // PASSO 1: Extrai o ID da carona
             const { caro_id } = req.params;
 
-            // PASSO 2: Valida��o do ID
             if (!caro_id || isNaN(caro_id)) {
-                return res.status(400).json({
-                    error: "ID de carona inv�lido."
-                });
+                return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 3: Busca no banco (SIMULA��O)
-            // Em produ��o: SELECT * FROM SOLICITACOES_CARONA WHERE caro_id = ? ORDER BY criado_em DESC
-            const solicitacoes = [
-                {
-                    soli_id: 1,
-                    caro_id: parseInt(caro_id),
-                    usua_id: 2,
-                    usua_nome: "Maria Silva",
-                    soli_vagaSolicitadas: 2,
-                    soli_status: "Pendente",
-                    criado_em: "2024-03-20 08:00"
-                }
-            ];
+            const [solicitacoes] = await db.query(
+                `SELECT s.sol_id, s.usu_id_passageiro, s.sol_vaga_soli, s.sol_status,
+                        u.usu_nome AS passageiro
+                 FROM SOLICITACOES_CARONA s
+                 INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
+                 WHERE s.car_id = ?
+                 ORDER BY s.sol_id DESC`,
+                [caro_id]
+            );
 
-            // PASSO 4: Resposta de sucesso
             return res.status(200).json({
-                message: "Solicita��es da carona listadas",
+                message: "Solicitações da carona listadas",
                 total: solicitacoes.length,
                 caro_id: parseInt(caro_id),
-                solicitacoes: solicitacoes
+                solicitacoes
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Listar solicita��es por carona:", error);
-            return res.status(500).json({
-                error: "Erro ao listar solicita��es."
-            });
+            console.error("[ERRO] listarPorCarona:", error);
+            return res.status(500).json({ error: "Erro ao listar solicitações." });
         }
     }
 
     /**
-     * M�TODO: listarPorUsuario
-     * Descri��o: Lista todas as solicita��es feitas por um usu�rio (passageiro)
-     * Par�metros: usua_id (via URL)
-     * Acesso: PROTEGIDO - Apenas o pr�prio usu�rio
-     * Retorno: Status 200 com array de solicita��es
+     * MÉTODO: listarPorUsuario
+     * Lista todas as solicitações feitas por um passageiro.
+     *
+     * Tabela: SOLICITACOES_CARONA + CARONAS (JOIN)
+     * Parâmetro: usua_id (via URL)
      */
     async listarPorUsuario(req, res) {
         try {
-            // PASSO 1: Extrai o ID do usu�rio
             const { usua_id } = req.params;
 
-            // PASSO 2: Valida��o do ID
             if (!usua_id || isNaN(usua_id)) {
-                return res.status(400).json({
-                    error: "ID de usu�rio inv�lido."
-                });
+                return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // PASSO 3: Busca no banco (SIMULA��O)
-            // Em produ��o: SELECT * FROM SOLICITACOES_CARONA WHERE usua_id = ? ORDER BY criado_em DESC
-            const solicitacoes = [
-                {
-                    soli_id: 1,
-                    caro_id: 1,
-                    caro_desc: "Carona para o Centro",
-                    soli_vagaSolicitadas: 2,
-                    soli_status: "Aceito",
-                    criado_em: "2024-03-20 08:00"
-                }
-            ];
+            const [solicitacoes] = await db.query(
+                `SELECT s.sol_id, s.car_id, s.sol_vaga_soli, s.sol_status,
+                        c.car_desc AS carona, c.car_data AS data_carona
+                 FROM SOLICITACOES_CARONA s
+                 INNER JOIN CARONAS c ON s.car_id = c.car_id
+                 WHERE s.usu_id_passageiro = ?
+                 ORDER BY s.sol_id DESC`,
+                [usua_id]
+            );
 
-            // PASSO 4: Resposta de sucesso
             return res.status(200).json({
-                message: "Solicita��es do usu�rio listadas",
+                message: "Solicitações do usuário listadas",
                 total: solicitacoes.length,
-                usua_id: parseInt(usua_id),
-                solicitacoes: solicitacoes
+                usu_id: parseInt(usua_id),
+                solicitacoes
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Listar solicita��es por usu�rio:", error);
-            return res.status(500).json({
-                error: "Erro ao listar solicita��es do usu�rio."
-            });
+            console.error("[ERRO] listarPorUsuario:", error);
+            return res.status(500).json({ error: "Erro ao listar solicitações do usuário." });
         }
     }
 
     /**
-     * M�TODO: responderSolicitacao
-     * Descri��o: Motorista responde (aceita ou recusa) uma solicita��o
-     * Par�metros: soli_id (via URL)
-     * Campos esperados: novo_status ('Aceito' ou 'Recusado')
-     * Acesso: PROTEGIDO - Apenas motorista da carona
-     * Retorno: Status 200 com atualiza��o
-     * 
-     * L�GICA IMPORTANTE:
-     * - Se 'Aceito': Subtrai vagas de CARONAS.caro_vagasDispo
-     * - Se 'Recusado': Vagas n�o mudam
+     * MÉTODO: responderSolicitacao
+     * Motorista aceita (sol_status = 2) ou recusa (sol_status = 3) uma solicitação.
+     * Se aceito, subtrai as vagas da carona.
+     *
+     * Tabelas: SOLICITACOES_CARONA (UPDATE) + CARONAS (UPDATE vagas se aceito)
+     * Parâmetro: soli_id (via URL)
+     * Campo no body: novo_status ('Aceito' ou 'Recusado')
      */
     async responderSolicitacao(req, res) {
         try {
-            // PASSO 1: Extrai ID e novo status
             const { soli_id } = req.params;
             const { novo_status } = req.body;
 
-            // PASSO 2: Valida��o do ID
             if (!soli_id || isNaN(soli_id)) {
-                return res.status(400).json({
-                    error: "ID de solicita��o inv�lido."
-                });
+                return res.status(400).json({ error: "ID de solicitação inválido." });
             }
 
-            // PASSO 3: Valida��o do novo status
             const statusValidos = ["Aceito", "Recusado"];
             if (!novo_status || !statusValidos.includes(novo_status)) {
-                return res.status(400).json({
-                    error: "Status inv�lido. Use 'Aceito' ou 'Recusado'."
-                });
+                return res.status(400).json({ error: "Status inválido. Use 'Aceito' ou 'Recusado'." });
             }
 
-            // PASSO 4: Atualiza��o no banco (SIMULA��O)
-            // Em produ��o:
-            // 1. UPDATE SOLICITACOES_CARONA SET soli_status = ? WHERE soli_id = ?
-            // 2. Se novo_status = 'Aceito':
-            //    UPDATE CARONAS SET caro_vagasDispo = caro_vagasDispo - soli_vagaSolicitadas
-            //    WHERE caro_id = (SELECT caro_id FROM SOLICITACOES_CARONA WHERE soli_id = ?)
+            // Converte texto para código numérico do banco
+            const statusCodigo = novo_status === 'Aceito' ? 2 : 3;
 
-            const solicitacaoAtualizada = {
-                soli_id: parseInt(soli_id),
-                soli_status: novo_status,
-                respondido_em: new Date().toISOString()
-            };
+            // Busca a solicitação para saber quantas vagas foram pedidas
+            const [sol] = await db.query(
+                'SELECT sol_vaga_soli, car_id FROM SOLICITACOES_CARONA WHERE sol_id = ?',
+                [soli_id]
+            );
 
-            // PASSO 5: Resposta de sucesso
+            if (sol.length === 0) {
+                return res.status(404).json({ error: "Solicitação não encontrada." });
+            }
+
+            // Atualiza o status da solicitação
+            await db.query(
+                'UPDATE SOLICITACOES_CARONA SET sol_status = ? WHERE sol_id = ?',
+                [statusCodigo, soli_id]
+            );
+
+            // Se aceito: subtrai as vagas da carona
+            if (statusCodigo === 2) {
+                await db.query(
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo - ? WHERE car_id = ?',
+                    [sol[0].sol_vaga_soli, sol[0].car_id]
+                );
+            }
+
             return res.status(200).json({
-                message: `Solicita��o ${novo_status.toLowerCase()} com sucesso!`,
-                solicitacao: solicitacaoAtualizada
+                message: `Solicitação ${novo_status.toLowerCase()} com sucesso!`,
+                solicitacao: { sol_id: parseInt(soli_id), sol_status: statusCodigo }
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Responder solicita��o:", error);
-            return res.status(500).json({
-                error: "Erro ao responder solicita��o."
-            });
+            console.error("[ERRO] responderSolicitacao:", error);
+            return res.status(500).json({ error: "Erro ao responder solicitação." });
         }
     }
 
     /**
-     * M�TODO: cancelarSolicitacao
-     * Descri��o: Passageiro cancela sua solicita��o
-     * Par�metros: soli_id (via URL)
-     * Acesso: PROTEGIDO - Apenas o passageiro que fez a solicita��o
-     * Retorno: Status 200 com confirma��o
-     * 
-     * L�GICA IMPORTANTE:
-     * - Se solicita��o estava 'Aceito': Adiciona vaga de volta para a carona
-     * - Se estava 'Pendente': Apenas muda status para 'Cancelado'
+     * MÉTODO: cancelarSolicitacao
+     * Passageiro cancela sua solicitação (sol_status = 0).
+     * Se a solicitação estava aceita (sol_status = 2), devolve a vaga à carona.
+     *
+     * Tabelas: SOLICITACOES_CARONA (UPDATE) + CARONAS (UPDATE vagas se necessário)
      */
     async cancelarSolicitacao(req, res) {
         try {
-            // PASSO 1: Extrai o ID
             const { soli_id } = req.params;
 
-            // PASSO 2: Valida��o do ID
             if (!soli_id || isNaN(soli_id)) {
-                return res.status(400).json({
-                    error: "ID de solicita��o inv�lido."
-                });
+                return res.status(400).json({ error: "ID de solicitação inválido." });
             }
 
-            // PASSO 3: Atualiza��o no banco (SIMULA��O)
-            // Em produ��o:
-            // 1. UPDATE SOLICITACOES_CARONA SET soli_status = 'Cancelado' WHERE soli_id = ?
-            // 2. Se soli_status anterior = 'Aceito':
-            //    UPDATE CARONAS SET caro_vagasDispo = caro_vagasDispo + soli_vagaSolicitadas
-            //    WHERE caro_id = (SELECT caro_id FROM SOLICITACOES_CARONA WHERE soli_id = ?)
+            // Busca a solicitação atual para saber o status e as vagas
+            const [sol] = await db.query(
+                'SELECT sol_status, sol_vaga_soli, car_id FROM SOLICITACOES_CARONA WHERE sol_id = ?',
+                [soli_id]
+            );
 
-            const solicitacaoCancelada = {
-                soli_id: parseInt(soli_id),
-                soli_status: "Cancelado",
-                cancelado_em: new Date().toISOString()
-            };
+            if (sol.length === 0) {
+                return res.status(404).json({ error: "Solicitação não encontrada." });
+            }
 
-            // PASSO 4: Resposta de sucesso
+            // Muda o status para 0 (Cancelado)
+            await db.query(
+                'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE sol_id = ?',
+                [soli_id]
+            );
+
+            // Se estava aceita (sol_status = 2): devolve a vaga à carona
+            if (sol[0].sol_status === 2) {
+                await db.query(
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + ? WHERE car_id = ?',
+                    [sol[0].sol_vaga_soli, sol[0].car_id]
+                );
+            }
+
             return res.status(200).json({
-                message: "Solicita��o cancelada com sucesso!",
-                solicitacao: solicitacaoCancelada
+                message: "Solicitação cancelada com sucesso!",
+                solicitacao: { sol_id: parseInt(soli_id), sol_status: 0 }
             });
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Cancelar solicita��o:", error);
-            return res.status(500).json({
-                error: "Erro ao cancelar solicita��o."
-            });
+            console.error("[ERRO] cancelarSolicitacao:", error);
+            return res.status(500).json({ error: "Erro ao cancelar solicitação." });
         }
     }
 
     /**
-     * M�TODO: deletarSolicitacao
-     * Descri��o: Deleta uma solicita��o (soft delete recomendado)
-     * Par�metros: soli_id (via URL)
-     * Acesso: PROTEGIDO - Apenas motorista ou admin
-     * Retorno: Status 204 (No Content)
+     * MÉTODO: deletarSolicitacao
+     * Remove permanentemente uma solicitação do banco (hard delete).
+     *
+     * Tabela: SOLICITACOES_CARONA (DELETE)
+     * Parâmetro: soli_id (via URL)
      */
     async deletarSolicitacao(req, res) {
         try {
-            // PASSO 1: Extrai o ID
             const { soli_id } = req.params;
 
-            // PASSO 2: Valida��o do ID
             if (!soli_id || isNaN(soli_id)) {
-                return res.status(400).json({
-                    error: "ID de solicita��o inv�lido."
-                });
+                return res.status(400).json({ error: "ID de solicitação inválido." });
             }
 
-            // PASSO 3: Soft Delete no banco (recomendado)
-            // Em produ��o: UPDATE SOLICITACOES_CARONA SET deletada = 1, deletado_em = GETDATE() WHERE soli_id = ?
+            await db.query(
+                'DELETE FROM SOLICITACOES_CARONA WHERE sol_id = ?',
+                [soli_id]
+            );
 
-            // PASSO 4: Resposta de sucesso (204 No Content)
             return res.status(204).send();
 
         } catch (error) {
-            // Captura erros inesperados
-            console.error("[ERRO] Deletar solicita��o:", error);
-            return res.status(500).json({
-                error: "Erro ao deletar solicita��o."
-            });
+            console.error("[ERRO] deletarSolicitacao:", error);
+            return res.status(500).json({ error: "Erro ao deletar solicitação." });
         }
     }
 }
 
 module.exports = new SolicitacaoController();
-
-// Correção do literal de modelo não finalizado
-const errorMessages = {
-    missingFields: "Campos obrigatórios ausentes. Verifique os dados enviados.",
-    invalidId: "O ID fornecido é inválido. Deve ser um número.",
-    invalidSeats: "O número de vagas deve ser maior que zero.",
-    insufficientSeats: (available) => `Apenas ${available} vagas disponíveis na carona.`,
-    duplicateRequest: "Já existe uma solicitação ativa para esta carona.",
-    notFound: "Solicitação não encontrada.",
-    invalidStatus: "Status inválido. Use 'Aceito' ou 'Recusado'.",
-    internalError: "Erro interno ao processar a solicitação."
-};
-
-// Substituir mensagens de erro existentes por constantes padronizadas
-// Exemplo:
-// if (!caro_id || !usua_id || !soli_vagaSolicitadas) {
-//     return res.status(400).json({ error: errorMessages.missingFields });
-// }

@@ -1,326 +1,296 @@
-// CONTROLLER DE USUÁRIOS - Gerenciamento de Usuários e Autenticação
-// Este arquivo contém métodos para gerenciar usuários, incluindo cadastro, login e perfil.
-// 
-// Funções principais:
-// - Cadastro de novos usuários.
-// - Login e geração de tokens JWT.
-// - Atualização e exclusão de perfis de usuários.
-// 
-// Segurança:
-// - Métodos sensíveis exigem autenticação JWT.
-// - Apenas usuários autenticados podem acessar ou modificar seus próprios dados.
+/**
+ * CONTROLLER DE USUÁRIOS
+ *
+ * O que mudou:
+ * - Antes: dados simulados em um array na memória (perdidos ao reiniciar).
+ * - Agora: consultas reais ao banco MySQL, tabelas USUARIOS, USUARIOS_REGISTROS e PERFIL.
+ *
+ * Novidades integradas ao banco:
+ * - Senhas são armazenadas como hash (bcryptjs) — mais seguro.
+ * - Login atualiza a data do último acesso em USUARIOS_REGISTROS.
+ * - Cadastro cria registros em USUARIOS, USUARIOS_REGISTROS e PERFIL automaticamente.
+ *
+ * Colunas do banco usadas:
+ * USUARIOS: usu_id, usu_nome, usu_email, usu_senha, usu_telefone,
+ *           usu_matricula, usu_endereco, usu_endereco_geom, usu_status, usu_verificacao
+ * USUARIOS_REGISTROS: usu_id, usu_criado_em, usu_data_login, usu_atualizado_em
+ * PERFIL: per_id, usu_id, per_nome, per_data, per_tipo, per_habilitado
+ */
 
-const jwt = require('jsonwebtoken');
-
-// Lista de usuários simulados
-const usuariosSimulados = [
-    {
-        usua_id: 1,
-        usua_nome: "Guilherme Monteiro",
-        usua_email: "admin@escola.com",
-        usua_senha_hash: "123456"
-    }
-];
+const jwt     = require('jsonwebtoken');
+const bcrypt  = require('bcryptjs');
+const db      = require('../config/database'); // Pool de conexão MySQL
 
 class UsuarioController {
 
     /**
      * MÉTODO: cadastrar
-     * Descrição: Realiza o cadastro de um novo usuário no sistema.
-     * 
-     * Explicação para estudantes:
-     * Este método valida os dados de entrada e adiciona um novo usuário à lista simulada.
-     * Em um sistema real, os dados seriam salvos em um banco de dados.
-     * 
-     * Exemplo de resposta:
-     * {
-     *   "message": "Usuário cadastrado com sucesso!",
-     *   "usuario": {
-     *     "usua_id": 2,
-     *     "usua_nome": "João Silva",
-     *     "usua_email": "joao@teste.com"
-     *   }
-     * }
+     * Insere um novo usuário no banco e cria seus registros auxiliares.
+     *
+     * Tabelas: USUARIOS → USUARIOS_REGISTROS → PERFIL
+     * Campos obrigatórios no body: usu_nome, usu_email, usu_senha,
+     *   usu_telefone, usu_matricula, usu_endereco, usu_endereco_geom
      */
     cadastrar = async (req, res) => {
         try {
-            const { usua_nome, usua_email, usua_senha } = req.body;
+            const {
+                usu_nome, usu_email, usu_senha,
+                usu_telefone, usu_matricula,
+                usu_endereco, usu_endereco_geom,
+                usu_foto, usu_descricao, usu_horario_habitual
+            } = req.body;
 
-            // PASSO 1: Validação de campos obrigatórios
-            if (!usua_email || !usua_senha || !usua_nome) {
+            // Validação dos campos obrigatórios
+            if (!usu_nome || !usu_email || !usu_senha || !usu_telefone ||
+                !usu_matricula || !usu_endereco || !usu_endereco_geom) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: usua_nome, usua_email e usua_senha."
+                    error: "Campos obrigatórios: usu_nome, usu_email, usu_senha, usu_telefone, usu_matricula, usu_endereco, usu_endereco_geom."
                 });
             }
 
-            // PASSO 2: Geração de ID único
-            const novoUsua_id = Math.floor(Math.random() * 10000);
-            const novoUsuario = {
-                usua_id: novoUsua_id,
-                usua_nome,
-                usua_email,
-                usua_senha_hash: usua_senha
-            };
+            // Verifica se já existe um usuário com o mesmo e-mail
+            const [existente] = await db.query(
+                'SELECT usu_id FROM USUARIOS WHERE usu_email = ?',
+                [usu_email]
+            );
+            if (existente.length > 0) {
+                return res.status(409).json({ error: "E-mail já cadastrado." });
+            }
 
-            // PASSO 3: Adiciona o novo usuário à lista simulada
-            usuariosSimulados.push(novoUsuario);
+            // Gera o hash da senha antes de salvar no banco
+            // O número 10 é o "custo" do hash — quanto maior, mais seguro e mais lento
+            const senhaHash = await bcrypt.hash(usu_senha, 10);
 
-            console.log("[DEBUG] Usuários simulados após cadastro:", JSON.stringify(usuariosSimulados, null, 2));
+            // Insere o usuário na tabela USUARIOS
+            const [resultado] = await db.query(
+                `INSERT INTO USUARIOS
+                    (usu_nome, usu_email, usu_senha, usu_telefone, usu_matricula,
+                     usu_endereco, usu_endereco_geom, usu_foto, usu_descricao,
+                     usu_horario_habitual, usu_verificacao, usu_status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
+                [usu_nome, usu_email, senhaHash, usu_telefone, usu_matricula,
+                 usu_endereco, usu_endereco_geom,
+                 usu_foto || null, usu_descricao || null, usu_horario_habitual || null]
+            );
 
-            // PASSO 4: Retorna sucesso
+            const novoId = resultado.insertId; // ID gerado automaticamente pelo banco
+
+            // Cria o registro de datas do usuário em USUARIOS_REGISTROS (relação 1:1)
+            await db.query(
+                `INSERT INTO USUARIOS_REGISTROS (usu_id, usu_criado_em)
+                 VALUES (?, NOW())`,
+                [novoId]
+            );
+
+            // Cria o perfil padrão do usuário em PERFIL
+            await db.query(
+                `INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado)
+                 VALUES (?, ?, NOW(), 0, 0)`,
+                [novoId, usu_nome]
+            );
+
             return res.status(201).json({
                 message: "Usuário cadastrado com sucesso!",
-                usuario: {
-                    usua_id: novoUsuario.usua_id,
-                    usua_nome: novoUsuario.usua_nome,
-                    usua_email: novoUsuario.usua_email
-                }
+                usuario: { usu_id: novoId, usu_nome, usu_email }
             });
 
         } catch (error) {
-            // PASSO 5: Tratamento de erros
             console.error("[ERRO] cadastrar:", error);
-            return res.status(500).json({
-                error: "Erro ao cadastrar usuário."
-            });
+            return res.status(500).json({ error: "Erro ao cadastrar usuário." });
         }
     }
 
     /**
      * MÉTODO: login
-     * Descrição: Realiza o login de um usuário e gera um token JWT para autenticação.
-     * 
-     * Acesso: Público - Qualquer pessoa pode tentar fazer login.
-     * Retorno: Status 200 com o token JWT e dados do usuário autenticado.
-     * 
-     * Fluxo:
-     * 1. Valida os campos obrigatórios (email, senha).
-     * 2. Busca o usuário na lista simulada.
-     * 3. Gera um token JWT com validade de 1 hora.
-     * 4. Retorna o token e os dados do usuário autenticado.
+     * Busca o usuário pelo e-mail, compara a senha e retorna um token JWT.
+     *
+     * Tabelas: USUARIOS (leitura), USUARIOS_REGISTROS (atualiza data de login)
+     * Campos no body: usu_email, usu_senha
      */
     login = async (req, res) => {
         try {
-            const { usua_email, usua_senha } = req.body;
+            const { usu_email, usu_senha } = req.body;
 
-            // PASSO 1: Validação de campos obrigatórios
-            if (!usua_email || !usua_senha) {
+            if (!usu_email || !usu_senha) {
                 return res.status(400).json({
-                    error: "Campos obrigatorios: usua_email e usua_senha."
+                    error: "Campos obrigatórios: usu_email e usu_senha."
                 });
             }
 
-            // PASSO 2: Buscar usuário na lista simulada
-            const usuario = usuariosSimulados.find(
-                u => u.usua_email === usua_email && u.usua_senha_hash === usua_senha
+            // Busca o usuário pelo e-mail no banco
+            const [rows] = await db.query(
+                'SELECT usu_id, usu_nome, usu_email, usu_senha, usu_status FROM USUARIOS WHERE usu_email = ?',
+                [usu_email]
             );
 
-            // PASSO 3: Verificação se o usuário foi encontrado
-            console.log("[DEBUG] Tentativa de login para o email:", usua_email);
-            if (!usuario) {
-                console.log("[DEBUG] Usuário não encontrado ou senha inválida para o email:", usua_email);
-                return res.status(401).json({
-                    error: "E-mail ou senha invalidos."
-                });
-            } else {
-                console.log("[DEBUG] Usuário encontrado:", usuario);
+            if (rows.length === 0) {
+                return res.status(401).json({ error: "E-mail ou senha inválidos." });
             }
 
-            // PASSO 4: Geração do token JWT
-            const secret = process.env.JWT_SECRET || 'CHAVE_MESTRA_DA_API_CARONAS';
-            console.log("[DEBUG] Segredo do JWT utilizado:", secret);
+            const usuario = rows[0];
 
+            // Verifica se a conta está ativa (usu_status = 1)
+            if (!usuario.usu_status) {
+                return res.status(403).json({ error: "Conta inativa." });
+            }
+
+            // Compara a senha enviada com o hash salvo no banco
+            const senhaValida = await bcrypt.compare(usu_senha, usuario.usu_senha);
+            if (!senhaValida) {
+                return res.status(401).json({ error: "E-mail ou senha inválidos." });
+            }
+
+            // Atualiza a data do último login em USUARIOS_REGISTROS
+            await db.query(
+                'UPDATE USUARIOS_REGISTROS SET usu_data_login = NOW() WHERE usu_id = ?',
+                [usuario.usu_id]
+            );
+
+            // Gera o token JWT com o ID e e-mail do usuário, válido por 24h
             const token = jwt.sign(
-                {
-                    id: usuario.usua_id,
-                    email: usuario.usua_email
-                },
-                secret,
-                { expiresIn: '1h' } // Alterado para 1 hora
+                { id: usuario.usu_id, email: usuario.usu_email },
+                process.env.JWT_SECRET,
+                { expiresIn: '24h' }
             );
 
-            // PASSO 5: Retorno do token e dados do usuário
             return res.status(200).json({
                 auth: true,
-                token: token,
+                token,
                 user: {
-                    usua_id: usuario.usua_id,
-                    usua_nome: usuario.usua_nome,
-                    usua_email: usuario.usua_email
+                    usu_id:    usuario.usu_id,
+                    usu_nome:  usuario.usu_nome,
+                    usu_email: usuario.usu_email
                 }
             });
 
         } catch (error) {
-            // PASSO 6: Tratamento de erros
-            console.error("[ERRO] Login do usuario:", error);
-            return res.status(500).json({
-                error: "Erro ao processar login. Tente novamente mais tarde."
-            });
+            console.error("[ERRO] login:", error);
+            return res.status(500).json({ error: "Erro ao processar login." });
         }
     }
 
     /**
      * MÉTODO: perfil
-     * Descrição: Recupera as informações do perfil de um usuário.
-     * 
-     * Acesso: Restrito - Apenas usuários autenticados podem acessar.
-     * Retorno: Status 200 com os dados do perfil do usuário.
-     * 
-     * Fluxo:
-     * 1. Valida o ID do usuário na requisição.
-     * 2. Busca os dados do usuário na lista simulada.
-     * 3. Retorna os dados do perfil do usuário.
+     * Retorna os dados do usuário e seu perfil.
+     *
+     * Tabelas: USUARIOS + PERFIL (JOIN)
+     * Parâmetro: id (usu_id via URL)
      */
     perfil = async (req, res) => {
         try {
             const { id } = req.params;
 
-            // PASSO 1: Validação do ID do usuário
             if (!id || isNaN(id)) {
-                return res.status(400).json({
-                    error: "ID de usuario invalido."
-                });
+                return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // PASSO 2: Busca os dados do usuário
-            const usuarioPerfil = {
-                usua_id: parseInt(id),
-                usua_nome: "Guilherme Monteiro",
-                usua_email: "admin@escola.com",
-                usua_matricula: "2024001",
-                perfil_avaliacao: 4.8,
-                perfil_viagens_realizadas: 15,
-                perfil_viagens_ofertadas: 8
-            };
+            // Busca usuário e seu perfil com JOIN entre as tabelas
+            const [rows] = await db.query(
+                `SELECT u.usu_id, u.usu_nome, u.usu_email, u.usu_telefone,
+                        u.usu_descricao, u.usu_foto, u.usu_endereco,
+                        p.per_tipo, p.per_habilitado
+                 FROM USUARIOS u
+                 LEFT JOIN PERFIL p ON u.usu_id = p.usu_id
+                 WHERE u.usu_id = ?`,
+                [id]
+            );
 
-            // PASSO 3: Retorno dos dados do perfil
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "Usuário não encontrado." });
+            }
+
             return res.status(200).json({
                 message: "Perfil recuperado com sucesso!",
-                user: usuarioPerfil
+                user: rows[0]
             });
 
         } catch (error) {
-            // PASSO 4: Tratamento de erros
-            console.error("[ERRO] Recuperar perfil:", error);
-            return res.status(500).json({
-                error: "Erro ao recuperar perfil do usuario."
-            });
+            console.error("[ERRO] perfil:", error);
+            return res.status(500).json({ error: "Erro ao recuperar perfil." });
         }
     }
 
     /**
      * MÉTODO: atualizar
-     * Descrição: Atualiza as informações de um usuário.
-     * 
-     * Acesso: Restrito - Apenas usuários autenticados podem atualizar seus dados.
-     * Retorno: Status 200 com os dados atualizados do usuário.
-     * 
-     * Fluxo:
-     * 1. Valida o ID do usuário e os campos a serem atualizados.
-     * 2. Atualiza as informações do usuário na lista simulada.
-     * 3. Retorna uma mensagem de sucesso com os dados atualizados.
+     * Atualiza os dados do usuário no banco.
+     *
+     * Tabelas: USUARIOS (UPDATE), USUARIOS_REGISTROS (atualiza data)
+     * Campos opcionais no body: usu_nome, usu_email, usu_senha
      */
     atualizar = async (req, res) => {
         try {
             const { id } = req.params;
-            const { usua_nome, usua_email, usua_senha } = req.body;
+            const { usu_nome, usu_email, usu_senha } = req.body;
 
-            // PASSO 1: Validação do ID do usuário
             if (!id || isNaN(id)) {
-                return res.status(400).json({
-                    error: "ID de usuario invalido."
-                });
+                return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // PASSO 2: Validação dos campos a serem atualizados
-            if (!usua_nome && !usua_email && !usua_senha) {
-                return res.status(400).json({
-                    error: "Nenhum campo para atualizar fornecido."
-                });
+            if (!usu_nome && !usu_email && !usu_senha) {
+                return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
             }
 
-            // PASSO 3: Atualiza as informações do usuário
-            return res.status(200).json({
-                message: "Usuario atualizado com sucesso!",
-                user: {
-                    usua_id: parseInt(id),
-                    usua_nome: usua_nome || "Guilherme Monteiro",
-                    usua_email: usua_email || "admin@escola.com"
-                }
-            });
+            // Monta a query dinamicamente com os campos enviados
+            const campos = [];
+            const valores = [];
+
+            if (usu_nome)  { campos.push('usu_nome = ?');  valores.push(usu_nome); }
+            if (usu_email) { campos.push('usu_email = ?'); valores.push(usu_email); }
+            if (usu_senha) {
+                const senhaHash = await bcrypt.hash(usu_senha, 10);
+                campos.push('usu_senha = ?');
+                valores.push(senhaHash);
+            }
+
+            valores.push(id); // WHERE usu_id = ?
+
+            await db.query(
+                `UPDATE USUARIOS SET ${campos.join(', ')} WHERE usu_id = ?`,
+                valores
+            );
+
+            // Registra a data de atualização
+            await db.query(
+                'UPDATE USUARIOS_REGISTROS SET usu_atualizado_em = NOW() WHERE usu_id = ?',
+                [id]
+            );
+
+            return res.status(200).json({ message: "Usuário atualizado com sucesso!" });
 
         } catch (error) {
-            // PASSO 4: Tratamento de erros
-            console.error("[ERRO] Atualizar usuario:", error);
-            return res.status(500).json({
-                error: "Erro ao atualizar usuario."
-            });
+            console.error("[ERRO] atualizar:", error);
+            return res.status(500).json({ error: "Erro ao atualizar usuário." });
         }
     }
 
     /**
      * MÉTODO: deletar
-     * Descrição: Remove um usuário do sistema.
-     * 
-     * Acesso: Restrito - Apenas usuários autenticados podem deletar suas contas.
-     * Retorno: Status 204 (No Content) se a deleção for bem-sucedida.
-     * 
-     * Fluxo:
-     * 1. Valida o ID do usuário.
-     * 2. Remove o usuário da lista simulada.
-     * 3. Retorna status 204.
+     * Desativa o usuário (soft delete: usu_status = 0).
+     * Não remove do banco para preservar histórico.
+     *
+     * Tabela: USUARIOS (UPDATE usu_status)
      */
     deletar = async (req, res) => {
         try {
             const { id } = req.params;
 
-            // PASSO 1: Validação do ID do usuário
             if (!id || isNaN(id)) {
-                return res.status(400).json({
-                    error: "ID de usuario invalido."
-                });
+                return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // PASSO 2: Remoção do usuário
+            // Soft delete: marca como inativo em vez de apagar do banco
+            await db.query(
+                'UPDATE USUARIOS SET usu_status = 0 WHERE usu_id = ?',
+                [id]
+            );
+
             return res.status(204).send();
 
         } catch (error) {
-            // PASSO 3: Tratamento de erros
-            console.error("[ERRO] Deletar usuario:", error);
-            return res.status(500).json({
-                error: "Erro ao deletar usuario."
-            });
+            console.error("[ERRO] deletar:", error);
+            return res.status(500).json({ error: "Erro ao deletar usuário." });
         }
-    }
-
-    /**
-     * MÉTODO AUXILIAR: registrarAcesso
-     * Descrição: Registra o acesso de um usuário para fins de auditoria.
-     * 
-     * Acesso: Interno - Usado apenas dentro da aplicação.
-     * Retorno: Nenhum.
-     * 
-     * Fluxo:
-     * 1. Obtém a data e hora atuais.
-     * 2. Registra no console o acesso do usuário.
-     */
-    registrarAcesso = async (usua_id) => {
-        try {
-            const dataHora = new Date().toISOString();
-            console.log(`[REGISTROS_DE_USUARIOS] Acesso do usuario ${usua_id} em ${dataHora}`);
-        } catch (error) {
-            console.error("[ERRO] Registrar acesso:", error);
-        }
-    }
-
-    // Corrigindo o contexto de `this` nos métodos
-    constructor() {
-        this.cadastrar = this.cadastrar.bind(this);
-        this.login = this.login.bind(this);
     }
 }
-
-// Adicionar log para verificar inicialização do servidor
-console.log("[DEBUG] Servidor iniciado com sucesso.");
 
 module.exports = new UsuarioController();
