@@ -1,18 +1,20 @@
-const express = require('express');
-const router = express.Router();
-const PontoEncontroController = require('../controllers/PontoEncontroController');
-
 /**
- * ROTAS DE PONTOS DE ENCONTRO - Gerenciamento de Locais de Carona
- * Estas rotas permitem criar e listar pontos de encontro associados a caronas.
+ * ROTAS DE PONTOS DE ENCONTRO
  *
  * Endpoints:
- * - POST /: Cria um novo ponto de encontro.
- * - GET /carona/:caro_id: Lista os pontos de encontro de uma carona específica.
+ * - POST /api/pontos/               → Cadastra ponto de encontro (PROTEGIDO)
+ * - GET  /api/pontos/carona/:caro_id → Lista pontos de uma carona (PROTEGIDO)
  */
 
-// Tabela: PONTO_ENCONTRO
-router.post('/', PontoEncontroController.criar); // Define onde o motorista vai passar
-router.get('/carona/:caro_id', PontoEncontroController.listarPorCarona);
+const express               = require('express');
+const router                = express.Router();
+const PontoEncontroController = require('../controllers/PontoEncontroController');
+const auth                  = require('../middlewares/authMiddleware'); // Adicionado: exige login
+
+// Cadastra ponto de encontro — apenas motoristas autenticados definem os pontos
+router.post('/', auth, PontoEncontroController.criar);
+
+// Lista pontos de uma carona — apenas usuários autenticados
+router.get('/carona/:caro_id', auth, PontoEncontroController.listarPorCarona);
 
 module.exports = router;

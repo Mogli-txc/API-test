@@ -162,8 +162,8 @@ Rotas públicas para listar escolas e cursos disponíveis.
 
 | Método | Rota                    | Proteção | Descrição                          |
 |--------|-------------------------|----------|------------------------------------|
-| POST   | `/`                     | Público  | Cadastra veículo                   |
-| GET    | `/usuario/:usua_id`     | Público  | Lista veículos ativos do usuário   |
+| POST   | `/`                     | [JWT]    | Cadastra veículo                   |
+| GET    | `/usuario/:usua_id`     | [JWT]    | Lista veículos ativos do usuário   |
 
 **Cadastrar veículo — campos obrigatórios:**
 ```json
@@ -370,6 +370,35 @@ api-caronas/
         ├── sugestaoRoutes.js
         └── matriculaRoutes.js
 ```
+
+---
+
+## Testes
+
+```bash
+npm test        # Executa todos os testes com Jest
+```
+
+Os testes estão em `tests/` e usam `supertest` para simular requisições HTTP sem precisar subir o servidor manualmente.
+
+### Cobertura atual
+
+| Grupo                      | Testes |
+|----------------------------|--------|
+| Usuários                   | Cadastro, login, perfil, erros 400/401/404 |
+| Segurança JWT              | Sem token (403), token inválido (401) |
+| Infraestrutura             | Escolas, cursos, ID inválido |
+| Caronas                    | Listar, detalhe, criar sem campos, ID inválido |
+| Veículos                   | Sem token (403), campo faltando (400), listar |
+| Matrículas                 | Sem token (403), listar por usuário |
+| Solicitações               | Sem token (403), listar por carona e usuário |
+| Mensagens                  | Sem token (403), listar conversa |
+| Pontos de Encontro         | Sem token (403), listar pontos |
+| Sugestões e Denúncias      | Sem token (403), listar |
+| Passageiros Confirmados    | Sem token (403), listar |
+| Rota inexistente           | 404 |
+
+> Os testes que fazem login dependem de um usuário `admin@escola.com` com senha `123456` cadastrado no banco. Use `insert_implementacao.sql` para criar os dados de teste.
 
 ---
 

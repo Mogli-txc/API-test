@@ -95,11 +95,11 @@ async function teste1_AcessoNegadoSemToken() {
     };
 
     const body = {
-      cur_usu_id: 1,
-      vei_id: 1,
-      caro_desc: "Carona teste",
-      caro_data: "2026-03-25 08:00",
-      caro_vagasDispo: 3
+      cur_usu_id:      1,
+      vei_id:          1,
+      car_desc:        "Carona teste",     // corrigido: caro_desc → car_desc
+      car_data:        "2026-03-25 08:00", // corrigido: caro_data → car_data
+      car_vagas_dispo: 3                  // corrigido: caro_vagasDispo → car_vagas_dispo
     };
 
     const resposta = await fazerRequisicao(opcoes, body);
@@ -140,8 +140,8 @@ async function teste2_GerarTokenJWT() {
     };
 
     const body = {
-      usua_email: "admin@escola.com",
-      usua_senha: "123456"
+      usu_email: "admin@escola.com", // corrigido: usua_email → usu_email
+      usu_senha: "123456"            // corrigido: usua_senha → usu_senha
     };
 
     const resposta = await fazerRequisicao(opcoes, body);
@@ -195,11 +195,12 @@ async function teste3_AcessoPermitidoComToken(token) {
     };
 
     const body = {
-      cur_usu_id: 1,
-      vei_id: 1,
-      caro_desc: "Carona de Teste Protegida",
-      caro_data: "2026-03-25 08:00",
-      caro_vagasDispo: 3
+      cur_usu_id:      1,
+      vei_id:          1,
+      car_desc:        "Carona de Teste Protegida", // corrigido: caro_desc → car_desc
+      car_data:        "2026-03-25 08:00:00",       // corrigido: caro_data → car_data
+      car_hor_saida:   "08:00:00",
+      car_vagas_dispo: 3                            // corrigido: caro_vagasDispo → car_vagas_dispo
     };
 
     const resposta = await fazerRequisicao(opcoes, body);
