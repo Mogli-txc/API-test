@@ -15,6 +15,6 @@ const auth             = require('../middlewares/authMiddleware'); // Adicionado
 router.post('/', auth, VeiculoController.cadastrarVeiculo);
 
 // Lista veículos do usuário — apenas usuários autenticados
-router.get('/usuario/:usua_id', auth, VeiculoController.listarPorUsuario);
+router.get('/usuario/:usu_id', auth, VeiculoController.listarPorUsuario);
 
 module.exports = router;
