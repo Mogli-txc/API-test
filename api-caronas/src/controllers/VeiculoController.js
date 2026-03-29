@@ -1,10 +1,6 @@
 /**
  * CONTROLLER DE VEÍCULOS
  *
- * O que mudou:
- * - Antes: respostas fixas sem salvar nada.
- * - Agora: INSERT e SELECT reais na tabela VEICULOS.
- *
  * Valores de vei_tipo no banco: 0 = Moto | 1 = Carro
  * Valores de vei_status no banco: 1 = Ativo | 0 = Inutilizado
  *

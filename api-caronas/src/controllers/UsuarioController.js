@@ -1,14 +1,9 @@
 /**
  * CONTROLLER DE USUÁRIOS
  *
- * O que mudou:
- * - Antes: dados simulados em um array na memória (perdidos ao reiniciar).
- * - Agora: consultas reais ao banco MySQL, tabelas USUARIOS, USUARIOS_REGISTROS e PERFIL.
- *
- * Novidades integradas ao banco:
- * - Senhas são armazenadas como hash (bcryptjs) — mais seguro.
- * - Login atualiza a data do último acesso em USUARIOS_REGISTROS.
- * - Cadastro cria registros em USUARIOS, USUARIOS_REGISTROS e PERFIL automaticamente.
+ * Senhas armazenadas como hash bcryptjs.
+ * Login atualiza data do último acesso em USUARIOS_REGISTROS.
+ * Cadastro cria registros em USUARIOS, USUARIOS_REGISTROS e PERFIL automaticamente.
  *
  * Colunas do banco usadas:
  * USUARIOS: usu_id, usu_nome, usu_email, usu_senha, usu_telefone,

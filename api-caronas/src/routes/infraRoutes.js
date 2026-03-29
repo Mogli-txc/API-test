@@ -1,13 +1,9 @@
 /**
  * ROTAS DE INFRAESTRUTURA - Escolas e Cursos
  *
- * O que mudou:
- * - Antes: retornava apenas mensagens fixas sem dados reais.
- * - Agora: busca dados reais nas tabelas ESCOLAS e CURSOS.
- *
  * Endpoints:
- * - GET /api/infra/escolas            → Lista todas as escolas cadastradas
- * - GET /api/infra/escolas/:esc_id/cursos → Lista os cursos de uma escola específica
+ * - GET /api/infra/escolas                 → Lista todas as escolas cadastradas
+ * - GET /api/infra/escolas/:esc_id/cursos  → Lista os cursos de uma escola específica
  */
 
 const express = require('express');
@@ -17,9 +13,6 @@ const db      = require('../config/database'); // Pool de conexão MySQL
 /**
  * ROTA: GET /api/infra/escolas
  * Descrição: Retorna todas as escolas cadastradas no banco.
- *
- * O que mudou: antes retornava mensagem fixa; agora faz SELECT real.
- *
  * Tabela: ESCOLAS
  * Colunas: esc_id, esc_nome, esc_endereco
  */
@@ -45,9 +38,6 @@ router.get('/escolas', async (_req, res) => { // _req: parâmetro não utilizado
 /**
  * ROTA: GET /api/infra/escolas/:esc_id/cursos
  * Descrição: Retorna todos os cursos de uma escola específica.
- *
- * O que mudou: antes retornava mensagem fixa; agora faz SELECT real com filtro.
- *
  * Tabela: CURSOS
  * Parâmetro: esc_id (via URL)
  * Colunas: cur_id, cur_nome, cur_semestre

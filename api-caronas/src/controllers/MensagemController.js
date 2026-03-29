@@ -3,10 +3,6 @@
  * Responsável por: enviar, listar, editar e deletar mensagens
  * Segurança: Usuários só podem editar/deletar suas próprias mensagens
  *
- * O que mudou:
- * - Antes: mensagens simuladas em memória, sem persistência.
- * - Agora: consultas reais na tabela MENSAGENS.
- *
  * Colunas da tabela MENSAGENS:
  *   men_id, car_id, usu_id_remetente, usu_id_destinatario,
  *   men_texto, men_id_resposta
@@ -19,8 +15,6 @@ class MensagemController {
     /**
      * MÉTODO: enviarMensagem
      * Descrição: Envia uma nova mensagem em um chat de carona.
-     *
-     * O que mudou: antes criava objeto em memória; agora faz INSERT no banco.
      *
      * Exemplo de resposta:
      * {
@@ -91,8 +85,6 @@ class MensagemController {
      * Descrição: Lista todas as mensagens de uma carona (thread completa)
      * Parâmetros: caro_id (via URL)
      * Acesso: PROTEGIDO — Apenas participantes da carona podem ver
-     *
-     * O que mudou: antes retornava lista fixa; agora busca do banco com JOIN.
      */
     async listarConversa(req, res) {
         try {
@@ -137,8 +129,6 @@ class MensagemController {
      * Descrição: Edita o texto de uma mensagem já enviada (apenas o remetente)
      * Parâmetros: mens_id (via URL)
      * Acesso: PROTEGIDO — Apenas o remetente pode editar
-     *
-     * O que mudou: antes retornava objeto fixo; agora faz UPDATE no banco.
      */
     async editarMensagem(req, res) {
         try {
@@ -185,8 +175,6 @@ class MensagemController {
      * Descrição: Remove permanentemente uma mensagem do banco
      * Parâmetros: mens_id (via URL)
      * Acesso: PROTEGIDO — Apenas o remetente pode deletar
-     *
-     * O que mudou: antes apenas retornava 204; agora executa DELETE real no banco.
      */
     async deletarMensagem(req, res) {
         try {

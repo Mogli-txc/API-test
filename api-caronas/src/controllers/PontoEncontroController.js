@@ -2,10 +2,6 @@
  * CONTROLLER DE PONTOS DE ENCONTRO
  * Responsável por registrar e listar os pontos de saída/destino de uma carona.
  *
- * O que mudou:
- * - Antes: respostas fixas sem persistência.
- * - Agora: INSERT e SELECT reais na tabela PONTO_ENCONTROS.
- *
  * Valores de pon_tipo no banco: 0 = Partida | 1 = Destino
  * Valores de pon_status no banco: 1 = Ativo | 0 = Inativo
  *
@@ -21,8 +17,6 @@ class PontoEncontroController {
     /**
      * MÉTODO: criar
      * Descrição: Registra um novo ponto de encontro para uma carona.
-     *
-     * O que mudou: antes retornava resposta fixa; agora faz INSERT no banco.
      *
      * Exemplo de resposta:
      * {
@@ -69,8 +63,6 @@ class PontoEncontroController {
     /**
      * MÉTODO: listarPorCarona
      * Descrição: Lista todos os pontos de encontro ativos de uma carona, em ordem.
-     *
-     * O que mudou: antes retornava mensagem fixa; agora busca do banco.
      *
      * Exemplo de resposta:
      * {

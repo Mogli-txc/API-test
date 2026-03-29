@@ -1,9 +1,6 @@
 /**
  * CONTROLLER DE CARONAS
  *
- * O que mudou:
- * - Antes: dados fixos simulados em memória.
- * - Agora: consultas reais nas tabelas CARONAS e SOLICITACOES_CARONA.
  *
  * Valores de car_status no banco:
  *   1 = Aberta | 2 = Em espera | 0 = Cancelada | 3 = Finalizada
@@ -150,28 +147,35 @@ class CaronaController {
      *
      * Tabela: CARONAS (UPDATE)
      * Parâmetro: caro_id (via URL)
-     * Campos opcionais no body: car_desc, car_data, car_vagas_dispo
+     * Campos opcionais no body: car_desc, car_data, car_vagas_dispo, car_status
+     * car_status: 0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada
      */
     async atualizar(req, res) {
         try {
             const { caro_id } = req.params;
-            const { car_desc, car_data, car_vagas_dispo } = req.body;
+            const { car_desc, car_data, car_vagas_dispo, car_status } = req.body;
 
             if (!caro_id || isNaN(caro_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            if (!car_desc && !car_data && !car_vagas_dispo) {
+            if (!car_desc && !car_data && !car_vagas_dispo && car_status === undefined) {
                 return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
+            }
+
+            // Valida car_status se enviado (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
+            if (car_status !== undefined && ![0, 1, 2, 3].includes(parseInt(car_status))) {
+                return res.status(400).json({ error: "car_status inválido. Use 0, 1, 2 ou 3." });
             }
 
             // Monta a query com apenas os campos enviados
             const campos = [];
             const valores = [];
 
-            if (car_desc)        { campos.push('car_desc = ?');        valores.push(car_desc); }
-            if (car_data)        { campos.push('car_data = ?');        valores.push(car_data); }
-            if (car_vagas_dispo) { campos.push('car_vagas_dispo = ?'); valores.push(car_vagas_dispo); }
+            if (car_desc)              { campos.push('car_desc = ?');        valores.push(car_desc); }
+            if (car_data)              { campos.push('car_data = ?');        valores.push(car_data); }
+            if (car_vagas_dispo)       { campos.push('car_vagas_dispo = ?'); valores.push(car_vagas_dispo); }
+            if (car_status !== undefined) { campos.push('car_status = ?');   valores.push(parseInt(car_status)); }
 
             valores.push(caro_id); // WHERE car_id = ?
 

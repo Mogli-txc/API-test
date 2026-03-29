@@ -1,10 +1,6 @@
 /**
  * CONTROLLER DE SOLICITAÇÕES DE CARONA
  *
- * O que mudou:
- * - Antes: dados simulados, nenhuma persistência real.
- * - Agora: consultas reais na tabela SOLICITACOES_CARONA.
- *
  * Valores de sol_status no banco:
  *   1 = Enviado | 2 = Aceito | 3 = Negado | 0 = Cancelado
  *

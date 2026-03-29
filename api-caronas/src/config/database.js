@@ -1,16 +1,11 @@
 /**
  * CONFIGURAÇÃO DO BANCO DE DADOS
  *
- * O que mudou:
- * - Antes: usava Sequelize (ORM) que NÃO estava instalado no projeto.
- * - Agora: usa mysql2/promise, que é mais simples e já está instalado.
+ * Usa mysql2/promise com pool de conexões:
+ * em vez de abrir e fechar uma conexão por consulta,
+ * o pool mantém até 10 conexões abertas e reutilizáveis.
  *
- * O que é um Pool de Conexões?
- * Em vez de abrir e fechar uma conexão a cada consulta,
- * o pool mantém várias conexões abertas prontas para uso.
- * Isso é mais rápido e eficiente.
- *
- * As variáveis de ambiente (DB_HOST, DB_USER etc.) são lidas do arquivo .env
+ * Variáveis de ambiente lidas do .env: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
  */
 
 const mysql = require('mysql2/promise');
