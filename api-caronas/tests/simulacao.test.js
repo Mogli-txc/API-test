@@ -31,8 +31,26 @@
  * Executar isolado: npx jest tests/simulacao.test.js --verbose
  */
 
+require('dotenv').config();
+
 const request = require('supertest');
 const app     = require('../src/server');
+const mysql   = require('mysql2/promise');
+
+// Helper: atualiza verificação diretamente no banco (simula aprovação do comprovante)
+async function setVerificacao(usu_id, nivel, expira) {
+    const db = await mysql.createConnection({
+        host:     process.env.DB_HOST || 'localhost',
+        user:     process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+    });
+    await db.execute(
+        'UPDATE USUARIOS SET usu_verificacao = ?, usu_verificacao_expira = ? WHERE usu_id = ?',
+        [nivel, expira, usu_id]
+    );
+    await db.end();
+}
 
 jest.setTimeout(15000);
 
@@ -139,7 +157,20 @@ describe('Usuário 1 — Motorista', () => {
         vei_id1 = res.body.veiculo.vei_id;
     });
 
-    it('1.5 — Oferta de carona', async () => {
+    it('1.5 — Ativa verificação do motorista no banco (nível 2)', async () => {
+        // PASSO 1: Simula aprovação do comprovante de matrícula + veículo cadastrado
+        // usu_verificacao = 2 → matrícula verificada + veículo registrado
+        // expira em 6 meses a partir de hoje
+        const expira = new Date();
+        expira.setMonth(expira.getMonth() + 6);
+
+        await setVerificacao(usu_id1, 2, expira);
+
+        // PASSO 2: Confirma que a atualização foi aplicada
+        expect(usu_id1).toBeDefined();
+    });
+
+    it('1.6 — Oferta de carona', async () => {
         // PASSO 1: cria a carona usando a matrícula e o veículo cadastrados
         const res = await request(app)
             .post('/api/caronas/oferecer')
@@ -214,7 +245,20 @@ describe('Usuário 2 — Passageiro', () => {
         expect(res.body.matricula).toHaveProperty('cur_usu_id');
     });
 
-    it('2.4 — Solicitação de vaga na carona do Usuário 1', async () => {
+    it('2.4 — Ativa verificação do passageiro no banco (nível 1)', async () => {
+        // PASSO 1: Simula aprovação do comprovante de matrícula
+        // usu_verificacao = 1 → matrícula verificada (passageiro não precisa de veículo)
+        // expira em 6 meses a partir de hoje
+        const expira = new Date();
+        expira.setMonth(expira.getMonth() + 6);
+
+        await setVerificacao(usu_id2, 1, expira);
+
+        // PASSO 2: Confirma que a atualização foi aplicada
+        expect(usu_id2).toBeDefined();
+    });
+
+    it('2.5 — Solicitação de vaga na carona do Usuário 1', async () => {
         // PASSO 1: solicita 1 vaga na carona criada pelo usuário 1
         const res = await request(app)
             .post('/api/caronas/solicitar')

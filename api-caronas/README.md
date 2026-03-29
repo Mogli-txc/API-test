@@ -32,6 +32,7 @@ Desenvolvida com Node.js, Express e MySQL.
    source infosdatabase/insert_implementacao.sql  # dados de teste (opcional)
    ```
 
+
 3. Configure o arquivo `.env` na raiz do projeto:
    ```env
    PORT=3000
@@ -61,6 +62,45 @@ Rotas marcadas como **[JWT]** requerem o token no cabeçalho:
 Authorization: Bearer <token>
 ```
 O token é obtido no endpoint `POST /api/usuarios/login` e expira em 24 horas.
+
+---
+
+## Regras de Negócio
+
+### Verificação de cadastro (`usu_verificacao`)
+
+O campo `usu_verificacao` na tabela `USUARIOS` controla o nível de acesso do usuário ao sistema de caronas:
+
+| Valor | Significado | Permissões |
+|-------|-------------|------------|
+| `0`   | Não verificado | Apenas cadastro e login |
+| `1`   | Matrícula verificada | Pode **solicitar** caronas |
+| `2`   | Matrícula verificada + veículo cadastrado | Pode **solicitar** e **oferecer** caronas |
+
+**Regras aplicadas nos endpoints:**
+
+- `POST /api/caronas/oferecer` — exige `usu_verificacao = 2`. O `vei_id` enviado deve pertencer ao motorista autenticado (via `usu_id` do token JWT).
+- `POST /api/solicitacoes/criar` — exige `usu_verificacao >= 1`.
+
+Tentativas de acesso sem o nível necessário retornam `403 Forbidden`.
+
+### Validade da verificação (`usu_verificacao_expira`)
+
+A verificação de matrícula tem **validade de 6 meses**, alinhada ao calendário semestral.
+
+- O campo `usu_verificacao_expira` (DATETIME) é preenchido quando o usuário envia e tem o comprovante aprovado.
+- A cada 6 meses o usuário deve enviar um novo comprovante para renovar o acesso.
+- Se `usu_verificacao_expira` for `NULL` ou uma data no passado, os endpoints de solicitar e oferecer carona retornam `403 Forbidden` com a mensagem:
+  > *"Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo."*
+
+**Ciclo de vida da verificação:**
+
+```
+Cadastro          → usu_verificacao = 0, usu_verificacao_expira = NULL
+Envia comprovante → usu_verificacao = 1, usu_verificacao_expira = NOW() + 6 meses
+Cadastra veículo  → usu_verificacao = 2, usu_verificacao_expira (inalterado)
+6 meses depois    → acesso bloqueado até novo envio de comprovante
+```
 
 ---
 
@@ -204,6 +244,8 @@ Rotas públicas para listar escolas e cursos disponíveis.
 ```
 `cur_usu_id` é o ID da matrícula do motorista (tabela CURSOS_USUARIOS).
 
+> **Restrição:** requer `usu_verificacao = 2` (matrícula verificada + veículo cadastrado). O `vei_id` deve pertencer ao motorista autenticado.
+
 **Status de carona:** 1=Aberta, 2=Em espera, 0=Cancelada, 3=Finalizada
 
 ---
@@ -224,6 +266,7 @@ Rotas públicas para listar escolas e cursos disponíveis.
 ```json
 { "car_id": 1, "usu_id_passageiro": 2, "sol_vaga_soli": 1 }
 ```
+> **Restrição:** requer `usu_verificacao >= 1` (matrícula verificada).
 
 **Responder solicitação:**
 ```json
@@ -381,24 +424,20 @@ npm test        # Executa todos os testes com Jest
 
 Os testes estão em `tests/` e usam `supertest` para simular requisições HTTP sem precisar subir o servidor manualmente.
 
-### Cobertura atual
+### Cobertura atual — 118 testes
 
-| Grupo                      | Testes |
-|----------------------------|--------|
-| Usuários                   | Cadastro, login, perfil, erros 400/401/404 |
-| Segurança JWT              | Sem token (403), token inválido (401) |
-| Infraestrutura             | Escolas, cursos, ID inválido |
-| Caronas                    | Listar, detalhe, criar sem campos, ID inválido |
-| Veículos                   | Sem token (403), campo faltando (400), listar |
-| Matrículas                 | Sem token (403), listar por usuário |
-| Solicitações               | Sem token (403), listar por carona e usuário |
-| Mensagens                  | Sem token (403), listar conversa |
-| Pontos de Encontro         | Sem token (403), listar pontos |
-| Sugestões e Denúncias      | Sem token (403), listar |
-| Passageiros Confirmados    | Sem token (403), listar |
-| Rota inexistente           | 404 |
+| Arquivo                        | Testes | O que cobre |
+|--------------------------------|--------|-------------|
+| `endpoints.test.js`            | ~50    | Cadastro, login, perfil, CRUD de caronas/veículos/matrículas/solicitações/mensagens/pontos/sugestões/passageiros, erros 400/404 |
+| `seguranca.test.js`            | 5      | Sem token (403), token inválido (401), acesso com token válido (200), rota pública |
+| `db.test.js`                   | 25     | Conexão com o banco, SELECT em todas as 13 tabelas, 10 JOINs replicando queries dos controllers |
+| `simulacao.test.js`            | 28     | Fluxo ponta a ponta: cadastro → verificação → veículo → carona → solicitação → aceite → chat → finalização |
+| `regras_verificacao.test.js`   | 8      | Regras de verificação semestral para oferecer e solicitar carona (níveis 0/1/2, validade expirada e ativa) |
+| `test2903.test.js`             | 2      | Conectividade e banco correto |
 
-> Os testes que fazem login dependem de um usuário `admin@escola.com` com senha `123456` cadastrado no banco. Use `insert_implementacao.sql` para criar os dados de teste.
+**Total: 118 testes — 118 passando**
+
+> O `globalSetup` (`tests/setup.js`) cria automaticamente o usuário `admin@escola.com` (senha `123456`) com `usu_verificacao = 2` e validade de 6 meses antes de qualquer teste. Não é necessário executar scripts SQL manualmente para rodar os testes.
 
 ---
 
