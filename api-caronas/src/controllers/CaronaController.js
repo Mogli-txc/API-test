@@ -118,6 +118,44 @@ class CaronaController {
                 return res.status(400).json({ error: "Vagas disponíveis devem ser maior que zero." });
             }
 
+            // REGRA DE NEGÓCIO: Para oferecer carona, o motorista precisa ter usu_verificacao = 2
+            // usu_verificacao 0 = não verificado | 1 = matrícula verificada | 2 = matrícula + veículo registrado
+            // O usu_id vem do token JWT decodificado pelo authMiddleware (req.user.id)
+            const usu_id = req.user.id;
+            const [usuario] = await db.query(
+                'SELECT usu_verificacao, usu_verificacao_expira FROM USUARIOS WHERE usu_id = ?',
+                [usu_id]
+            );
+
+            // Nível 2 exigido: matrícula verificada e veículo cadastrado
+            if (usuario.length === 0 || usuario[0].usu_verificacao < 2) {
+                return res.status(403).json({
+                    error: "É necessário ter matrícula verificada e veículo cadastrado para oferecer caronas."
+                });
+            }
+
+            // Validade da verificação: expira a cada 6 meses (renovação semestral obrigatória)
+            // usu_verificacao_expira = NULL significa que nunca foi verificado via documento
+            const expira = usuario[0].usu_verificacao_expira;
+            if (!expira || new Date(expira) < new Date()) {
+                return res.status(403).json({
+                    error: "Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo."
+                });
+            }
+
+            // Verifica se o vei_id enviado pertence ao motorista (segurança: evita usar veículo de outro usuário)
+            const [veiculo] = await db.query(
+                'SELECT vei_id FROM VEICULOS WHERE vei_id = ? AND usu_id = ? AND vei_status = 1',
+                [vei_id, usu_id]
+            );
+
+            // Se nenhum registro for encontrado, o veículo não pertence a este motorista
+            if (veiculo.length === 0) {
+                return res.status(403).json({
+                    error: "Veículo não encontrado ou não pertence ao motorista."
+                });
+            }
+
             // Insere a carona com status 1 (Aberta)
             const [resultado] = await db.query(
                 `INSERT INTO CARONAS
@@ -241,6 +279,30 @@ class CaronaController {
 
             if (isNaN(sol_vaga_soli) || sol_vaga_soli <= 0) {
                 return res.status(400).json({ error: "Vagas solicitadas devem ser maior que zero." });
+            }
+
+            // REGRA DE NEGÓCIO: Para solicitar carona, o passageiro precisa ter usu_verificacao >= 1
+            // usu_verificacao 0 = não verificado | 1 = matrícula verificada | 2 = matrícula + veículo registrado
+            // O usu_id vem do token JWT decodificado pelo authMiddleware (req.user.id)
+            const usu_id = req.user.id;
+            const [usuario] = await db.query(
+                'SELECT usu_verificacao, usu_verificacao_expira FROM USUARIOS WHERE usu_id = ?',
+                [usu_id]
+            );
+
+            // Nível 1 exigido: pelo menos a matrícula precisa estar verificada
+            if (usuario.length === 0 || usuario[0].usu_verificacao < 1) {
+                return res.status(403).json({
+                    error: "É necessário ter matrícula verificada para solicitar caronas."
+                });
+            }
+
+            // Validade da verificação: expira a cada 6 meses (renovação semestral obrigatória)
+            const expira = usuario[0].usu_verificacao_expira;
+            if (!expira || new Date(expira) < new Date()) {
+                return res.status(403).json({
+                    error: "Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo."
+                });
             }
 
             // Verifica as vagas disponíveis da carona no banco

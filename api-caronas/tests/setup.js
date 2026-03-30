@@ -32,6 +32,8 @@ module.exports = async function () {
         ['admin@escola.com']
     );
 
+    let usu_id;
+
     if (existe.length === 0) {
         // PASSO 2: Cria o usuário com hash bcrypt real da senha "123456"
         const hash = await bcrypt.hash('123456', 10);
@@ -41,7 +43,7 @@ module.exports = async function () {
                 (usu_nome, usu_email, usu_senha, usu_telefone, usu_matricula,
                  usu_endereco, usu_endereco_geom, usu_foto, usu_descricao,
                  usu_horario_habitual, usu_verificacao, usu_status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 1, 1)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 2, 1)`,
             [
                 'Admin Teste',
                 'admin@escola.com',
@@ -53,7 +55,7 @@ module.exports = async function () {
             ]
         );
 
-        const usu_id = result.insertId;
+        usu_id = result.insertId;
 
         // Insere registro 1:1 obrigatório em USUARIOS_REGISTROS
         await db.execute(
@@ -69,7 +71,31 @@ module.exports = async function () {
 
         console.log('[setup] Usuário de teste criado: admin@escola.com');
     } else {
+        usu_id = existe[0].usu_id;
         console.log('[setup] Usuário de teste já existe: admin@escola.com');
+    }
+
+    // Garante que o admin tenha verificação nível 2 com validade ativa (6 meses)
+    // Necessário para testes que chamam endpoints protegidos por regra de verificação
+    await db.execute(
+        `UPDATE USUARIOS
+         SET usu_verificacao = 2, usu_verificacao_expira = DATE_ADD(NOW(), INTERVAL 6 MONTH)
+         WHERE usu_id = ?`,
+        [usu_id]
+    );
+
+    // Garante que o admin tenha ao menos um veículo cadastrado para os testes de oferecer carona
+    const [veiculos] = await db.query(
+        'SELECT vei_id FROM VEICULOS WHERE usu_id = ? AND vei_status = 1 LIMIT 1',
+        [usu_id]
+    );
+    if (veiculos.length === 0) {
+        await db.execute(
+            `INSERT INTO VEICULOS (usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em)
+             VALUES (?, 'Carro Admin Teste', 1, 'Branco', 4, 1, CURDATE())`,
+            [usu_id]
+        );
+        console.log('[setup] Veículo de teste criado para admin.');
     }
 
     await db.end();
