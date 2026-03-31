@@ -40,19 +40,19 @@ CREATE TABLE CURSOS (
 DROP TABLE IF EXISTS USUARIOS;
 CREATE TABLE USUARIOS (
     usu_id              INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Usuário (PK)',
-    usu_nome            VARCHAR(80)  NOT NULL               COMMENT 'Nome do Usuário',
-    usu_foto            VARCHAR(256)                        COMMENT 'Caminho/URL da Foto do Usuário (NULL)',
-    usu_telefone        VARCHAR(11)  NOT NULL               COMMENT 'Telefone sem máscara (ex: 11999990000)',
-    usu_matricula       VARCHAR(100) NOT NULL               COMMENT 'Foto/Comprovante da Matrícula',
-    usu_senha           VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash)',
-    usu_verificacao      TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Não verificado, 1=Matrícula verificada, 2=Matrícula + veículo',
-    usu_verificacao_expira DATETIME                         COMMENT 'Data de expiração da verificação (NULL = nunca verificado)',
-    usu_status           TINYINT(1)   NOT NULL               COMMENT '1=Ativo, 0=Inativo',
-    usu_email           VARCHAR(180) NOT NULL UNIQUE        COMMENT 'Email Institucional para acesso (UNIQUE)',
-    usu_descricao       VARCHAR(255)                        COMMENT 'Descrição do Usuário (NULL)',
-    usu_endereco        VARCHAR(255) NOT NULL               COMMENT 'Endereço Descrito',
-    usu_endereco_geom   VARCHAR(255) NOT NULL               COMMENT 'Endereço com localização geométrica',
-    usu_horario_habitual TIME                               COMMENT 'Horário Habitual (NULL) (HH:MM:SS)',
+    usu_nome            VARCHAR(80)  NOT NULL                COMMENT 'Nome do Usuário',
+    usu_foto            VARCHAR(256)                         COMMENT 'Caminho/URL da Foto do Usuário (NULL)',
+    usu_telefone        VARCHAR(11)  NULL                    COMMENT 'Telefone sem máscara (ex: 11999990000)',
+    usu_matricula       VARCHAR(100) NULL                    COMMENT 'Foto/Comprovante da Matrícula',
+    usu_senha           VARCHAR(256) NOT NULL                COMMENT 'Senha de acesso (hash)',
+    usu_verificacao      TINYINT(1)  NOT NULL DEFAULT 0      COMMENT '0=Não verificado, 1=Verificação Temporária(pode ser usada por um período limitado), 2=Matrícula verificada, 3=Matrícula + veículo',
+    usu_verificacao_expira DATETIME  NOT NULL                COMMENT 'Data de expiração da verificação',
+    usu_status           TINYINT(1)  NOT NULL                COMMENT '1=Ativo, 0=Inativo',
+    usu_email           VARCHAR(180) NOT NULL UNIQUE         COMMENT 'Email Institucional para acesso (UNIQUE)',
+    usu_descricao       VARCHAR(255)                         COMMENT 'Descrição do Usuário (NULL)',
+    usu_endereco        VARCHAR(255) NULL                    COMMENT 'Endereço Descrito',
+    usu_endereco_geom   VARCHAR(255) NULL                    COMMENT 'Endereço com localização geométrica',
+    usu_horario_habitual TIME                                COMMENT 'Horário Habitual (NULL) (HH:MM:SS)',
     PRIMARY KEY (usu_id)
 ) ENGINE = InnoDB;
 
