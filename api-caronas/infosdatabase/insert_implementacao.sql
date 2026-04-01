@@ -4,7 +4,8 @@
 --            para testes e desenvolvimento do Back-end.
 --
 -- LEGENDA DE STATUS (referência rápida):
--- USUARIOS:         usu_verificacao (0=Não verificado, 1=Verificado)
+-- USUARIOS:         usu_verificacao (0=Não verificado, 1=Matrícula verificada,
+--                                    2=Matrícula + veículo, 5=Cadastro temporário 5 dias)
 --                   usu_status      (0=Inativo, 1=Ativo)
 -- PERFIL:           per_tipo        (0=Passageiro, 1=Motorista, 2=Administrador)
 -- VEICULOS:         vei_tipo        (0=Moto, 1=Carro)
@@ -65,24 +66,32 @@ INSERT INTO CURSOS (cur_semestre, cur_nome, esc_id) VALUES
 -- Para que serve no Back-end:
 --   - Autenticação (login com usu_email + usu_senha)
 --   - Exibição de perfil público (nome, foto, descrição)
---   - Validação de acesso (usu_verificacao + usu_status)
+--   - Validação de acesso (usu_verificacao + usu_verificacao_expira + usu_status)
 --   - Sugestão de caronas por endereço e horário habitual
 --
+-- usu_verificacao_expira:
+--   verificacao=1/2 → DATE_ADD(NOW(), INTERVAL 6 MONTH)  (renovação semestral)
+--   verificacao=5   → DATE_ADD(NOW(), INTERVAL 5 DAY)    (janela do cadastro temporário)
+--   verificacao=0   → NULL
+--
 -- Cenários de teste cobertos:
---   - usu_id=1 (Carlos):  Motorista verificado e ativo, com horário habitual
---   - usu_id=2 (Mariana): Passageira verificada e ativa, com horário habitual
---   - usu_id=3 (Pedro):   Motorista verificado e ativo, escola diferente (Campinas)
---   - usu_id=4 (Ana):     Conta NÃO verificada e inativa — testa bloqueio de login
---   - usu_id=5 (Lucas):   Verificado, sem foto e sem horário — testa campos NULL
---   - usu_id=6 (Admin):   Usuário administrador do sistema web
+--   - usu_id=1 (Carlos):   Motorista verificado e ativo, com horário habitual
+--   - usu_id=2 (Mariana):  Passageira verificada e ativa, com horário habitual
+--   - usu_id=3 (Pedro):    Motorista verificado e ativo, escola diferente (Campinas)
+--   - usu_id=4 (Ana):      Conta NÃO verificada e inativa — testa bloqueio de login e expira=NULL
+--   - usu_id=5 (Lucas):    Verificado, sem foto e sem horário — testa campos NULL
+--   - usu_id=6 (Admin):    Usuário administrador do sistema web
+--   - usu_id=7 (Novo):     Cadastro temporário (verificacao=5) — só email e senha,
+--                           demais campos NULL, acesso por 5 dias para pedir caronas
 -- =====================================================
-INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_status, usu_email, usu_descricao, usu_endereco, usu_endereco_geom, usu_horario_habitual) VALUES
-    ('Carlos Silva',  '11999991111', 'MAT2023001', 'hash_carlos_1',  1, 1, 'carlos.silva@aluno.inova.br',  'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP',  '-23.5505,-46.6333', '07:30:00'),  -- usu_id=1
-    ('Mariana Souza', '11988882222', 'MAT2023002', 'hash_mariana_2', 1, 1, 'mariana.souza@aluno.inova.br', 'Passageira tranquila, nunca me atraso.',            'Av. Brasil, 456, Jardins, São Paulo - SP',      '-23.5599,-46.6400', '07:45:00'),  -- usu_id=2
-    ('Pedro Santos',  '19977773333', 'MAT2022099', 'hash_pedro_3',   1, 1, 'pedro.santos@uni.saber.br',    'Moto rápida, somente 1 passageiro.',               'Rua da Paz, 88, Vila Nova, Campinas - SP',      '-22.9056,-47.0608', '18:30:00'),  -- usu_id=3
-    ('Ana Oliveira',  '11966664444', 'MAT2024001', 'hash_ana_4',     0, 0, 'ana.oliveira@aluno.inova.br',  NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL),         -- usu_id=4 (não verificada/inativa)
-    ('Lucas Pereira', '11955553333', 'MAT2023050', 'hash_lucas_5',   1, 1, 'lucas.pereira@aluno.inova.br', NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL),         -- usu_id=5 (sem foto, sem horário)
-    ('Admin Sistema', '11900000001', 'ADMIN000001', 'hash_admin_6',  1, 1, 'admin@sistema.inova.br',       'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL);          -- usu_id=6
+INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_verificacao_expira, usu_status, usu_email, usu_descricao, usu_endereco, usu_endereco_geom, usu_horario_habitual) VALUES
+    ('Carlos Silva',  '11999991111', 'MAT2023001',  'hash_carlos_1',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',  'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP', '-23.5505,-46.6333', '07:30:00'),  -- usu_id=1
+    ('Mariana Souza', '11988882222', 'MAT2023002',  'hash_mariana_2', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'mariana.souza@aluno.inova.br', 'Passageira tranquila, nunca me atraso.',            'Av. Brasil, 456, Jardins, São Paulo - SP',     '-23.5599,-46.6400', '07:45:00'),  -- usu_id=2
+    ('Pedro Santos',  '19977773333', 'MAT2022099',  'hash_pedro_3',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'pedro.santos@uni.saber.br',    'Moto rápida, somente 1 passageiro.',               'Rua da Paz, 88, Vila Nova, Campinas - SP',     '-22.9056,-47.0608', '18:30:00'),  -- usu_id=3
+    ('Ana Oliveira',  '11966664444', 'MAT2024001',  'hash_ana_4',     0, NULL,                              0, 'ana.oliveira@aluno.inova.br',  NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL),         -- usu_id=4 (não verificada/inativa)
+    ('Lucas Pereira', '11955553333', 'MAT2023050',  'hash_lucas_5',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'lucas.pereira@aluno.inova.br', NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL),         -- usu_id=5 (sem foto, sem horário)
+    ('Admin Sistema', '11900000001', 'ADMIN000001', 'hash_admin_6',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin@sistema.inova.br',       'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL),         -- usu_id=6
+    (NULL,            NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',    NULL,                                               NULL,                                          NULL,                NULL);          -- usu_id=7: Cadastro temporário (só email+senha)
 
 
 -- =====================================================
@@ -106,7 +115,8 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
     (3, '2023-10-01 08:00:00',       '2022-08-10 09:00:00', '2023-10-01 08:00:00'),  -- login antigo
     (4, NULL,                        '2024-03-10 11:00:00', NULL),                    -- nunca logou
     (5, NOW(),                       NOW(),                 NULL),                    -- primeiro acesso
-    (6, '2024-12-01 09:00:00',       '2022-01-01 08:00:00', '2024-12-01 09:00:00'); -- admin, conta antiga
+    (6, '2024-12-01 09:00:00',       '2022-01-01 08:00:00', '2024-12-01 09:00:00'), -- admin, conta antiga
+    (7, NULL,                        NOW(),                 NULL);                    -- cadastro temporário: nunca logou ainda
 
 
 
@@ -127,11 +137,12 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
 -- =====================================================
 -- per_tipo: 0=Passageiro, 1=Motorista, 2=Administrador
 INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado) VALUES
-    (1, 'Carlos Silva',  NOW(), 0, 1),   
-    (2, 'Mariana Souza', NOW(), 0, 1),   
-    (3, 'Pedro Santos',  NOW(), 0, 1),      
+    (1, 'Carlos Silva',  NOW(), 0, 1),
+    (2, 'Mariana Souza', NOW(), 0, 1),
+    (3, 'Pedro Santos',  NOW(), 0, 1),
     (4, 'Lucas Pereira', NOW(), 0, 1),   -- Usuário com perfil de Passageiro E Motorista
-    (5, 'Admin Sistema', NOW(), 1, 1);   -- Administrador web
+    (5, 'Admin Sistema', NOW(), 1, 1),   -- Administrador web
+    (7, NULL,            NOW(), 0, 0);   -- Cadastro temporário: per_nome NULL até completar o perfil
 
 
 -- =====================================================
@@ -187,18 +198,25 @@ INSERT INTO CURSOS_USUARIOS (usu_id, cur_id, cur_usu_dataFinal) VALUES
 --   - Notificação aos passageiros quando o status muda
 --
 -- Cenários de teste cobertos:
---   - car_id=1: Aberta, 3 vagas — carona principal para testes de busca
---   - car_id=2: Em espera, 0 vagas — testa carona lotada (não aparece na busca)
---   - car_id=3: Aberta, moto 1 vaga — testa filtro por tipo de veículo
---   - car_id=4: Aberta, 2 vagas — segundo motorista disponível
---   - car_id=5: Finalizada (passado) — testa histórico de caronas realizadas
---   - car_id=6: Cancelada — testa histórico de caronas canceladas
+--   - car_id=1: Aberta, motorista Carlos (usu_id=1)
+--               → testa BLOQUEIO REGRA 1: Carlos não pode solicitar esta carona (própria)
+--               → testa BLOQUEIO REGRA 2: Carlos não pode solicitar nenhuma outra (tem carona ativa)
+--   - car_id=2: Em espera, motorista Carlos (usu_id=1)
+--               → reforça BLOQUEIO REGRA 2: status=2 também conta como "em andamento"
+--   - car_id=3: Aberta, moto, motorista Pedro (usu_id=3)
+--               → testa BLOQUEIO REGRA 1: Pedro não pode solicitar esta carona (própria)
+--               → testa BLOQUEIO REGRA 2: Pedro não pode solicitar car_id=1 ou 4 (tem carona ativa)
+--               → testa PERMISSÃO: Mariana (sem carona ativa) pode solicitar normalmente
+--   - car_id=4: Aberta, motorista Lucas (usu_id=5)
+--               → testa PERMISSÃO: usuário temporário (usu_id=7) pode solicitar (dentro dos 5 dias)
+--   - car_id=5: Finalizada — testa histórico de caronas realizadas (status=3 não bloqueia REGRA 2)
+--   - car_id=6: Cancelada  — testa histórico de caronas canceladas  (status=0 não bloqueia REGRA 2)
 -- =====================================================
 INSERT INTO CARONAS (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status) VALUES
-    (1, 1, 'Ida p/ faculdade - Saio do centro, passo na Consolação', DATE_ADD(NOW(), INTERVAL 1 DAY), '07:30:00', 3, 1),  -- car_id=1: Aberta
-    (1, 1, 'Ida p/ faculdade - Saio do centro',                      DATE_ADD(NOW(), INTERVAL 1 DAY), '07:30:00', 0, 2),  -- car_id=2: Em espera (lotada)
-    (3, 3, 'Volta p/ Vila Nova - só 1 passageiro na moto',           DATE_ADD(NOW(), INTERVAL 1 DAY), '18:00:00', 1, 1),  -- car_id=3: Aberta, moto
-    (4, 5, 'Ida p/ faculdade - Saio de Pinheiros',                   DATE_ADD(NOW(), INTERVAL 1 DAY), '07:45:00', 2, 1),  -- car_id=4: Aberta, Lucas
+    (1, 1, 'Ida p/ faculdade - Saio do centro, passo na Consolação', DATE_ADD(NOW(), INTERVAL 1 DAY), '07:30:00', 3, 1),  -- car_id=1: Aberta  (Carlos, usu_id=1)
+    (1, 1, 'Ida p/ faculdade - Saio do centro',                      DATE_ADD(NOW(), INTERVAL 1 DAY), '07:30:00', 0, 2),  -- car_id=2: Em espera (Carlos, usu_id=1)
+    (3, 3, 'Volta p/ Vila Nova - só 1 passageiro na moto',           DATE_ADD(NOW(), INTERVAL 1 DAY), '18:00:00', 1, 1),  -- car_id=3: Aberta  (Pedro, usu_id=3)
+    (4, 5, 'Ida p/ faculdade - Saio de Pinheiros',                   DATE_ADD(NOW(), INTERVAL 1 DAY), '07:45:00', 2, 1),  -- car_id=4: Aberta  (Lucas, usu_id=5)
     (1, 1, 'Ida p/ faculdade - Carona da semana passada',            DATE_SUB(NOW(), INTERVAL 7 DAY), '07:30:00', 0, 3),  -- car_id=5: Finalizada
     (1, 1, 'Ida p/ faculdade - Cancelei por imprevisto',             DATE_ADD(NOW(), INTERVAL 2 DAY), '07:30:00', 3, 0);  -- car_id=6: Cancelada
 
@@ -239,19 +257,37 @@ INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_edereco_geom, pon_tipo, p
 --   - Aceite ou recusa pelo motorista (altera sol_status)
 --   - Restrição de solicitação duplicada (UNIQUE KEY por passageiro+carona)
 --
--- Cenários de teste cobertos:
---   - Mariana → Carona 1 (Aceita):           fluxo completo bem-sucedido
---   - Lucas   → Carona 1 (Enviada):          aguardando resposta do motorista
---   - Mariana → Carona 3 de Pedro (Negada):  testa recusa (moto sem vaga)
---   - Mariana → Carona 4 de Lucas (Cancelada pelo passageiro): testa desistência
---   - Lucas   → Carona 5 finalizada (Aceita): testa histórico de solicitações
+-- BLOQUEIOS DAS REGRAS (não geram registros — são rejeitados pela API):
+--   [REGRA 1] Carlos  → Carona 1: BLOQUEADO — motorista solicitando a própria carona
+--   [REGRA 1] Pedro   → Carona 3: BLOQUEADO — motorista solicitando a própria carona
+--   [REGRA 2] Carlos  → Carona 3: BLOQUEADO — tem car_id=1 (Aberta) e car_id=2 (Em espera) em andamento
+--   [REGRA 2] Carlos  → Carona 4: BLOQUEADO — mesmo motivo acima
+--   [REGRA 2] Pedro   → Carona 1: BLOQUEADO — tem car_id=3 (Aberta) em andamento
+--   [REGRA 3] Mariana → Carona 3: BLOQUEADO — já está vinculada à Carona 1 (sol_status=2, car_status=1)
+--             OBS: o registro de Mariana→Carona 3 abaixo é sol_status=3 (Negada), não gera vínculo ativo
+--   [REGRA 3] Novo    → Carona 1: BLOQUEADO (se já tiver sol_status=2 em outra carona ativa)
+--
+-- Cenários de teste cobertos (registros válidos que chegam ao banco):
+--   - Mariana (usu_id=2) → Carona 1 (Aceita, sol=2):
+--       Vínculo ativo criado — testa REGRA 3 bloqueando Mariana em novas solicitações
+--   - Lucas   (usu_id=5) → Carona 1 (Enviada, sol=1):
+--       Pendente (não aceito ainda) — Lucas ainda pode ser bloqueado pela REGRA 3 só após aceite
+--   - Mariana (usu_id=2) → Carona 3 de Pedro (Negada, sol=3):
+--       Rejeitada — não cria vínculo, testa que sol_status=3 não bloqueia a REGRA 3
+--   - Mariana (usu_id=2) → Carona 4 de Lucas (Cancelada, sol=0):
+--       Cancelada — não cria vínculo, testa que sol_status=0 não bloqueia a REGRA 3
+--   - Lucas   (usu_id=5) → Carona 5 finalizada (Aceita, sol=2):
+--       car_status=3 (Finalizada) — não bloqueia REGRA 3, testa histórico
+--   - Novo    (usu_id=7) → Carona 4 do Lucas (Enviada, sol=1):
+--       Cadastro temporário (verificacao=5) dentro do prazo — testa permissão de acesso temporário
 -- =====================================================
 INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli) VALUES
-    (2, 1, 2, 1),   -- Mariana → Carona 1 do Carlos (Aceita)
-    (5, 1, 1, 1),   -- Lucas   → Carona 1 do Carlos (Enviada, aguardando)
-    (2, 3, 3, 1),   -- Mariana → Carona 3 do Pedro  (Negada)
-    (2, 4, 0, 1),   -- Mariana → Carona 4 do Lucas  (Cancelada pelo passageiro)
-    (5, 5, 2, 1);   -- Lucas   → Carona 5 finalizada (Aceita, histórico)
+    (2, 1, 2, 1),   -- Mariana → Carona 1 do Carlos  (Aceita)   — VÍNCULO ATIVO para testar REGRA 3
+    (5, 1, 1, 1),   -- Lucas   → Carona 1 do Carlos  (Enviada)  — pendente, sem vínculo ainda
+    (2, 3, 3, 1),   -- Mariana → Carona 3 do Pedro   (Negada)   — não cria vínculo
+    (2, 4, 0, 1),   -- Mariana → Carona 4 do Lucas   (Cancelada)— não cria vínculo
+    (5, 5, 2, 1),   -- Lucas   → Carona 5 finalizada (Aceita)   — carona encerrada, não bloqueia REGRA 3
+    (7, 4, 1, 1);   -- Novo    → Carona 4 do Lucas   (Enviada)  — temporário dentro do prazo
 
 
 -- =====================================================

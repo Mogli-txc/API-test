@@ -5,6 +5,12 @@
  * Login atualiza data do último acesso em USUARIOS_REGISTROS.
  * Cadastro cria registros em USUARIOS, USUARIOS_REGISTROS e PERFIL automaticamente.
  *
+ * Valores de usu_verificacao no banco:
+ *   0 = Não verificado
+ *   1 = Matrícula verificada
+ *   2 = Matrícula + veículo registrado
+ *   5 = Cadastro temporário (acesso por 5 dias para pedir caronas)
+ *
  * Colunas do banco usadas:
  * USUARIOS: usu_id, usu_nome, usu_email, usu_senha, usu_telefone,
  *           usu_matricula, usu_endereco, usu_endereco_geom, usu_status, usu_verificacao
@@ -22,9 +28,15 @@ class UsuarioController {
      * MÉTODO: cadastrar
      * Insere um novo usuário no banco e cria seus registros auxiliares.
      *
+     * PASSO 1: Cadastro inicial — só e-mail e senha são obrigatórios.
+     *   O usuário recebe usu_verificacao = 5 (cadastro temporário) e pode
+     *   pedir caronas por 5 dias. Os demais dados são preenchidos depois.
+     *
+     * PASSO 2: Demais dados (nome, telefone, matrícula etc.) são opcionais
+     *   e podem ser atualizados pelo usuário posteriormente via MÉTODO: atualizar.
+     *
      * Tabelas: USUARIOS → USUARIOS_REGISTROS → PERFIL
-     * Campos obrigatórios no body: usu_nome, usu_email, usu_senha,
-     *   usu_telefone, usu_matricula, usu_endereco, usu_endereco_geom
+     * Campos obrigatórios no body: usu_email, usu_senha
      */
     cadastrar = async (req, res) => {
         try {
@@ -35,11 +47,10 @@ class UsuarioController {
                 usu_foto, usu_descricao, usu_horario_habitual
             } = req.body;
 
-            // Validação dos campos obrigatórios
-            if (!usu_nome || !usu_email || !usu_senha || !usu_telefone ||
-                !usu_matricula || !usu_endereco || !usu_endereco_geom) {
+            // Validação dos campos obrigatórios — apenas email e senha no cadastro inicial
+            if (!usu_email || !usu_senha) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: usu_nome, usu_email, usu_senha, usu_telefone, usu_matricula, usu_endereco, usu_endereco_geom."
+                    error: "Campos obrigatórios: usu_email e usu_senha."
                 });
             }
 
@@ -56,15 +67,16 @@ class UsuarioController {
             // O número 10 é o "custo" do hash — quanto maior, mais seguro e mais lento
             const senhaHash = await bcrypt.hash(usu_senha, 10);
 
-            // Insere o usuário na tabela USUARIOS
+            // Insere o usuário com usu_verificacao = 5 (cadastro temporário: 5 dias de acesso)
+            // usu_verificacao_expira recebe NOW() + 5 dias — reutiliza o mesmo campo de expiração
             const [resultado] = await db.query(
                 `INSERT INTO USUARIOS
                     (usu_nome, usu_email, usu_senha, usu_telefone, usu_matricula,
                      usu_endereco, usu_endereco_geom, usu_foto, usu_descricao,
-                     usu_horario_habitual, usu_verificacao, usu_status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
-                [usu_nome, usu_email, senhaHash, usu_telefone, usu_matricula,
-                 usu_endereco, usu_endereco_geom,
+                     usu_horario_habitual, usu_verificacao, usu_verificacao_expira, usu_status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5, DATE_ADD(NOW(), INTERVAL 5 DAY), 1)`,
+                [usu_nome || null, usu_email, senhaHash, usu_telefone || null, usu_matricula || null,
+                 usu_endereco || null, usu_endereco_geom || null,
                  usu_foto || null, usu_descricao || null, usu_horario_habitual || null]
             );
 
@@ -81,12 +93,12 @@ class UsuarioController {
             await db.query(
                 `INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado)
                  VALUES (?, ?, NOW(), 0, 0)`,
-                [novoId, usu_nome]
+                [novoId, usu_nome || null]
             );
 
             return res.status(201).json({
-                message: "Usuário cadastrado com sucesso!",
-                usuario: { usu_id: novoId, usu_nome, usu_email }
+                message: "Usuário cadastrado com sucesso! Complete seu perfil para acesso completo.",
+                usuario: { usu_id: novoId, usu_email, usu_verificacao: 5 }
             });
 
         } catch (error) {
