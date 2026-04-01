@@ -48,14 +48,29 @@ class CaronaPessoasController {
                 });
             }
 
-            // PASSO 4: Insere o passageiro com status 1 (Aceito) e data atual
+            // PASSO 4: Verifica se o passageiro já está vinculado a outra carona ativa
+            // Vínculo = sol_status = 2 (Aceito) em carona com car_status IN (1, 2)
+            // Esta checagem impede criar vínculo duplo direto via CARONA_PESSOAS
+            const [jaVinculado] = await db.query(
+                `SELECT s.sol_id FROM SOLICITACOES_CARONA s
+                 INNER JOIN CARONAS c ON s.car_id = c.car_id
+                 WHERE s.usu_id_passageiro = ? AND s.sol_status = 2 AND c.car_status IN (1, 2)`,
+                [usu_id]
+            );
+            if (jaVinculado.length > 0) {
+                return res.status(403).json({
+                    error: "Passageiro já está vinculado a uma carona ativa. Não é possível adicioná-lo a outra."
+                });
+            }
+
+            // PASSO 5: Insere o passageiro com status 1 (Aceito) e data atual
             const [resultado] = await db.query(
                 `INSERT INTO CARONA_PESSOAS (car_id, usu_id, car_pes_data, car_pes_status)
                  VALUES (?, ?, NOW(), 1)`,
                 [car_id, usu_id]
             );
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(201).json({
                 message: "Passageiro adicionado à carona com sucesso!",
                 passageiro: {

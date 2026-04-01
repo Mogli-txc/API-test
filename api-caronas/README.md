@@ -76,31 +76,78 @@ O campo `usu_verificacao` na tabela `USUARIOS` controla o nível de acesso do us
 | `0`   | Não verificado | Apenas cadastro e login |
 | `1`   | Matrícula verificada | Pode **solicitar** caronas |
 | `2`   | Matrícula verificada + veículo cadastrado | Pode **solicitar** e **oferecer** caronas |
+| `5`   | Cadastro temporário | Pode **solicitar** caronas por **5 dias** |
 
 **Regras aplicadas nos endpoints:**
 
 - `POST /api/caronas/oferecer` — exige `usu_verificacao = 2`. O `vei_id` enviado deve pertencer ao motorista autenticado (via `usu_id` do token JWT).
-- `POST /api/solicitacoes/criar` — exige `usu_verificacao >= 1`.
+- `POST /api/solicitacoes/criar` — exige `usu_verificacao >= 1` **ou** `usu_verificacao = 5` dentro do prazo de 5 dias.
 
 Tentativas de acesso sem o nível necessário retornam `403 Forbidden`.
 
 ### Validade da verificação (`usu_verificacao_expira`)
 
-A verificação de matrícula tem **validade de 6 meses**, alinhada ao calendário semestral.
+O campo `usu_verificacao_expira` é **unificado** para todos os níveis de verificação:
 
-- O campo `usu_verificacao_expira` (DATETIME) é preenchido quando o usuário envia e tem o comprovante aprovado.
-- A cada 6 meses o usuário deve enviar um novo comprovante para renovar o acesso.
-- Se `usu_verificacao_expira` for `NULL` ou uma data no passado, os endpoints de solicitar e oferecer carona retornam `403 Forbidden` com a mensagem:
-  > *"Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo."*
+| Nível | Quando é preenchido | Valor |
+|-------|---------------------|-------|
+| `5` (temporário) | No cadastro inicial | `NOW() + 5 dias` |
+| `1` (matrícula verificada) | Após aprovação do comprovante | `NOW() + 6 meses` |
+| `2` (+ veículo) | Herdado do nível 1 | Inalterado |
+| `0` (não verificado) | Nunca | `NULL` |
+
+Se `usu_verificacao_expira` for `NULL` ou uma data no passado, os endpoints de solicitar e oferecer carona retornam `403 Forbidden`. A mensagem varia conforme o nível:
+> Nível 5: *"Período de acesso temporário encerrado. Complete seu cadastro para continuar pedindo caronas."*
+> Nível 1/2: *"Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo."*
 
 **Ciclo de vida da verificação:**
 
 ```
-Cadastro          → usu_verificacao = 0, usu_verificacao_expira = NULL
+Cadastro inicial  → usu_verificacao = 5, usu_verificacao_expira = NOW() + 5 dias
+5 dias depois     → acesso a solicitar caronas bloqueado até completar o cadastro
 Envia comprovante → usu_verificacao = 1, usu_verificacao_expira = NOW() + 6 meses
 Cadastra veículo  → usu_verificacao = 2, usu_verificacao_expira (inalterado)
 6 meses depois    → acesso bloqueado até novo envio de comprovante
 ```
+
+---
+
+### Bloqueios de solicitação de carona
+
+Além da verificação de identidade, dois bloqueios adicionais são aplicados em `POST /api/caronas/solicitar` e `POST /api/solicitacoes/criar`:
+
+**1. Motorista não pode solicitar a própria carona**
+
+O `usu_id` do token é comparado ao `usu_id` do motorista da carona solicitada (via JOIN `CARONAS → CURSOS_USUARIOS`).
+
+Retorna `403 Forbidden`:
+> *"Você não pode solicitar a sua própria carona."*
+
+**2. Motorista não pode solicitar carona com uma carona em andamento**
+
+Se o usuário autenticado tiver qualquer carona com `car_status IN (1, 2)` como motorista, a solicitação é bloqueada.
+
+| Status bloqueante | Significado |
+|-------------------|-------------|
+| `1` | Aberta |
+| `2` | Em espera |
+
+Retorna `403 Forbidden`:
+> *"Você não pode solicitar carona enquanto tiver uma carona em andamento."*
+
+**3. Usuário não pode ser vinculado a mais de uma carona ao mesmo tempo**
+
+Um usuário é considerado **vinculado** a uma carona quando sua solicitação foi aceita (`sol_status = 2`) e a carona ainda está ativa (`car_status IN (1, 2)`).
+
+Enquanto esse vínculo existir, qualquer nova solicitação é bloqueada. Retorna `403 Forbidden`:
+> *"Você já está vinculado a uma carona ativa. Cancele ou aguarde a finalização antes de solicitar outra."*
+
+Para se desvincular, o usuário deve cancelar a solicitação aceita via `PUT /api/solicitacoes/:soli_id/cancelar` — o que devolve a vaga ao motorista automaticamente.
+
+Todas as três regras são verificadas **após** a validação de acesso (`usu_verificacao`) e **antes** da verificação de vagas disponíveis, nesta ordem:
+1. Própria carona
+2. Carona em andamento como motorista
+3. Vínculo ativo como passageiro
 
 ---
 
@@ -143,13 +190,18 @@ Tabelas e suas funções:
 **Cadastro — campos obrigatórios:**
 ```json
 {
-  "usu_nome": "João Silva",
   "usu_email": "joao@escola.edu.br",
-  "usu_senha": "senha123",
-  "usu_telefone": "11999990000",
-  "usu_matricula": "2024001",
-  "usu_endereco": "Rua A, 123",
-  "usu_endereco_geom": "-23.5505,-46.6333"
+  "usu_senha": "senha123"
+}
+```
+O usuário é criado com `usu_verificacao = 5` (cadastro temporário) e tem **5 dias** para pedir caronas.
+Os demais dados (`usu_nome`, `usu_telefone`, `usu_matricula`, `usu_endereco`, etc.) são opcionais e podem ser preenchidos depois via `PUT /:id`.
+
+**Resposta do cadastro:**
+```json
+{
+  "message": "Usuário cadastrado com sucesso! Complete seu perfil para acesso completo.",
+  "usuario": { "usu_id": 7, "usu_email": "joao@escola.edu.br", "usu_verificacao": 5 }
 }
 ```
 
@@ -266,7 +318,7 @@ Rotas públicas para listar escolas e cursos disponíveis.
 ```json
 { "car_id": 1, "usu_id_passageiro": 2, "sol_vaga_soli": 1 }
 ```
-> **Restrição:** requer `usu_verificacao >= 1` (matrícula verificada).
+> **Restrição:** requer `usu_verificacao >= 1` (matrícula verificada) **ou** `usu_verificacao = 5` (cadastro temporário) dentro do prazo de 5 dias. Em ambos os casos, `usu_verificacao_expira` deve ser uma data futura.
 
 **Responder solicitação:**
 ```json

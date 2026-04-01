@@ -23,11 +23,16 @@ INSERT INTO CURSOS (cur_semestre, cur_nome, esc_id) VALUES
 -- =====================================================
 -- 3. USUARIOS
 -- =====================================================
-INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_status, usu_email, usu_endereco, usu_endereco_geom, usu_horario_habitual) VALUES
-    ('Carlos Silva',  '11999991111', 'MAT2023001', 'hash_senha_secreta_1', 1, 1, 'carlos.silva@aluno.inova.br',   'Rua das Flores, 123, Centro',   '-23.5505,-46.6333', '07:30:00'),
-    ('Mariana Souza', '11988882222', 'MAT2023002', 'hash_senha_secreta_2', 1, 1, 'mariana.souza@aluno.inova.br',  'Av. Brasil, 456, Jardins',       '-23.5599,-46.6400', '07:45:00'),
-    ('Pedro Santos',  '19977773333', 'MAT2022099', 'hash_senha_secreta_3', 1, 1, 'pedro.santos@uni.saber.br',     'Rua da Paz, 88, Vila Nova',      '-22.9056,-47.0608', '18:30:00'),
-    ('Ana Oliveira',  '11966664444', 'MAT2024001', 'hash_senha_secreta_4', 0, 0, 'ana.oliveira@aluno.inova.br',   'Rua Torta, 10, Bairro Fim',      '-23.5000,-46.6000', NULL);
+-- usu_verificacao_expira:
+--   verificacao=1 → DATE_ADD(NOW(), INTERVAL 6 MONTH)  (renovação semestral)
+--   verificacao=5 → DATE_ADD(NOW(), INTERVAL 5 DAY)    (cadastro temporário)
+--   verificacao=0 → NULL
+INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_verificacao_expira, usu_status, usu_email, usu_endereco, usu_endereco_geom, usu_horario_habitual) VALUES
+    ('Carlos Silva',  '11999991111', 'MAT2023001', 'hash_senha_secreta_1', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',  'Rua das Flores, 123, Centro', '-23.5505,-46.6333', '07:30:00'),
+    ('Mariana Souza', '11988882222', 'MAT2023002', 'hash_senha_secreta_2', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'mariana.souza@aluno.inova.br', 'Av. Brasil, 456, Jardins',    '-23.5599,-46.6400', '07:45:00'),
+    ('Pedro Santos',  '19977773333', 'MAT2022099', 'hash_senha_secreta_3', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'pedro.santos@uni.saber.br',    'Rua da Paz, 88, Vila Nova',   '-22.9056,-47.0608', '18:30:00'),
+    ('Ana Oliveira',  '11966664444', 'MAT2024001', 'hash_senha_secreta_4', 0, NULL,                              0, 'ana.oliveira@aluno.inova.br',  'Rua Torta, 10, Bairro Fim',   '-23.5000,-46.6000', NULL),
+    (NULL,            NULL,          NULL,          'hash_senha_secreta_5', 5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.usuario@aluno.inova.br',  NULL,                          NULL,                NULL);  -- Cadastro temporário: só email e senha
 
 -- =====================================================
 -- 4. USUARIOS_REGISTROS (1:1 com USUARIOS)
@@ -36,17 +41,19 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
     (1, NOW(),                      '2023-01-15 10:00:00', NOW()),
     (2, NOW(),                      '2023-02-20 14:30:00', NOW()),
     (3, '2023-10-01 08:00:00',      '2022-08-10 09:00:00', '2023-10-01 08:00:00'),
-    (4, NULL,                       NOW(),                 NULL);
+    (4, NULL,                       NOW(),                 NULL),
+    (5, NOW(),                      NOW(),                 NULL);  -- Temporário: criado agora
 
 
 -- =====================================================
 -- 6. PERFIL
 -- =====================================================
 -- per_tipo: 0=Passageiro, 1=Motorista
-INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo,per_habilitado) VALUES
-    (1, 'Carlos Silva',   NOW(), 0, 1),  -- Usuário habilitado para dar carona
-    (2, 'Mariana Souza',  NOW(), 0, 1),  -- Usuário habilitado para dar carona
-    (3, 'Pedro Santos',   NOW(), 0, 0);  -- Usuário não habilitado para dar carona
+INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado) VALUES
+    (1, 'Carlos Silva',  NOW(), 0, 1),
+    (2, 'Mariana Souza', NOW(), 0, 1),
+    (3, 'Pedro Santos',  NOW(), 0, 0),
+    (5, NULL,            NOW(), 0, 0);  -- Temporário: sem nome até completar o cadastro
 
 -- =====================================================
 -- 7. VEICULOS
@@ -89,9 +96,11 @@ INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_edereco_geom, pon_tipo, p
 -- 11. SOLICITACOES_CARONA
 -- =====================================================
 -- sol_status: 1=Enviado, 2=Aceito, 3=Negado, 0=Cancelado
--- Mariana (usu_id=2) solicita carona na carona do Carlos (car_id=1)
+-- Mariana (usu_id=2) aceita na carona do Carlos (car_id=1) — VÍNCULO ATIVO (testa REGRA 3)
+-- Pedro   (usu_id=3) enviou solicitação na carona do Carlos — pendente, sem vínculo ainda
 INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli) VALUES
-    (2, 1, 2, 1);  -- Status 2 = Aceito
+    (2, 1, 2, 1),  -- Mariana → Carona 1 (Aceita)  — vínculo ativo, bloqueia nova solicitação pela REGRA 3
+    (3, 1, 1, 1);  -- Pedro   → Carona 1 (Enviada) — pendente (sol=1 não cria vínculo)
 
 -- =====================================================
 -- 12. CARONA_PESSOAS
