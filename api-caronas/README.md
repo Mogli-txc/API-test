@@ -83,7 +83,7 @@ api-caronas/
 │
 ├── public/                           # Arquivos estáticos servidos em /public
 │   └── usuarios/                     # Fotos de perfil dos usuários
-│       └── sem-foto.png              # Imagem padrão (fallback)
+│       └── perfil.png              # Imagem padrão (fallback)
 │
 ├── infosdatabase/
 │   ├── create.sql                    # Criação das 13 tabelas
@@ -300,7 +300,7 @@ foto: <arquivo>
 }
 ```
 
-A foto é armazenada em `public/usuarios/`. O campo `usu_foto` no banco guarda apenas o nome do arquivo; a URL completa é gerada por `gerarUrl()` ao retornar o perfil. Se o usuário não tiver foto, a resposta retorna a URL de `sem-foto.png`.
+A foto é armazenada em `public/usuarios/`. O campo `usu_foto` no banco guarda apenas o nome do arquivo; a URL completa é gerada por `gerarUrl()` ao retornar o perfil. Se o usuário não tiver foto, a resposta retorna a URL de `perfil.png`.
 
 ---
 

@@ -210,7 +210,7 @@ class UsuarioController {
             const usuario = rows[0];
 
             // Converte o nome do arquivo salvo no banco para URL pública completa
-            usuario.usu_foto = gerarUrl(usuario.usu_foto, 'usuarios', 'sem-foto.png');
+            usuario.usu_foto = gerarUrl(usuario.usu_foto, 'usuarios', 'perfil.png');
 
             return res.status(200).json({
                 message: "Perfil recuperado com sucesso!",
@@ -310,7 +310,7 @@ class UsuarioController {
             );
 
             // Retorna a URL pública da foto recém-salva
-            const urlFoto = gerarUrl(req.file.filename, 'usuarios', 'sem-foto.png');
+            const urlFoto = gerarUrl(req.file.filename, 'usuarios', 'perfil.png');
 
             return res.status(200).json({
                 message: "Foto de perfil atualizada com sucesso!",
