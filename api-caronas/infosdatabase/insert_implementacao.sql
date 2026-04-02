@@ -236,16 +236,16 @@ INSERT INTO CARONAS (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_
 -- =====================================================
 INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status) VALUES
     -- Carona 1 (Carlos)
-    -- (1, 'Rua das Flores, 123, Centro, São Paulo',    '-23.5505,-46.6333', 0, 'Saída - Casa do Carlos', 1, 1),  -- Ponto do motorista
-    -- (1, 'Estação Metrô Consolação, São Paulo',        '-23.5599,-46.6600', 1, 'Metrô Consolação',       2, 1),  -- Ponto do passageiro
+    (1, 'Rua das Flores, 123, Centro, São Paulo',    '-23.5505,-46.6333', 0, 'Saída - Casa do Carlos', 1, 1),  -- Ponto do motorista
+    (1, 'Estação Metrô Consolação, São Paulo',        '-23.5599,-46.6600', 1, 'Metrô Consolação',       2, 1),  -- Ponto do passageiro
 
-    -- -- Carona 3 (Pedro, moto)
-    -- (3, 'Rua da Paz, 88, Vila Nova, Campinas',        '-22.9056,-47.0608', 0, 'Saída - Casa do Pedro',  1, 1),  -- Só partida
+    -- Carona 3 (Pedro, moto)
+    (3, 'Rua da Paz, 88, Vila Nova, Campinas',        '-22.9056,-47.0608', 0, 'Saída - Casa do Pedro',  1, 1),  -- Só partida
 
-    -- -- Carona 4 (Lucas)
-    -- (4, 'Rua Nova, 200, Pinheiros, São Paulo',        '-23.5678,-46.6890', 0, 'Saída - Casa do Lucas',  1, 1),  -- Ponto do motorista
-    -- (4, 'Av. Faria Lima, 1000, São Paulo',            '-23.5765,-46.6887', 1, 'Av. Faria Lima',         2, 1),  -- Ponto ativo
-    -- (4, 'Estação Metrô Butantã, São Paulo',           '-23.5722,-46.7198', 1, 'Metrô Butantã',          3, 0);  -- Ponto desativado (testa pon_status=0) corrigir 
+    -- Carona 4 (Lucas)
+    (4, 'Rua Nova, 200, Pinheiros, São Paulo',        '-23.5678,-46.6890', 0, 'Saída - Casa do Lucas',  1, 1),  -- Ponto do motorista
+    (4, 'Av. Faria Lima, 1000, São Paulo',            '-23.5765,-46.6887', 1, 'Av. Faria Lima',         2, 1),  -- Ponto ativo
+    (4, 'Estação Metrô Butantã, São Paulo',           '-23.5722,-46.7198', 1, 'Metrô Butantã',          3, 0);  -- Ponto desativado (testa pon_status=0)
 
 
 -- =====================================================
@@ -327,7 +327,7 @@ INSERT INTO CARONA_PESSOAS (car_id, usu_id, car_pes_data, car_pes_status) VALUES
 --   - Resposta referenciando outra mensagem (men_id_resposta): testa encadeamento
 --   - Conversa na Carona 5 finalizada: testa histórico de chat
 -- =====================================================
-INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_status, men_id_resposta) VALUES
+INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta) VALUES
     -- Conversa Mariana ↔ Carlos na Carona 1 (todas lidas)
     (1, 2, 1, 'Olá Carlos! Você passa perto do metrô Consolação?',          NULL),  -- men_id=1: Pergunta inicial (Lida)
     (1, 1, 2, 'Oi Mariana! Sim, passo lá por volta das 07h40.',             1),     -- men_id=2: Responde à msg 1 (Lida)
