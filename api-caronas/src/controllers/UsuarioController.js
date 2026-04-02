@@ -18,9 +18,10 @@
  * PERFIL: per_id, usu_id, per_nome, per_data, per_tipo, per_habilitado
  */
 
-const jwt     = require('jsonwebtoken');
-const bcrypt  = require('bcryptjs');
-const db      = require('../config/database'); // Pool de conexão MySQL
+const jwt          = require('jsonwebtoken');
+const bcrypt       = require('bcryptjs');
+const db           = require('../config/database');    // Pool de conexão MySQL
+const { gerarUrl } = require('../utils/gerarUrl');     // Gera URLs públicas de imagens
 
 class UsuarioController {
 
@@ -206,9 +207,14 @@ class UsuarioController {
                 return res.status(404).json({ error: "Usuário não encontrado." });
             }
 
+            const usuario = rows[0];
+
+            // Converte o nome do arquivo salvo no banco para URL pública completa
+            usuario.usu_foto = gerarUrl(usuario.usu_foto, 'usuarios', 'sem-foto.png');
+
             return res.status(200).json({
                 message: "Perfil recuperado com sucesso!",
-                user: rows[0]
+                user: usuario
             });
 
         } catch (error) {
@@ -267,6 +273,53 @@ class UsuarioController {
         } catch (error) {
             console.error("[ERRO] atualizar:", error);
             return res.status(500).json({ error: "Erro ao atualizar usuário." });
+        }
+    }
+
+    /**
+     * MÉTODO: atualizarFoto
+     * Recebe o upload da foto de perfil via multipart/form-data e
+     * salva o nome do arquivo na coluna usu_foto de USUARIOS.
+     *
+     * PASSO 1: O middleware uploadHelper processa o arquivo e o salva
+     *   em /public/usuarios/. O nome gerado fica em req.file.filename.
+     *
+     * PASSO 2: Atualiza usu_foto no banco com o nome do arquivo salvo.
+     *
+     * Tabela: USUARIOS (UPDATE usu_foto)
+     * Parâmetro: id (usu_id via URL)
+     * Campo no body (multipart): foto
+     */
+    atualizarFoto = async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            if (!id || isNaN(id)) {
+                return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+
+            // req.file é preenchido pelo uploadHelper quando o upload é bem-sucedido
+            if (!req.file) {
+                return res.status(400).json({ error: "Nenhuma imagem enviada." });
+            }
+
+            // Salva apenas o nome do arquivo no banco (não o caminho completo)
+            await db.query(
+                'UPDATE USUARIOS SET usu_foto = ? WHERE usu_id = ?',
+                [req.file.filename, id]
+            );
+
+            // Retorna a URL pública da foto recém-salva
+            const urlFoto = gerarUrl(req.file.filename, 'usuarios', 'sem-foto.png');
+
+            return res.status(200).json({
+                message: "Foto de perfil atualizada com sucesso!",
+                usu_foto: urlFoto
+            });
+
+        } catch (error) {
+            console.error("[ERRO] atualizarFoto:", error);
+            return res.status(500).json({ error: "Erro ao atualizar foto de perfil." });
         }
     }
 

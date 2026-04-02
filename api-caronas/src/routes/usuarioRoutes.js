@@ -9,6 +9,9 @@ const express = require('express');
 const router = express.Router();
 const UsuarioController = require('../controllers/UsuarioController');
 const authMiddleware = require('../middlewares/authMiddleware'); // Middleware de autenticação
+const uploadImage = require('../middlewares/uploadHelper');
+
+const uploadUsuario = uploadImage('usuarios');
 
 // ========== ROTAS PÚBLICAS (SEM AUTENTICAÇÃO) ==========
 
@@ -52,6 +55,16 @@ router.get('/perfil/:id', UsuarioController.perfil);
  * Retorno: Status 200 com dados atualizados
  */
 router.put('/:id', authMiddleware, UsuarioController.atualizar);
+
+/**
+ * ROTA: PUT /api/usuarios/:id/foto
+ * Descrição: Atualiza a foto de perfil do usuário
+ * Acesso: PROTEGIDO - Apenas o próprio usuário pode atualizar sua foto
+ * Parâmetro: id (usu_id via URL)
+ * Campo no body (multipart/form-data): foto
+ * Retorno: Status 200 com a URL pública da nova foto
+ */
+router.put('/:id/foto', authMiddleware, uploadUsuario.single('foto'), UsuarioController.atualizarFoto);
 
 /**
  * ROTA: DELETE /api/usuarios/:id

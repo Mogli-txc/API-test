@@ -52,7 +52,14 @@ app.use(cors());
 app.use(express.json());
 
 /**
- * Middleware 3: Logging de Requisições (OPCIONAL)
+ * Middleware 3: Pasta pública de arquivos estáticos
+ * Imagens enviadas via upload ficam acessíveis em /public/<pasta>/<arquivo>
+ * Ex: http://localhost:3000/public/usuarios/foto.jpg
+ */
+app.use('/public', express.static('public'));
+
+/**
+ * Middleware 4: Logging de Requisições (OPCIONAL)
  * Exibe informações sobre cada requisição recebida
  */
 if (process.env.LOG_REQUESTS === 'true') {
