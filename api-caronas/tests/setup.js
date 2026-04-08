@@ -63,9 +63,9 @@ module.exports = async function () {
             [usu_id]
         );
 
-        // Insere perfil padrão (necessário para o sistema funcionar)
+        // Insere perfil como Desenvolvedor (per_tipo=2) — acesso total para os testes
         await db.execute(
-            'INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado) VALUES (?, ?, NOW(), 0, 0)',
+            'INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_escola_id) VALUES (?, ?, NOW(), 2, 1, NULL)',
             [usu_id, 'Admin Teste']
         );
 

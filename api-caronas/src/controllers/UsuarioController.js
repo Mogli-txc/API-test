@@ -239,6 +239,18 @@ class UsuarioController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
+            // Desenvolvedor (per_tipo=2) pode editar qualquer usuário
+            // Demais perfis só podem editar o próprio
+            const [perfil] = await db.query(
+                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+                [req.user.id]
+            );
+            const isDev = perfil.length > 0 && perfil[0].per_tipo === 2;
+
+            if (!isDev && req.user.id !== parseInt(id)) {
+                return res.status(403).json({ error: "Sem permissão para alterar este usuário." });
+            }
+
             if (!usu_nome && !usu_email && !usu_senha) {
                 return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
             }
@@ -298,6 +310,17 @@ class UsuarioController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
+            // Desenvolvedor (per_tipo=2) pode atualizar foto de qualquer usuário
+            const [perfil] = await db.query(
+                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+                [req.user.id]
+            );
+            const isDev = perfil.length > 0 && perfil[0].per_tipo === 2;
+
+            if (!isDev && req.user.id !== parseInt(id)) {
+                return res.status(403).json({ error: "Sem permissão para alterar este usuário." });
+            }
+
             // req.file é preenchido pelo uploadHelper quando o upload é bem-sucedido
             if (!req.file) {
                 return res.status(400).json({ error: "Nenhuma imagem enviada." });
@@ -336,6 +359,17 @@ class UsuarioController {
 
             if (!id || isNaN(id)) {
                 return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+
+            // Desenvolvedor (per_tipo=2) pode desativar qualquer conta
+            const [perfil] = await db.query(
+                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+                [req.user.id]
+            );
+            const isDev = perfil.length > 0 && perfil[0].per_tipo === 2;
+
+            if (!isDev && req.user.id !== parseInt(id)) {
+                return res.status(403).json({ error: "Sem permissão para deletar este usuário." });
             }
 
             // Soft delete: marca como inativo em vez de apagar do banco

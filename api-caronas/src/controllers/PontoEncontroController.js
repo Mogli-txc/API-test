@@ -6,7 +6,7 @@
  * Valores de pon_status no banco: 1 = Ativo | 0 = Inativo
  *
  * Colunas da tabela PONTO_ENCONTROS:
- *   pon_id, car_id, pon_endereco, pon_edereco_geom (atenção: typo no banco),
+ *   pon_id, car_id, pon_endereco, pon_endereco_geom (atenção: typo no banco),
  *   pon_tipo, pon_nome, pon_ordem, pon_status
  */
 
@@ -27,22 +27,22 @@ class PontoEncontroController {
     async criar(req, res) {
         try {
             // PASSO 1: Desestrutura os dados da requisição
-            const { car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome, pon_ordem } = req.body;
+            const { car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem } = req.body;
 
             // PASSO 2: Validação de campos obrigatórios
-            if (!car_id || !pon_endereco || !pon_edereco_geom || pon_tipo === undefined || !pon_nome) {
+            if (!car_id || !pon_endereco || !pon_endereco_geom || pon_tipo === undefined || !pon_nome) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome."
+                    error: "Campos obrigatórios: car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome."
                 });
             }
 
             // PASSO 3: Inserção no banco com status 1 (Ativo)
-            // INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status)
+            // INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status)
             const [resultado] = await db.query(
                 `INSERT INTO PONTO_ENCONTROS
-                    (car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status)
+                    (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status)
                  VALUES (?, ?, ?, ?, ?, ?, 1)`,
-                [car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome, pon_ordem || null]
+                [car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem || null]
             );
 
             // PASSO 4: Resposta de sucesso com ID gerado pelo banco
@@ -85,7 +85,7 @@ class PontoEncontroController {
             // PASSO 3: Busca no banco ordenado pela ordem dos pontos
             // SELECT * FROM PONTO_ENCONTROS WHERE car_id = ? AND pon_status = 1 ORDER BY pon_ordem
             const [pontos] = await db.query(
-                `SELECT pon_id, pon_nome, pon_endereco, pon_edereco_geom,
+                `SELECT pon_id, pon_nome, pon_endereco, pon_endereco_geom,
                         pon_tipo, pon_ordem, pon_status
                  FROM PONTO_ENCONTROS
                  WHERE car_id = ? AND pon_status = 1

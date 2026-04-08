@@ -73,24 +73,48 @@ class SugestaoDenunciaController {
 
     /**
      * MÉTODO: listar
-     * Lista todas as sugestões e denúncias (uso administrativo).
+     * Lista sugestões e denúncias com escopo por papel do usuário.
      *
-     * Tabelas: SUGESTAO_DENUNCIA + USUARIOS (JOIN para nome do autor)
-     * Filtro opcional: sug_tipo (via query string)
+     * PASSO 1: Desenvolvedor (per_tipo=2) → retorna todas sem filtro.
+     * PASSO 2: Administrador (per_tipo=1) → retorna apenas as de usuários
+     *   vinculados à sua escola (per_escola_id), via JOIN com CURSOS_USUARIOS.
+     *
+     * Tabelas: SUGESTAO_DENUNCIA + USUARIOS + CURSOS_USUARIOS + CURSOS (Admin)
      */
-    async listar(_req, res) { // _req: parâmetro não utilizado neste método
+    async listar(req, res) {
         try {
-            // PASSO 1: Busca todas as sugestões com nome do autor via JOIN
-            const [sugestoes] = await db.query(
-                `SELECT s.sug_id, s.sug_texto, s.sug_data, s.sug_status, s.sug_tipo,
-                        s.sug_resposta,
-                        u.usu_nome AS autor
-                 FROM SUGESTAO_DENUNCIA s
-                 INNER JOIN USUARIOS u ON s.usu_id = u.usu_id
-                 ORDER BY s.sug_id DESC`
-            );
+            const { per_tipo, per_escola_id } = req.user;
 
-            // PASSO 2: Resposta de sucesso
+            let sugestoes;
+
+            if (per_tipo === 2) {
+                // PASSO 1: Desenvolvedor — acesso total, sem filtro de escola
+                [sugestoes] = await db.query(
+                    `SELECT s.sug_id, s.sug_texto, s.sug_data, s.sug_status, s.sug_tipo,
+                            s.sug_resposta,
+                            u.usu_nome AS autor
+                     FROM SUGESTAO_DENUNCIA s
+                     INNER JOIN USUARIOS u ON s.usu_id = u.usu_id
+                     ORDER BY s.sug_id DESC`
+                );
+            } else {
+                // PASSO 2: Administrador — filtra por usuários da sua escola
+                // JOIN: SUGESTAO_DENUNCIA → USUARIOS → CURSOS_USUARIOS → CURSOS (esc_id)
+                [sugestoes] = await db.query(
+                    `SELECT DISTINCT s.sug_id, s.sug_texto, s.sug_data, s.sug_status,
+                            s.sug_tipo, s.sug_resposta,
+                            u.usu_nome AS autor
+                     FROM SUGESTAO_DENUNCIA s
+                     INNER JOIN USUARIOS u          ON s.usu_id  = u.usu_id
+                     INNER JOIN CURSOS_USUARIOS cu  ON u.usu_id  = cu.usu_id
+                     INNER JOIN CURSOS c            ON cu.cur_id = c.cur_id
+                     WHERE c.esc_id = ?
+                     ORDER BY s.sug_id DESC`,
+                    [per_escola_id]
+                );
+            }
+
+            // PASSO 3: Resposta de sucesso
             return res.status(200).json({
                 message:  "Lista de sugestões/denúncias recuperada.",
                 total:    sugestoes.length,
@@ -160,7 +184,8 @@ class SugestaoDenunciaController {
         try {
             // PASSO 1: Extrai o ID e os dados da resposta
             const { sug_id } = req.params;
-            const { sug_resposta, sug_id_resposta } = req.body;
+            const { sug_resposta } = req.body;
+            const { per_tipo, per_escola_id } = req.user;
 
             // PASSO 2: Valida o ID
             if (!sug_id || isNaN(sug_id)) {
@@ -168,25 +193,40 @@ class SugestaoDenunciaController {
             }
 
             // PASSO 3: Valida a resposta
-            if (!sug_resposta || !sug_id_resposta) {
-                return res.status(400).json({
-                    error: "Campos obrigatórios: sug_resposta, sug_id_resposta (ID do admin)."
-                });
+            if (!sug_resposta) {
+                return res.status(400).json({ error: "Campo obrigatório: sug_resposta." });
             }
 
-            // PASSO 4: Atualiza com a resposta e fecha (sug_status = 0)
+            // PASSO 4: Administrador só pode responder sugestões de usuários da sua escola
+            if (per_tipo === 1) {
+                const [pertence] = await db.query(
+                    `SELECT s.sug_id FROM SUGESTAO_DENUNCIA s
+                     INNER JOIN USUARIOS u         ON s.usu_id  = u.usu_id
+                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                     INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                     WHERE s.sug_id = ? AND c.esc_id = ?
+                     LIMIT 1`,
+                    [sug_id, per_escola_id]
+                );
+                if (pertence.length === 0) {
+                    return res.status(403).json({ error: "Sem permissão para responder esta sugestão/denúncia." });
+                }
+            }
+
+            // PASSO 5: Atualiza com a resposta e fecha (sug_status = 0)
+            // sug_id_resposta registra o ID do usuário autenticado que respondeu
             const [resultado] = await db.query(
                 `UPDATE SUGESTAO_DENUNCIA
                  SET sug_resposta = ?, sug_id_resposta = ?, sug_status = 0
                  WHERE sug_id = ?`,
-                [sug_resposta, sug_id_resposta, sug_id]
+                [sug_resposta, req.user.id, sug_id]
             );
 
             if (resultado.affectedRows === 0) {
                 return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
             }
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:  "Resposta registrada e sugestão/denúncia fechada.",
                 sugestao: { sug_id: parseInt(sug_id), sug_status: 0, sug_resposta }

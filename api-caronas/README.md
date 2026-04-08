@@ -21,16 +21,17 @@ Desenvolvida com Node.js, Express e MySQL.
 
 ## Tecnologias
 
-| Pacote        | Uso                                                |
-|---------------|----------------------------------------------------|
-| express       | Framework web / roteamento                         |
-| mysql2        | Driver MySQL com suporte a Promises                |
-| bcryptjs      | Hash de senhas                                     |
-| jsonwebtoken  | Autenticação via JWT                               |
-| dotenv        | Variáveis de ambiente                              |
-| cors          | Permitir requisições cross-origin                  |
-| multer        | Upload de arquivos via multipart/form-data         |
-| fs-extra      | Verificação de existência de arquivos no servidor  |
+| Pacote              | Uso                                                |
+|---------------------|----------------------------------------------------|
+| express             | Framework web / roteamento                         |
+| mysql2              | Driver MySQL com suporte a Promises                |
+| bcryptjs            | Hash de senhas                                     |
+| jsonwebtoken        | Autenticação via JWT                               |
+| dotenv              | Variáveis de ambiente                              |
+| cors                | Controle de origens permitidas (CORS)              |
+| express-rate-limit  | Limite de requisições por IP (proteção brute force)|
+| multer              | Upload de arquivos via multipart/form-data         |
+| fs-extra            | Verificação de existência de arquivos no servidor  |
 
 ---
 
@@ -51,19 +52,25 @@ source infosdatabase/insert_implementacao.sql  # dados de teste (opcional)
 **3. Configure o arquivo `.env` na raiz do projeto:**
 ```env
 PORT=3000
-NODE_ENV=development
-LOG_REQUESTS=true
+NODE_ENV=development      # development ou production
+LOG_REQUESTS=true         # exibe cada requisição no console
 
 DB_HOST=localhost
+DB_PORT=3306
 DB_USER=root
 DB_PASSWORD=sua_senha
-DB_NAME=bd_tcc_des_125_caronas
+DB_NAME=bd_tcc_des_125_carona
+
+# Frontends permitidos (apenas em NODE_ENV=production)
+# Separe múltiplas origens com vírgula
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 
 JWT_SECRET=CHAVE_SUPER_SECRETA_API_CARONAS
-API_BASE_URL=http://localhost:3000
 ```
 
-> `API_BASE_URL` é usado para montar as URLs públicas das imagens enviadas via upload.
+> Em `NODE_ENV=development`, o CORS é aberto (qualquer origem). Em `production`, apenas as origens em `ALLOWED_ORIGINS` são permitidas — isso protege o painel web admin sem afetar os apps mobile.
+>
+> As variáveis `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET` e `PORT` são **obrigatórias**. O servidor encerra na inicialização caso alguma esteja ausente.
 
 **4. Inicie o servidor:**
 ```bash
@@ -100,6 +107,7 @@ api-caronas/
     │
     ├── middlewares/
     │   ├── authMiddleware.js         # Verificação do token JWT
+    │   ├── roleMiddleware.js         # Controle de acesso por tipo de perfil (per_tipo)
     │   └── uploadHelper.js           # Factory Multer para upload de imagens
     │
     ├── utils/
@@ -133,9 +141,10 @@ api-caronas/
 
 ```
 Requisição HTTP
-    → server.js          (middlewares: CORS, JSON, static, log)
+    → server.js          (middlewares: CORS, rate limit, JSON, static, log)
     → routes/*.js        (define método, URL e middlewares da rota)
     → authMiddleware.js  (valida JWT quando necessário)
+    → roleMiddleware.js  (valida per_tipo quando a rota exige papel específico)
     → uploadHelper.js    (processa arquivo quando necessário)
     → controllers/*.js   (lógica de negócio + queries no banco)
     → Resposta JSON
@@ -152,6 +161,20 @@ Authorization: Bearer <token>
 
 O token é obtido no endpoint `POST /api/usuarios/login` e expira em **24 horas**.
 
+### Tipos de perfil (`per_tipo`)
+
+O campo `per_tipo` na tabela `PERFIL` define o papel do usuário e controla o acesso às rotas administrativas:
+
+| Valor | Papel          | Acesso                                                                 |
+|-------|----------------|------------------------------------------------------------------------|
+| `0`   | Usuário        | App mobile — funcionalidades padrão de carona                         |
+| `1`   | Administrador  | Painel web — escopo restrito à escola vinculada em `per_escola_id`    |
+| `2`   | Desenvolvedor  | Painel web — acesso total, sem restrição de escola                    |
+
+Rotas que exigem papel específico são marcadas como **[ADMIN]** (per_tipo 1 ou 2) ou **[DEV]** (per_tipo 2 apenas). O `roleMiddleware` valida o papel e bloqueia com `403` caso insuficiente. Também bloqueia perfis com `per_habilitado = 0`.
+
+> `per_escola_id` é preenchido apenas para Administradores e define qual escola eles gerenciam. Desenvolvedores e Usuários têm `NULL`.
+
 ---
 
 ## Banco de Dados
@@ -164,14 +187,14 @@ O token é obtido no endpoint `POST /api/usuarios/login` e expira em **24 horas*
 | CURSOS               | Cursos de cada escola                               |
 | USUARIOS             | Usuários do sistema                                 |
 | USUARIOS_REGISTROS   | Datas de criação, login e atualização (1:1)         |
-| PERFIL               | Tipo de perfil do usuário (0=Usuário, 1=Admin)      |
+| PERFIL               | Perfil do usuário — per_tipo (0/1/2) e per_escola_id|
 | CURSOS_USUARIOS      | Matrícula de usuários em cursos (N:M)               |
 | VEICULOS             | Veículos cadastrados pelos motoristas               |
 | CARONAS              | Caronas oferecidas                                  |
 | PONTO_ENCONTROS      | Pontos de parada de uma carona                      |
 | SOLICITACOES_CARONA  | Solicitações de participação em caronas             |
 | CARONA_PESSOAS       | Passageiros confirmados em uma carona               |
-| MENSAGENS            | Chat entre motorista e passageiro                   |
+| MENSAGENS            | Chat entre motorista e passageiro (soft delete)     |
 | SUGESTAO_DENUNCIA    | Sugestões e denúncias dos usuários                  |
 
 ---
@@ -246,9 +269,9 @@ Para se desvincular, cancele via `PUT /api/solicitacoes/:soli_id/cancelar` — o
 | POST   | `/cadastro`       | Público           | Cadastra novo usuário                      |
 | POST   | `/login`          | Público           | Faz login e retorna token JWT              |
 | GET    | `/perfil/:id`     | Público           | Retorna perfil e foto do usuário           |
-| PUT    | `/:id`            | [JWT]             | Atualiza nome, email ou senha              |
-| PUT    | `/:id/foto`       | [JWT] multipart   | Atualiza foto de perfil                    |
-| DELETE | `/:id`            | [JWT]             | Desativa conta (soft delete)               |
+| PUT    | `/:id`            | [JWT] próprio / [DEV] | Atualiza nome, email ou senha         |
+| PUT    | `/:id/foto`       | [JWT] próprio / [DEV] | Atualiza foto de perfil               |
+| DELETE | `/:id`            | [JWT] próprio / [DEV] | Desativa conta (soft delete)          |
 
 **Cadastro — campos obrigatórios:**
 ```json
@@ -259,6 +282,8 @@ Para se desvincular, cancele via `PUT /api/solicitacoes/:soli_id/cancelar` — o
 ```
 O usuário é criado com `usu_verificacao = 5` (cadastro temporário, 5 dias para solicitar caronas).
 Os demais campos (`usu_nome`, `usu_telefone`, `usu_matricula`, `usu_endereco` etc.) são opcionais e podem ser preenchidos depois via `PUT /:id`.
+
+> **Autorização:** `PUT /:id`, `PUT /:id/foto` e `DELETE /:id` só podem ser executados pelo próprio usuário ou por um Desenvolvedor (`per_tipo=2`). Tentar alterar outro usuário sem essa permissão retorna `403 Forbidden`.
 
 **Resposta do cadastro:**
 ```json
@@ -323,7 +348,7 @@ Vincula usuários a cursos. O `cur_usu_id` gerado é necessário ao criar uma ca
 |--------|----------------------|----------|-------------------------------|
 | POST   | `/`                  | [JWT]    | Matricula usuário em um curso |
 | GET    | `/usuario/:usu_id`   | [JWT]    | Lista cursos de um usuário    |
-| GET    | `/curso/:cur_id`     | [JWT]    | Lista alunos de um curso      |
+| GET    | `/curso/:cur_id`     | [ADMIN]  | Lista alunos de um curso      |
 | DELETE | `/:cur_usu_id`       | [JWT]    | Cancela matrícula             |
 
 **Criar matrícula — campos obrigatórios:**
@@ -421,7 +446,7 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 | POST   | `/`                   | [JWT]    | Adiciona passageiro confirmado  |
 | GET    | `/carona/:car_id`     | [JWT]    | Lista passageiros de uma carona |
 | PUT    | `/:car_pes_id`        | [JWT]    | Atualiza status do passageiro   |
-| DELETE | `/:car_pes_id`        | [JWT]    | Remove passageiro da carona     |
+| DELETE | `/:car_pes_id`        | [ADMIN]  | Remove passageiro da carona     |
 
 **Adicionar passageiro:**
 ```json
@@ -445,7 +470,7 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
   "car_id": 1,
   "pon_nome": "Saída - Minha Casa",
   "pon_endereco": "Rua B, 456",
-  "pon_edereco_geom": "-23.5510,-46.6340",
+  "pon_endereco_geom": "-23.5510,-46.6340",
   "pon_tipo": 0,
   "pon_ordem": 1
 }
@@ -461,7 +486,7 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 | POST   | `/enviar`             | [JWT]    | Envia mensagem no chat da carona |
 | GET    | `/carona/:caro_id`    | [JWT]    | Lista conversa de uma carona     |
 | PUT    | `/:mens_id`           | [JWT]    | Edita mensagem                   |
-| DELETE | `/:mens_id`           | [JWT]    | Remove mensagem permanentemente  |
+| DELETE | `/:mens_id`           | [JWT]    | Remove mensagem (soft delete)    |
 
 **Enviar mensagem — campos obrigatórios:**
 ```json
@@ -480,10 +505,10 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 | Método | Rota                | Proteção | Descrição                            |
 |--------|---------------------|----------|--------------------------------------|
 | POST   | `/`                 | [JWT]    | Registra sugestão ou denúncia        |
-| GET    | `/`                 | [JWT]    | Lista todas as sugestões/denúncias   |
+| GET    | `/`                 | [ADMIN]  | Lista sugestões/denúncias (Admin: escopo escola, Dev: todas) |
 | GET    | `/:sug_id`          | [JWT]    | Detalhes de uma sugestão/denúncia    |
-| PUT    | `/:sug_id/responder`| [JWT]    | Admin responde e fecha o registro    |
-| DELETE | `/:sug_id`          | [JWT]    | Remove permanentemente               |
+| PUT    | `/:sug_id/responder`| [ADMIN]  | Responde e fecha o registro          |
+| DELETE | `/:sug_id`          | [DEV]    | Remove permanentemente               |
 
 **Criar sugestão/denúncia — campos obrigatórios:**
 ```json
@@ -491,10 +516,11 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 ```
 `sug_tipo`: 0=Denúncia, 1=Sugestão
 
-**Responder (admin):**
+**Responder (Admin/Dev):**
 ```json
-{ "sug_resposta": "Obrigado pelo feedback.", "sug_id_resposta": 5 }
+{ "sug_resposta": "Obrigado pelo feedback." }
 ```
+> O respondente é registrado automaticamente a partir do token JWT — não é necessário enviar `sug_id_resposta` no body.
 
 **Status:** 1=Aberto, 3=Em análise, 0=Fechado
 
@@ -513,15 +539,15 @@ Os testes estão em `tests/` e usam `supertest` para simular requisições HTTP 
 | Arquivo                        | Testes | O que cobre                                                                                      |
 |--------------------------------|--------|--------------------------------------------------------------------------------------------------|
 | `endpoints.test.js`            | ~50    | Cadastro, login, perfil, CRUD de caronas/veículos/matrículas/solicitações/mensagens/pontos/sugestões/passageiros, erros 400/404 |
-| `seguranca.test.js`            | 5      | Sem token (403), token inválido (401), acesso com token válido (200), rota pública               |
+| `seguranca.test.js`            | 10     | Sem token (403), token inválido (401), acesso com token válido (200), rota pública, permissões por per_tipo (5 casos) |
 | `db.test.js`                   | 25     | Conexão com o banco, SELECT em todas as 13 tabelas, 10 JOINs replicando queries dos controllers |
 | `simulacao.test.js`            | 28     | Fluxo ponta a ponta: cadastro → verificação → veículo → carona → solicitação → aceite → chat → finalização |
 | `regras_verificacao.test.js`   | 8      | Regras de verificação para oferecer e solicitar carona (níveis 0/1/2, validade expirada e ativa) |
 | `test2903.test.js`             | 2      | Conectividade e banco correto                                                                    |
 
-**Total: 118 testes — 118 passando**
+**Total: 123 testes**
 
-> O `globalSetup` (`tests/setup.js`) cria automaticamente o usuário `admin@escola.com` (senha `123456`) com `usu_verificacao = 2` e validade de 6 meses antes de qualquer teste. Não é necessário executar scripts SQL manualmente para rodar os testes.
+> O `globalSetup` (`tests/setup.js`) cria automaticamente o usuário `admin@escola.com` (senha `123456`) com `usu_verificacao = 2`, `per_tipo = 2` (Desenvolvedor) e validade de 6 meses antes de qualquer teste. Não é necessário executar scripts SQL manualmente para rodar os testes.
 
 ---
 

@@ -135,14 +135,16 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
 --   - Lucas: AMBOS os perfis — testa usuário com duplo papel
 --   - Admin: perfil Administrador — testa acesso ao painel web
 -- =====================================================
--- per_tipo: 0=Passageiro, 1=Motorista, 2=Administrador
-INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado) VALUES
-    (1, 'Carlos Silva',  NOW(), 0, 1),
-    (2, 'Mariana Souza', NOW(), 0, 1),
-    (3, 'Pedro Santos',  NOW(), 0, 1),
-    (4, 'Lucas Pereira', NOW(), 0, 1),   -- Usuário com perfil de Passageiro E Motorista
-    (5, 'Admin Sistema', NOW(), 1, 1),   -- Administrador web
-    (7, NULL,            NOW(), 0, 0);   -- Cadastro temporário: per_nome NULL até completar o perfil
+-- per_tipo: 0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)
+-- per_escola_id: NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador
+INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_escola_id) VALUES
+    (1, 'Carlos Silva',  NOW(), 0, 1, NULL),  -- usu_id=1: Carlos   → Usuário comum
+    (2, 'Mariana Souza', NOW(), 0, 1, NULL),  -- usu_id=2: Mariana  → Usuário comum
+    (3, 'Pedro Santos',  NOW(), 0, 1, NULL),  -- usu_id=3: Pedro    → Usuário comum
+    (4, 'Ana Oliveira',  NOW(), 0, 0, NULL),  -- usu_id=4: Ana      → Usuário inativo
+    (5, 'Lucas Pereira', NOW(), 0, 1, NULL),  -- usu_id=5: Lucas    → Usuário comum
+    (6, 'Admin Sistema', NOW(), 2, 1, NULL),  -- usu_id=6: Admin    → Desenvolvedor (acesso total)
+    (7, NULL,            NOW(), 0, 0, NULL);  -- usu_id=7: Novo     → Temporário
 
 
 -- =====================================================
@@ -234,7 +236,7 @@ INSERT INTO CARONAS (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_
 --   - Carona 3: apenas ponto do motorista — sem paradas intermediárias
 --   - Carona 4: motorista + 2 pontos, sendo 1 inativo — testa filtragem por status
 -- =====================================================
-INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status) VALUES
+INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status) VALUES
     -- Carona 1 (Carlos)
     (1, 'Rua das Flores, 123, Centro, São Paulo',    '-23.5505,-46.6333', 0, 'Saída - Casa do Carlos', 1, 1),  -- Ponto do motorista
     (1, 'Estação Metrô Consolação, São Paulo',        '-23.5599,-46.6600', 1, 'Metrô Consolação',       2, 1),  -- Ponto do passageiro

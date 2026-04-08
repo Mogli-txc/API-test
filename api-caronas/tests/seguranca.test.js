@@ -312,6 +312,101 @@ describe('Testes de Segurança - API de Caronas', () => {
 });
 
 /**
+ * TESTES DE PAPEL (ROLE) - Permissões por per_tipo
+ * Valida que rotas restritas bloqueiam usuários sem permissão
+ * e permitem Desenvolvedor (per_tipo=2) e Admin (per_tipo=1).
+ */
+describe('Testes de Role - Permissões por Tipo de Perfil', () => {
+
+  /**
+   * Registra um usuário comum (per_tipo=0) e retorna seu token.
+   * Usado nos testes negativos (quem NÃO deve ter acesso).
+   */
+  async function registrarUsuarioComum() {
+    const email = `teste.role.${Date.now()}@escola.com`;
+    const opcoesCadastro = {
+      hostname: 'localhost', port: 3000,
+      path: '/api/usuarios/cadastro', method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    };
+    await fazerRequisicao(opcoesCadastro, { usu_email: email, usu_senha: 'senha123' });
+
+    const opcoesLogin = {
+      hostname: 'localhost', port: 3000,
+      path: '/api/usuarios/login', method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    };
+    const respLogin = await fazerRequisicao(opcoesLogin, { usu_email: email, usu_senha: 'senha123' });
+    return respLogin.body?.token ?? null;
+  }
+
+  test('Teste 6: Usuário comum NÃO pode listar sugestões (403)', async () => {
+    const tokenComum = await registrarUsuarioComum();
+    expect(tokenComum).toBeDefined();
+
+    const resposta = await fazerRequisicao({
+      hostname: 'localhost', port: 3000,
+      path: '/api/sugestoes', method: 'GET',
+      headers: { 'Authorization': `Bearer ${tokenComum}` }
+    });
+
+    expect(resposta.status).toBe(403);
+  });
+
+  test('Teste 7: Desenvolvedor PODE listar sugestões (200)', async () => {
+    const { token } = await teste2_GerarTokenJWT(); // admin@escola.com = per_tipo=2
+    expect(token).toBeDefined();
+
+    const resposta = await fazerRequisicao({
+      hostname: 'localhost', port: 3000,
+      path: '/api/sugestoes', method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    expect(resposta.status).toBe(200);
+  });
+
+  test('Teste 8: Usuário comum NÃO pode deletar sugestão (403)', async () => {
+    const tokenComum = await registrarUsuarioComum();
+    expect(tokenComum).toBeDefined();
+
+    const resposta = await fazerRequisicao({
+      hostname: 'localhost', port: 3000,
+      path: '/api/sugestoes/1', method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${tokenComum}` }
+    });
+
+    expect(resposta.status).toBe(403);
+  });
+
+  test('Teste 9: Usuário comum NÃO pode listar alunos de curso (403)', async () => {
+    const tokenComum = await registrarUsuarioComum();
+    expect(tokenComum).toBeDefined();
+
+    const resposta = await fazerRequisicao({
+      hostname: 'localhost', port: 3000,
+      path: '/api/matriculas/curso/1', method: 'GET',
+      headers: { 'Authorization': `Bearer ${tokenComum}` }
+    });
+
+    expect(resposta.status).toBe(403);
+  });
+
+  test('Teste 10: Desenvolvedor PODE listar alunos de curso (200)', async () => {
+    const { token } = await teste2_GerarTokenJWT();
+    expect(token).toBeDefined();
+
+    const resposta = await fazerRequisicao({
+      hostname: 'localhost', port: 3000,
+      path: '/api/matriculas/curso/1', method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    expect(resposta.status).toBe(200);
+  });
+});
+
+/**
  * EXECUÇÃO PRINCIPAL
  */
 async function executarTestes() {

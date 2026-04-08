@@ -13,20 +13,21 @@ const express    = require('express');
 const router     = express.Router();
 const controller = require('../controllers/SugestaoDenunciaController');
 const auth       = require('../middlewares/authMiddleware');
+const checkRole  = require('../middlewares/roleMiddleware');
 
-// Registra nova sugestão ou denúncia (PROTEGIDO)
+// Registra nova sugestão ou denúncia — qualquer usuário autenticado (PROTEGIDO)
 router.post('/', auth, controller.criar.bind(controller));
 
-// Lista todas as sugestões/denúncias (PROTEGIDO)
-router.get('/', auth, controller.listar.bind(controller));
+// Lista sugestões/denúncias — Admin vê apenas sua escola, Dev vê tudo (ADMIN/DEV)
+router.get('/', auth, checkRole([1, 2]), controller.listar.bind(controller));
 
-// Detalhes de uma sugestão/denúncia (PROTEGIDO)
+// Detalhes de uma sugestão/denúncia — qualquer usuário autenticado (PROTEGIDO)
 router.get('/:sug_id', auth, controller.obterPorId.bind(controller));
 
-// Admin responde e fecha o registro (PROTEGIDO)
-router.put('/:sug_id/responder', auth, controller.responder.bind(controller));
+// Responde e fecha o registro — Admin (escopo escola) ou Dev (ADMIN/DEV)
+router.put('/:sug_id/responder', auth, checkRole([1, 2]), controller.responder.bind(controller));
 
-// Remove permanentemente (PROTEGIDO)
-router.delete('/:sug_id', auth, controller.deletar.bind(controller));
+// Remove permanentemente — apenas Desenvolvedor (DEV)
+router.delete('/:sug_id', auth, checkRole([2]), controller.deletar.bind(controller));
 
 module.exports = router;

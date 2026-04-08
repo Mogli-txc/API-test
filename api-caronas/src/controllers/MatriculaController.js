@@ -117,13 +117,25 @@ class MatriculaController {
         try {
             // PASSO 1: Extrai o ID do curso
             const { cur_id } = req.params;
+            const { per_tipo, per_escola_id } = req.user;
 
             // PASSO 2: Valida o ID
             if (!cur_id || isNaN(cur_id)) {
                 return res.status(400).json({ error: "ID de curso inválido." });
             }
 
-            // PASSO 3: Busca os alunos do curso com nome do usuário via JOIN
+            // PASSO 3: Administrador só pode listar alunos de cursos da sua escola
+            if (per_tipo === 1) {
+                const [cursoDaEscola] = await db.query(
+                    'SELECT cur_id FROM CURSOS WHERE cur_id = ? AND esc_id = ?',
+                    [cur_id, per_escola_id]
+                );
+                if (cursoDaEscola.length === 0) {
+                    return res.status(403).json({ error: "Sem permissão para listar alunos deste curso." });
+                }
+            }
+
+            // PASSO 4: Busca os alunos do curso com nome do usuário via JOIN
             const [matriculas] = await db.query(
                 `SELECT cu.cur_usu_id, cu.usu_id, cu.cur_usu_dataFinal,
                         u.usu_nome AS aluno, u.usu_email
@@ -134,7 +146,7 @@ class MatriculaController {
                 [cur_id]
             );
 
-            // PASSO 4: Resposta de sucesso
+            // PASSO 5: Resposta de sucesso
             return res.status(200).json({
                 message:   `Alunos do curso ${cur_id} listados.`,
                 total:     matriculas.length,

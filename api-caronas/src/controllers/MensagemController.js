@@ -46,7 +46,9 @@ class MensagemController {
             }
 
             // PASSO 4: Validação do comprimento da mensagem (limite da coluna no banco: 255)
-            if (men_texto.length < 1 || men_texto.length > 255) {
+            // trim() remove espaços em branco das bordas antes de validar o conteúdo
+            const men_texto_trim = men_texto.trim();
+            if (men_texto_trim.length < 1 || men_texto_trim.length > 255) {
                 return res.status(400).json({ error: "Mensagem deve ter entre 1 e 255 caracteres." });
             }
 
@@ -55,12 +57,12 @@ class MensagemController {
                 return res.status(400).json({ error: "Não é possível enviar mensagem para si mesmo." });
             }
 
-            // PASSO 6: Inserção da mensagem no banco
+            // PASSO 6: Inserção da mensagem no banco (usa o texto já trimado)
             // INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta)
             const [resultado] = await db.query(
                 `INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta)
                  VALUES (?, ?, ?, ?, ?)`,
-                [car_id, usu_id_remetente, usu_id_destinatario, men_texto,
+                [car_id, usu_id_remetente, usu_id_destinatario, men_texto_trim,
                  men_id_resposta ? parseInt(men_id_resposta) : null]
             );
 
@@ -69,7 +71,8 @@ class MensagemController {
                 message: "Mensagem enviada com sucesso!",
                 mensagem: {
                     men_id: resultado.insertId, // ID gerado automaticamente pelo banco
-                    car_id, usu_id_remetente, usu_id_destinatario, men_texto,
+                    car_id, usu_id_remetente, usu_id_destinatario,
+                    men_texto: men_texto_trim,
                     men_id_resposta: men_id_resposta || null
                 }
             });
@@ -97,7 +100,7 @@ class MensagemController {
             }
 
             // PASSO 3: Busca no banco com JOIN para trazer os nomes dos usuários
-            // SELECT mensagens + nome do remetente + nome do destinatário
+            // Filtra mensagens deletadas (soft delete: men_deletado_em IS NULL = ativas)
             const [mensagens] = await db.query(
                 `SELECT m.men_id, m.men_texto, m.men_id_resposta,
                         u_rem.usu_nome  AS remetente,
@@ -105,7 +108,7 @@ class MensagemController {
                  FROM MENSAGENS m
                  INNER JOIN USUARIOS u_rem  ON m.usu_id_remetente    = u_rem.usu_id
                  INNER JOIN USUARIOS u_dest ON m.usu_id_destinatario = u_dest.usu_id
-                 WHERE m.car_id = ?
+                 WHERE m.car_id = ? AND m.men_deletado_em IS NULL
                  ORDER BY m.men_id ASC`,
                 [caro_id]
             );
@@ -142,15 +145,17 @@ class MensagemController {
             }
 
             // PASSO 3: Validação do novo texto
-            if (!men_texto || men_texto.length < 1 || men_texto.length > 255) {
+            // trim() remove espaços em branco das bordas antes de validar
+            const men_texto_trim = men_texto ? men_texto.trim() : '';
+            if (men_texto_trim.length < 1 || men_texto_trim.length > 255) {
                 return res.status(400).json({ error: "Mensagem deve ter entre 1 e 255 caracteres." });
             }
 
-            // PASSO 4: Atualização no banco
+            // PASSO 4: Atualização no banco (usa o texto já trimado)
             // UPDATE MENSAGENS SET men_texto = ? WHERE men_id = ?
             const [resultado] = await db.query(
                 'UPDATE MENSAGENS SET men_texto = ? WHERE men_id = ?',
-                [men_texto, mens_id]
+                [men_texto_trim, mens_id]
             );
 
             // affectedRows = 0 significa que nenhuma linha foi alterada (ID não existe)
@@ -161,7 +166,7 @@ class MensagemController {
             // PASSO 5: Resposta de sucesso
             return res.status(200).json({
                 message:  "Mensagem atualizada com sucesso!",
-                mensagem: { men_id: parseInt(mens_id), men_texto }
+                mensagem: { men_id: parseInt(mens_id), men_texto: men_texto_trim }
             });
 
         } catch (error) {
@@ -172,7 +177,8 @@ class MensagemController {
 
     /**
      * MÉTODO: deletarMensagem
-     * Descrição: Remove permanentemente uma mensagem do banco
+     * Descrição: Soft delete — marca men_deletado_em em vez de remover do banco.
+     *   Preserva o histórico e evita quebra de referências via men_id_resposta.
      * Parâmetros: mens_id (via URL)
      * Acesso: PROTEGIDO — Apenas o remetente pode deletar
      */
@@ -186,9 +192,16 @@ class MensagemController {
                 return res.status(400).json({ error: "ID de mensagem inválido." });
             }
 
-            // PASSO 3: Remoção no banco
-            // DELETE FROM MENSAGENS WHERE men_id = ?
-            await db.query('DELETE FROM MENSAGENS WHERE men_id = ?', [mens_id]);
+            // PASSO 3: Soft delete — registra data de remoção sem apagar o registro
+            // UPDATE MENSAGENS SET men_deletado_em = NOW() WHERE men_id = ?
+            const [resultado] = await db.query(
+                'UPDATE MENSAGENS SET men_deletado_em = NOW() WHERE men_id = ? AND men_deletado_em IS NULL',
+                [mens_id]
+            );
+
+            if (resultado.affectedRows === 0) {
+                return res.status(404).json({ error: "Mensagem não encontrada." });
+            }
 
             // PASSO 4: Resposta de sucesso (204 = sem conteúdo no retorno)
             return res.status(204).send();

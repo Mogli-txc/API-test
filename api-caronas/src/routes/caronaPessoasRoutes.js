@@ -12,6 +12,7 @@ const express    = require('express');
 const router     = express.Router();
 const controller = require('../controllers/CaronaPessoasController');
 const auth       = require('../middlewares/authMiddleware');
+const checkRole  = require('../middlewares/roleMiddleware');
 
 // Adiciona passageiro a uma carona (PROTEGIDO)
 router.post('/', auth, controller.adicionar.bind(controller));
@@ -22,7 +23,7 @@ router.get('/carona/:car_id', auth, controller.listarPorCarona.bind(controller))
 // Atualiza status do passageiro (PROTEGIDO)
 router.put('/:car_pes_id', auth, controller.atualizarStatus.bind(controller));
 
-// Remove passageiro da carona (PROTEGIDO)
-router.delete('/:car_pes_id', auth, controller.remover.bind(controller));
+// Remove passageiro da carona — Admin ou Desenvolvedor (ADMIN/DEV)
+router.delete('/:car_pes_id', auth, checkRole([1, 2]), controller.remover.bind(controller));
 
 module.exports = router;

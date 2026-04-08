@@ -17,8 +17,9 @@
  */
 
 // Importação das dependências externas
-const express = require('express');
-const cors = require('cors');
+const express   = require('express');
+const cors      = require('cors');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config(); // Carrega variáveis de ambiente do arquivo .env
 
 // Importação das rotas
@@ -40,9 +41,33 @@ const app = express();
 
 /**
  * Middleware 1: CORS (Cross-Origin Resource Sharing)
- * Permite requisições de outros domínios (importante para Mobile e Web)
+ * Em desenvolvimento: permite qualquer origem (facilita testes locais).
+ * Em produção: restringe às origens definidas em ALLOWED_ORIGINS no .env.
+ * Apps mobile não são afetados por CORS — a restrição se aplica ao painel web admin.
  */
-app.use(cors());
+const corsOptions = process.env.NODE_ENV === 'production'
+    ? {
+        origin: process.env.ALLOWED_ORIGINS
+            ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+            : [],
+        credentials: true
+      }
+    : {}; // Em development: CORS aberto
+app.use(cors(corsOptions));
+
+/**
+ * Middleware 2: Rate Limiting
+ * Limita cada IP a 100 requisições por janela de 15 minutos.
+ * Protege endpoints sensíveis (login, cadastro) contra força bruta.
+ */
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Muitas requisições. Tente novamente em alguns minutos." }
+});
+app.use(limiter);
 
 /**
  * Middleware 2: Parsing de JSON
@@ -172,7 +197,8 @@ app.use((err, req, res, next) => {
 // ========== INICIALIZAÇÃO DO SERVIDOR ==========
 
 // Validação de variáveis de ambiente críticas
-const requiredEnvVars = ['JWT_SECRET', 'PORT'];
+// Inclui vars do banco para detectar configuração incompleta antes da primeira query
+const requiredEnvVars = ['JWT_SECRET', 'PORT', 'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
     console.error(`[ERRO] Variáveis de ambiente ausentes: ${missingEnvVars.join(', ')}`);

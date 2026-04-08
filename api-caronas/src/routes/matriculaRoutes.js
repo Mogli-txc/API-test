@@ -14,6 +14,7 @@ const express    = require('express');
 const router     = express.Router();
 const controller = require('../controllers/MatriculaController');
 const auth       = require('../middlewares/authMiddleware');
+const checkRole  = require('../middlewares/roleMiddleware');
 
 // Inscreve usuário em um curso (PROTEGIDO)
 router.post('/', auth, controller.matricular.bind(controller));
@@ -21,8 +22,8 @@ router.post('/', auth, controller.matricular.bind(controller));
 // Lista cursos do usuário (PROTEGIDO)
 router.get('/usuario/:usu_id', auth, controller.listarPorUsuario.bind(controller));
 
-// Lista alunos de um curso (PROTEGIDO)
-router.get('/curso/:cur_id', auth, controller.listarPorCurso.bind(controller));
+// Lista alunos de um curso — Admin vê apenas sua escola, Dev vê qualquer curso (ADMIN/DEV)
+router.get('/curso/:cur_id', auth, checkRole([1, 2]), controller.listarPorCurso.bind(controller));
 
 // Cancela a matrícula (PROTEGIDO)
 router.delete('/:cur_usu_id', auth, controller.cancelar.bind(controller));

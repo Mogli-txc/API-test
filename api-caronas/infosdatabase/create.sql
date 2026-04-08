@@ -76,12 +76,13 @@ CREATE TABLE USUARIOS_REGISTROS (
 -- =====================================================
 DROP TABLE IF EXISTS PERFIL;
 CREATE TABLE PERFIL (
-    per_id   INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Perfil (PK)',
-    usu_id   INT          NOT NULL               COMMENT 'Identificador do Usuário (FK)',
-    per_nome VARCHAR(50)                          COMMENT 'Nome presente no Perfil (NULL no cadastro temporário)',
-    per_data DATETIME     NOT NULL               COMMENT 'Data de Acesso ao Perfil',
-    per_tipo TINYINT      NOT NULL               COMMENT 'Tipo de Perfil (ex: 0=Usário, 1=Administrador)',
-    per_habilitado TINYINT      NOT NULL               COMMENT 'Tipo de Perfil (ex: 0=Não habilitado, 1=Habilitado)',
+    per_id        INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Perfil (PK)',
+    usu_id        INT          NOT NULL               COMMENT 'Identificador do Usuário (FK)',
+    per_nome      VARCHAR(50)                          COMMENT 'Nome presente no Perfil (NULL no cadastro temporário)',
+    per_data      DATETIME     NOT NULL               COMMENT 'Data de Acesso ao Perfil',
+    per_tipo      TINYINT      NOT NULL               COMMENT '0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)',
+    per_habilitado TINYINT     NOT NULL               COMMENT '0=Não habilitado, 1=Habilitado',
+    per_escola_id INT                                 COMMENT 'Escola do Administrador (FK, NULL para Usuário e Desenvolvedor)',
     PRIMARY KEY (per_id)
 ) ENGINE = InnoDB;
 
@@ -161,7 +162,7 @@ CREATE TABLE PONTO_ENCONTROS (
     pon_id           INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Ponto de Encontro (PK)',
     car_id           INT          NOT NULL               COMMENT 'Carona relacionada (FK)',
     pon_endereco     VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Descritivo)',
-    pon_edereco_geom VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Geométrico)',
+    pon_endereco_geom VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Geométrico)',
     pon_tipo         TINYINT      NOT NULL               COMMENT '0=Partida, 1=Destino',
     pon_nome         VARCHAR(25)  NOT NULL               COMMENT 'Descrição do ponto de encontro',
     pon_ordem        TINYINT                             COMMENT 'Ordem dos pontos na rota (NULL)',
@@ -180,6 +181,8 @@ CREATE TABLE MENSAGENS (
     usu_id_remetente    INT          NOT NULL               COMMENT 'Remetente da Mensagem (FK)',
     usu_id_destinatario INT          NOT NULL               COMMENT 'Destinatário da Mensagem (FK)',
     men_texto           VARCHAR(255) NOT NULL               COMMENT 'Conteúdo da mensagem',
+    men_status          TINYINT      NOT NULL DEFAULT 1     COMMENT '0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida',
+    men_deletado_em     DATETIME                            COMMENT 'Soft delete: data de remoção (NULL = ativo)',
     men_id_resposta     INT                                 COMMENT 'Mensagem respondida (auto-referência, NULL)',
     PRIMARY KEY (men_id)
 ) ENGINE = InnoDB;
@@ -237,6 +240,12 @@ ALTER TABLE PERFIL
     ADD CONSTRAINT FK_Perfil_Usuarios
         FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
         ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- PERFIL → ESCOLAS (restringe o Admin à escola que administra)
+ALTER TABLE PERFIL
+    ADD CONSTRAINT FK_Perfil_Escola
+        FOREIGN KEY (per_escola_id) REFERENCES ESCOLAS (esc_id)
+        ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- CURSOS_USUARIOS → USUARIOS e CURSOS
 ALTER TABLE CURSOS_USUARIOS

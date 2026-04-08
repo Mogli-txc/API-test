@@ -48,12 +48,13 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
 -- =====================================================
 -- 6. PERFIL
 -- =====================================================
--- per_tipo: 0=Passageiro, 1=Motorista
-INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado) VALUES
-    (1, 'Carlos Silva',  NOW(), 0, 1),
-    (2, 'Mariana Souza', NOW(), 0, 1),
-    (3, 'Pedro Santos',  NOW(), 0, 0),
-    (5, NULL,            NOW(), 0, 0);  -- Temporário: sem nome até completar o cadastro
+-- per_tipo: 0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)
+-- per_escola_id: NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador
+INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_escola_id) VALUES
+    (1, 'Carlos Silva',  NOW(), 0, 1, NULL),
+    (2, 'Mariana Souza', NOW(), 0, 1, NULL),
+    (3, 'Pedro Santos',  NOW(), 0, 0, NULL),
+    (5, NULL,            NOW(), 0, 0, NULL);  -- Temporário: sem nome até completar o cadastro
 
 -- =====================================================
 -- 7. VEICULOS
@@ -88,7 +89,7 @@ INSERT INTO CARONAS (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_
 -- =====================================================
 -- pon_tipo: 0=Ponto do Motorista, 1=Ponto do Passageiro
 -- pon_status: 1=Ativo, 0=Inativo
-INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_edereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status) VALUES
+INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status) VALUES
     (1, 'Rua das Flores, 123, Centro',   '-23.5505,-46.6333', 0, 'Saída - Minha Casa',    1, 1),  -- Ponto do Motorista
     (1, 'Metro Consolação, São Paulo',   '-23.5599,-46.6600', 1, 'Estação Consolação',    2, 1);  -- Ponto do Passageiro
 

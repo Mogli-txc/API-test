@@ -75,7 +75,6 @@ DELETE FROM VEICULOS            WHERE usu_id IN (1, 3, 5);
 -- Nível 1: Tabelas dependentes de USUARIOS
 DELETE FROM SUGESTAO_DENUNCIA   WHERE usu_id IN (1, 2, 3, 4, 5, 6);
 DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4, 5, 6);
-DELETE FROM DISPOSITIVOS        WHERE usu_id IN (1, 2, 3, 4, 5, 6);
 DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4, 5, 6);
 
 -- Nível 0: Usuários
@@ -106,9 +105,6 @@ SELECT 'BLOCO 2 removido com sucesso.' AS Status;
 
 -- Apagar apenas os pontos de encontro de uma carona
 -- DELETE FROM PONTO_ENCONTROS WHERE car_id = 1;
-
--- Apagar apenas os dispositivos inativos de um usuário
--- DELETE FROM DISPOSITIVOS WHERE usu_id = 1 AND dis_status = 0;
 
 -- Apagar apenas os veículos inutilizados de um usuário
 -- DELETE FROM VEICULOS WHERE usu_id = 1 AND vei_status = 0;
