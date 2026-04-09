@@ -98,7 +98,7 @@ class UsuarioController {
             );
 
             return res.status(201).json({
-                message: "Usuário cadastrado com sucesso! Complete seu perfil para acesso completo.",
+                message: "Usuário cadastrado com sucesso!",
                 usuario: { usu_id: novoId, usu_email, usu_verificacao: 5 }
             });
 

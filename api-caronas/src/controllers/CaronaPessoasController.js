@@ -48,14 +48,14 @@ class CaronaPessoasController {
                 });
             }
 
-            // PASSO 4: Verifica se o passageiro já está vinculado a outra carona ativa
+            // PASSO 4: Verifica se o passageiro já está vinculado a OUTRA carona ativa
             // Vínculo = sol_status = 2 (Aceito) em carona com car_status IN (1, 2)
-            // Esta checagem impede criar vínculo duplo direto via CARONA_PESSOAS
+            // E excluir a carona atual (car_id) para permitir adicionar a mesma carona que já foi aceita
             const [jaVinculado] = await db.query(
                 `SELECT s.sol_id FROM SOLICITACOES_CARONA s
                  INNER JOIN CARONAS c ON s.car_id = c.car_id
-                 WHERE s.usu_id_passageiro = ? AND s.sol_status = 2 AND c.car_status IN (1, 2)`,
-                [usu_id]
+                 WHERE s.usu_id_passageiro = ? AND s.sol_status = 2 AND c.car_status IN (1, 2) AND c.car_id != ?`,
+                [usu_id, car_id]
             );
             if (jaVinculado.length > 0) {
                 return res.status(403).json({
