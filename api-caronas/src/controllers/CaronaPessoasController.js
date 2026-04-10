@@ -104,7 +104,28 @@ class CaronaPessoasController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 3: Busca passageiros com nome do usuário via JOIN
+            // PASSO 3: Verifica se o usuário autenticado é motorista ou passageiro desta carona
+            const [motorista] = await db.query(
+                `SELECT cu.usu_id FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [car_id]
+            );
+            if (motorista.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            const ehMotorista = motorista[0].usu_id === req.user.id;
+            if (!ehMotorista) {
+                const [ehPassageiro] = await db.query(
+                    'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1',
+                    [car_id, req.user.id]
+                );
+                if (ehPassageiro.length === 0) {
+                    return res.status(403).json({ error: "Sem permissão para visualizar passageiros desta carona." });
+                }
+            }
+
+            // PASSO 4: Busca passageiros com nome do usuário via JOIN (sem expor e-mail)
             const [passageiros] = await db.query(
                 `SELECT cp.car_pes_id, cp.usu_id, cp.car_pes_data, cp.car_pes_status,
                         u.usu_nome AS passageiro
@@ -115,7 +136,7 @@ class CaronaPessoasController {
                 [car_id]
             );
 
-            // PASSO 4: Resposta de sucesso
+            // PASSO 5: Resposta de sucesso
             return res.status(200).json({
                 message:     `Passageiros da carona ${car_id} listados.`,
                 total:       passageiros.length,

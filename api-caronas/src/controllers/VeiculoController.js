@@ -22,11 +22,14 @@ class VeiculoController {
      */
     async cadastrarVeiculo(req, res) {
         try {
-            const { usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas } = req.body;
+            // usu_id é ignorado do body — o proprietário é sempre o usuário autenticado (req.user.id)
+            // Aceitar usu_id do body permitiria registrar veículos em nome de outros usuários
+            const usu_id = req.user.id;
+            const { vei_marca_modelo, vei_tipo, vei_cor, vei_vagas } = req.body;
 
-            if (!usu_id || !vei_marca_modelo || vei_tipo === undefined || !vei_cor || !vei_vagas) {
+            if (!vei_marca_modelo || vei_tipo === undefined || !vei_cor || !vei_vagas) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas."
+                    error: "Campos obrigatórios: vei_marca_modelo, vei_tipo, vei_cor, vei_vagas."
                 });
             }
 

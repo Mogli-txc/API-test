@@ -27,12 +27,15 @@ class SugestaoDenunciaController {
     async criar(req, res) {
         try {
             // PASSO 1: Extrai os dados da requisição
-            const { usu_id, sug_texto, sug_tipo } = req.body;
+            // usu_id é ignorado do body — o autor é sempre o usuário autenticado (req.user.id)
+            // Aceitar usu_id do body permitiria acusações falsas em nome de outros usuários
+            const { sug_texto, sug_tipo } = req.body;
+            const usu_id = req.user.id;
 
             // PASSO 2: Valida campos obrigatórios
-            if (!usu_id || !sug_texto || sug_tipo === undefined) {
+            if (!sug_texto || sug_tipo === undefined) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: usu_id, sug_texto, sug_tipo (0=Denúncia, 1=Sugestão)."
+                    error: "Campos obrigatórios: sug_texto, sug_tipo (0=Denúncia, 1=Sugestão)."
                 });
             }
 
@@ -42,7 +45,7 @@ class SugestaoDenunciaController {
             }
 
             // PASSO 4: Valida o comprimento do texto (limite do banco: 255)
-            if (sug_texto.length < 5 || sug_texto.length > 255) {
+            if (sug_texto.trim().length < 5 || sug_texto.trim().length > 255) {
                 return res.status(400).json({ error: "Texto deve ter entre 5 e 255 caracteres." });
             }
 
@@ -50,7 +53,7 @@ class SugestaoDenunciaController {
             const [resultado] = await db.query(
                 `INSERT INTO SUGESTAO_DENUNCIA (usu_id, sug_texto, sug_data, sug_status, sug_tipo)
                  VALUES (?, ?, NOW(), 1, ?)`,
-                [usu_id, sug_texto, sug_tipo]
+                [usu_id, sug_texto.trim(), sug_tipo]
             );
 
             // PASSO 6: Resposta de sucesso
@@ -59,7 +62,7 @@ class SugestaoDenunciaController {
                 sugestao: {
                     sug_id:     resultado.insertId,
                     usu_id,
-                    sug_texto,
+                    sug_texto:  sug_texto.trim(),
                     sug_tipo:   parseInt(sug_tipo),
                     sug_status: 1
                 }

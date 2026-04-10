@@ -31,17 +31,20 @@ class MensagemController {
     async enviarMensagem(req, res) {
         try {
             // PASSO 1: Desestrutura os dados da requisição
-            const { car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta } = req.body;
+            // usu_id_remetente é ignorado do body — o remetente é sempre o usuário autenticado (req.user.id)
+            // Aceitar remetente do body permitiria falsificação de identidade (spoofing)
+            const { car_id, usu_id_destinatario, men_texto, men_id_resposta } = req.body;
+            const usu_id_remetente = req.user.id;
 
             // PASSO 2: Validação de campos obrigatórios
-            if (!car_id || !usu_id_remetente || !usu_id_destinatario || !men_texto) {
+            if (!car_id || !usu_id_destinatario || !men_texto) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: car_id, usu_id_remetente, usu_id_destinatario, men_texto."
+                    error: "Campos obrigatórios: car_id, usu_id_destinatario, men_texto."
                 });
             }
 
             // PASSO 3: Validação de tipos numéricos
-            if (isNaN(car_id) || isNaN(usu_id_remetente) || isNaN(usu_id_destinatario)) {
+            if (isNaN(car_id) || isNaN(usu_id_destinatario)) {
                 return res.status(400).json({ error: "IDs devem ser numéricos." });
             }
 
@@ -53,7 +56,7 @@ class MensagemController {
             }
 
             // PASSO 5: Prevenção — usuário não pode enviar para si mesmo
-            if (parseInt(usu_id_remetente) === parseInt(usu_id_destinatario)) {
+            if (usu_id_remetente === parseInt(usu_id_destinatario)) {
                 return res.status(400).json({ error: "Não é possível enviar mensagem para si mesmo." });
             }
 
@@ -99,7 +102,29 @@ class MensagemController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 3: Busca no banco com JOIN para trazer os nomes dos usuários
+            // PASSO 3: Verifica se o usuário autenticado é participante desta carona
+            // (motorista ou passageiro confirmado), para não expor conversas de outros
+            const [participante] = await db.query(
+                `SELECT cu.usu_id AS motorista_id FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [caro_id]
+            );
+            if (participante.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            const ehMotorista = participante[0].motorista_id === req.user.id;
+            if (!ehMotorista) {
+                const [passageiro] = await db.query(
+                    'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1',
+                    [caro_id, req.user.id]
+                );
+                if (passageiro.length === 0) {
+                    return res.status(403).json({ error: "Sem permissão para visualizar esta conversa." });
+                }
+            }
+
+            // PASSO 4: Busca no banco com JOIN para trazer os nomes dos usuários
             // Filtra mensagens deletadas (soft delete: men_deletado_em IS NULL = ativas)
             const [mensagens] = await db.query(
                 `SELECT m.men_id, m.men_texto, m.men_id_resposta,
@@ -113,7 +138,7 @@ class MensagemController {
                 [caro_id]
             );
 
-            // PASSO 4: Resposta de sucesso
+            // PASSO 5: Resposta de sucesso
             return res.status(200).json({
                 message:  "Conversa recuperada com sucesso",
                 total:    mensagens.length,

@@ -40,22 +40,24 @@ class UsuarioController {
      * Campos obrigatórios no body: usu_email, usu_senha
      */
     cadastrar = async (req, res) => {
+        const {
+            usu_nome, usu_email, usu_senha,
+            usu_telefone, usu_matricula,
+            usu_endereco, usu_endereco_geom,
+            usu_foto, usu_descricao, usu_horario_habitual
+        } = req.body;
+
+        // Validação dos campos obrigatórios — apenas email e senha no cadastro inicial
+        if (!usu_email || !usu_senha) {
+            return res.status(400).json({
+                error: "Campos obrigatórios: usu_email e usu_senha."
+            });
+        }
+
+        // conn declarado antes do try para que o finally consiga liberar em qualquer caminho
+        let conn;
         try {
-            const {
-                usu_nome, usu_email, usu_senha,
-                usu_telefone, usu_matricula,
-                usu_endereco, usu_endereco_geom,
-                usu_foto, usu_descricao, usu_horario_habitual
-            } = req.body;
-
-            // Validação dos campos obrigatórios — apenas email e senha no cadastro inicial
-            if (!usu_email || !usu_senha) {
-                return res.status(400).json({
-                    error: "Campos obrigatórios: usu_email e usu_senha."
-                });
-            }
-
-            // Verifica se já existe um usuário com o mesmo e-mail
+            // Verifica se já existe um usuário com o mesmo e-mail (leitura via pool, antes da transação)
             const [existente] = await db.query(
                 'SELECT usu_id FROM USUARIOS WHERE usu_email = ?',
                 [usu_email]
@@ -68,9 +70,15 @@ class UsuarioController {
             // O número 10 é o "custo" do hash — quanto maior, mais seguro e mais lento
             const senhaHash = await bcrypt.hash(usu_senha, 10);
 
-            // Insere o usuário com usu_verificacao = 5 (cadastro temporário: 5 dias de acesso)
+            // PASSO 1-3: Os três INSERTs são executados em transação atômica.
+            // Se qualquer um falhar, todos são desfeitos — evita registros órfãos
+            // (ex: USUARIOS sem PERFIL correspondente quebraria o endpoint de perfil).
+            conn = await db.getConnection();
+            await conn.beginTransaction();
+
+            // PASSO 1: Insere o usuário com usu_verificacao = 5 (cadastro temporário: 5 dias de acesso)
             // usu_verificacao_expira recebe NOW() + 5 dias — reutiliza o mesmo campo de expiração
-            const [resultado] = await db.query(
+            const [resultado] = await conn.query(
                 `INSERT INTO USUARIOS
                     (usu_nome, usu_email, usu_senha, usu_telefone, usu_matricula,
                      usu_endereco, usu_endereco_geom, usu_foto, usu_descricao,
@@ -83,19 +91,21 @@ class UsuarioController {
 
             const novoId = resultado.insertId; // ID gerado automaticamente pelo banco
 
-            // Cria o registro de datas do usuário em USUARIOS_REGISTROS (relação 1:1)
-            await db.query(
+            // PASSO 2: Cria o registro de datas do usuário em USUARIOS_REGISTROS (relação 1:1)
+            await conn.query(
                 `INSERT INTO USUARIOS_REGISTROS (usu_id, usu_criado_em)
                  VALUES (?, NOW())`,
                 [novoId]
             );
 
-            // Cria o perfil padrão do usuário em PERFIL
-            await db.query(
+            // PASSO 3: Cria o perfil padrão do usuário em PERFIL
+            await conn.query(
                 `INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado)
                  VALUES (?, ?, NOW(), 0, 0)`,
                 [novoId, usu_nome || null]
             );
+
+            await conn.commit();
 
             return res.status(201).json({
                 message: "Usuário cadastrado com sucesso! Complete seu perfil para acesso completo.",
@@ -103,8 +113,11 @@ class UsuarioController {
             });
 
         } catch (error) {
+            if (conn) await conn.rollback();
             console.error("[ERRO] cadastrar:", error);
             return res.status(500).json({ error: "Erro ao cadastrar usuário." });
+        } finally {
+            if (conn) conn.release();
         }
     }
 

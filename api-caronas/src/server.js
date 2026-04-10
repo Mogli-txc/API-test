@@ -19,6 +19,7 @@
 // Importação das dependências externas
 const express   = require('express');
 const cors      = require('cors');
+const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config(); // Carrega variáveis de ambiente do arquivo .env
 
@@ -40,6 +41,14 @@ const app = express();
 // ========== MIDDLEWARE GLOBAL ==========
 
 /**
+ * Middleware 0: Helmet — Security Headers
+ * Define cabeçalhos HTTP de segurança automaticamente:
+ * Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, etc.
+ * contentSecurityPolicy desabilitado para não bloquear respostas JSON da API.
+ */
+app.use(helmet({ contentSecurityPolicy: false }));
+
+/**
  * Middleware 1: CORS (Cross-Origin Resource Sharing)
  * Em desenvolvimento: permite qualquer origem (facilita testes locais).
  * Em produção: restringe às origens definidas em ALLOWED_ORIGINS no .env.
@@ -56,9 +65,8 @@ const corsOptions = process.env.NODE_ENV === 'production'
 app.use(cors(corsOptions));
 
 /**
- * Middleware 2: Rate Limiting
+ * Middleware 2: Rate Limiting global
  * Limita cada IP a 100 requisições por janela de 15 minutos.
- * Protege endpoints sensíveis (login, cadastro) contra força bruta.
  */
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
@@ -68,6 +76,21 @@ const limiter = rateLimit({
     message: { error: "Muitas requisições. Tente novamente em alguns minutos." }
 });
 app.use(limiter);
+
+/**
+ * Middleware 2b: Rate Limiting estrito para autenticação
+ * Limita cada IP a 10 tentativas por 15 minutos nos endpoints de login e cadastro.
+ * Protege contra ataques de força bruta em credenciais.
+ */
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Muitas tentativas de autenticação. Tente novamente em 15 minutos." }
+});
+app.use('/api/usuarios/login', authLimiter);
+app.use('/api/usuarios/cadastro', authLimiter);
 
 /**
  * Middleware 2: Parsing de JSON

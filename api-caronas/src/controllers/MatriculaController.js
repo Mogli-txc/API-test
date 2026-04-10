@@ -136,9 +136,10 @@ class MatriculaController {
             }
 
             // PASSO 4: Busca os alunos do curso com nome do usuário via JOIN
+            // usu_email omitido intencionalmente — evita exposição de PII em listagens
             const [matriculas] = await db.query(
                 `SELECT cu.cur_usu_id, cu.usu_id, cu.cur_usu_dataFinal,
-                        u.usu_nome AS aluno, u.usu_email
+                        u.usu_nome AS aluno
                  FROM CURSOS_USUARIOS cu
                  INNER JOIN USUARIOS u ON cu.usu_id = u.usu_id
                  WHERE cu.cur_id = ?

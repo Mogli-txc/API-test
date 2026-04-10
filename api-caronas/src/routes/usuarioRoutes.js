@@ -9,7 +9,8 @@ const express = require('express');
 const router = express.Router();
 const UsuarioController = require('../controllers/UsuarioController');
 const authMiddleware = require('../middlewares/authMiddleware'); // Middleware de autenticação
-const uploadImage = require('../middlewares/uploadHelper');
+const uploadImage       = require('../middlewares/uploadHelper');
+const { validarImagem } = uploadImage;
 
 const uploadUsuario = uploadImage('usuarios');
 
@@ -40,11 +41,11 @@ router.post('/login', UsuarioController.login);
 /**
  * ROTA: GET /api/usuarios/perfil/:id
  * Descrição: Recupera os dados do perfil de um usuário
- * Acesso: Público (pode ser protegido conforme política)
- * Parâmetro: id (usua_id via URL)
- * Retorno: Status 200 com dados do usuário e estatísticas de perfil
+ * Acesso: PROTEGIDO - Requer autenticação para evitar enumeração e vazamento de PII
+ * Parâmetro: id (usu_id via URL)
+ * Retorno: Status 200 com dados do usuário e perfil
  */
-router.get('/perfil/:id', UsuarioController.perfil);
+router.get('/perfil/:id', authMiddleware, UsuarioController.perfil);
 
 /**
  * ROTA: PUT /api/usuarios/:id
@@ -64,7 +65,7 @@ router.put('/:id', authMiddleware, UsuarioController.atualizar);
  * Campo no body (multipart/form-data): foto
  * Retorno: Status 200 com a URL pública da nova foto
  */
-router.put('/:id/foto', authMiddleware, uploadUsuario.single('foto'), UsuarioController.atualizarFoto);
+router.put('/:id/foto', authMiddleware, uploadUsuario.single('foto'), validarImagem, UsuarioController.atualizarFoto);
 
 /**
  * ROTA: DELETE /api/usuarios/:id

@@ -18,6 +18,61 @@ const multer = require('multer');
 const fs     = require('fs');
 const path   = require('path');
 
+/**
+ * Magic bytes das imagens suportadas.
+ * Cada entrada contém uma ou mais assinaturas possíveis para o tipo.
+ * Valida o conteúdo real do arquivo independente da extensão declarada,
+ * evitando upload de arquivos maliciosos com extensão falsificada.
+ */
+const MAGIC_BYTES = {
+    'image/jpeg': [[0xFF, 0xD8, 0xFF]],
+    'image/jpg':  [[0xFF, 0xD8, 0xFF]],
+    'image/png':  [[0x89, 0x50, 0x4E, 0x47]],
+    'image/gif':  [
+        [0x47, 0x49, 0x46, 0x38, 0x37], // GIF87a
+        [0x47, 0x49, 0x46, 0x38, 0x39]  // GIF89a
+    ]
+};
+
+/**
+ * Verifica se o buffer começa com os magic bytes do tipo declarado.
+ */
+const magicBytesValidos = (buffer, mimetype) => {
+    const assinaturas = MAGIC_BYTES[mimetype];
+    if (!assinaturas) return false;
+    return assinaturas.some(assinatura =>
+        assinatura.every((byte, i) => buffer[i] === byte)
+    );
+};
+
+/**
+ * Middleware pós-upload que valida magic bytes do arquivo salvo em disco.
+ * Deve ser encadeado após o multer.single() nas rotas.
+ * Deleta o arquivo e retorna 400 caso o conteúdo não corresponda ao mimetype declarado.
+ *
+ * Uso nas rotas:
+ *   router.put('/:id/foto', auth, uploadUsuario.single('foto'), validarImagem, controller.atualizarFoto);
+ */
+const validarImagem = (req, res, next) => {
+    if (!req.file) return next(); // sem arquivo: deixa o controller tratar
+
+    // Lê apenas os primeiros 8 bytes para verificar a assinatura
+    const fd     = fs.openSync(req.file.path, 'r');
+    const buffer = Buffer.alloc(8);
+    fs.readSync(fd, buffer, 0, 8, 0);
+    fs.closeSync(fd);
+
+    if (!magicBytesValidos(buffer, req.file.mimetype)) {
+        // Remove o arquivo suspeito antes de rejeitar
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({
+            error: 'Arquivo inválido. O conteúdo não corresponde ao formato declarado.'
+        });
+    }
+
+    next();
+};
+
 const uploadImage = (pastaDestino) => {
     if (!pastaDestino) {
         throw new Error('O nome da pasta de destino é obrigatório.');
@@ -32,18 +87,18 @@ const uploadImage = (pastaDestino) => {
 
     // Define onde e com qual nome o arquivo será salvo
     const storage = multer.diskStorage({
-        destination: (req, file, cb) => {
+        destination: (_req, _file, cb) => {
             cb(null, caminhoCompleto);
         },
-        filename: (req, file, cb) => {
-            const sufixo    = Date.now() + '-' + Math.round(Math.random() * 1e9);
-            const extensao  = file.mimetype.split('/')[1]; // ex: "jpeg", "png"
+        filename: (_req, file, cb) => {
+            const sufixo   = Date.now() + '-' + Math.round(Math.random() * 1e9);
+            const extensao = file.mimetype.split('/')[1]; // ex: "jpeg", "png"
             cb(null, `${sufixo}.${extensao}`);
         }
     });
 
-    // Aceita apenas imagens
-    const fileFilter = (req, file, cb) => {
+    // Primeira camada: valida o mimetype declarado pelo cliente
+    const fileFilter = (_req, file, cb) => {
         const tiposAceitos = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
         if (tiposAceitos.includes(file.mimetype)) {
             cb(null, true);
@@ -60,3 +115,4 @@ const uploadImage = (pastaDestino) => {
 };
 
 module.exports = uploadImage;
+module.exports.validarImagem = validarImagem;

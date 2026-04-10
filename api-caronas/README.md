@@ -12,10 +12,11 @@ Desenvolvida com Node.js, Express e MySQL.
 3. [Estrutura do Projeto](#estrutura-do-projeto)
 4. [Autenticação](#autenticação)
 5. [Banco de Dados](#banco-de-dados)
-6. [Regras de Negócio](#regras-de-negócio)
-7. [Endpoints](#endpoints)
-8. [Testes](#testes)
-9. [Scripts](#scripts)
+6. [Segurança](#segurança)
+7. [Regras de Negócio](#regras-de-negócio)
+8. [Endpoints](#endpoints)
+9. [Testes](#testes)
+10. [Scripts](#scripts)
 
 ---
 
@@ -29,6 +30,7 @@ Desenvolvida com Node.js, Express e MySQL.
 | jsonwebtoken        | Autenticação via JWT                               |
 | dotenv              | Variáveis de ambiente                              |
 | cors                | Controle de origens permitidas (CORS)              |
+| helmet              | Cabeçalhos HTTP de segurança (CSP, X-Frame etc.)  |
 | express-rate-limit  | Limite de requisições por IP (proteção brute force)|
 | multer              | Upload de arquivos via multipart/form-data         |
 | fs-extra            | Verificação de existência de arquivos no servidor  |
@@ -46,7 +48,7 @@ npm install
 ```bash
 # No MySQL Workbench ou CLI:
 source infosdatabase/create.sql
-source infosdatabase/insert_implementacao.sql  # dados de teste (opcional)
+source infosdatabase/insert.sql  # dados de teste (opcional)
 ```
 
 **3. Configure o arquivo `.env` na raiz do projeto:**
@@ -94,7 +96,7 @@ api-caronas/
 │
 ├── infosdatabase/
 │   ├── create.sql                    # Criação das 13 tabelas
-│   ├── insert_implementacao.sql      # Dados de teste completos
+│   ├── insert.sql                    # Dados de teste completos
 │   ├── select.sql                    # Consultas de teste
 │   ├── delete.sql                    # Scripts de limpeza
 │   └── apagar-banco.sql              # Remove todas as tabelas
@@ -199,6 +201,91 @@ Rotas que exigem papel específico são marcadas como **[ADMIN]** (per_tipo 1 ou
 
 ---
 
+## Segurança
+
+### Cabeçalhos HTTP
+
+O `helmet` é aplicado como primeiro middleware e define automaticamente cabeçalhos de segurança em todas as respostas:
+
+- `X-Frame-Options` — previne clickjacking
+- `X-Content-Type-Options` — previne MIME sniffing
+- `Strict-Transport-Security` — força HTTPS em produção
+- `X-XSS-Protection` — camada adicional contra XSS em browsers legados
+
+> `Content-Security-Policy` está desabilitado (`contentSecurityPolicy: false`) para não bloquear respostas JSON da API.
+
+---
+
+### Rate Limiting
+
+Duas camadas de limite de requisições por IP:
+
+| Camada     | Rotas                                | Limite               |
+|------------|--------------------------------------|----------------------|
+| Global     | Todas as rotas                       | 100 req / 15 minutos |
+| Auth       | `/api/usuarios/login` e `/cadastro`  | 10 req / 15 minutos  |
+
+A camada de autenticação protege contra ataques de força bruta em credenciais. Ambas retornam `429 Too Many Requests` com mensagem de erro quando o limite é atingido.
+
+---
+
+### Upload de Imagens
+
+O upload de fotos de perfil (`PUT /api/usuarios/:id/foto`) passa por duas camadas de validação antes de ser salvo:
+
+1. **Mimetype declarado** — o `fileFilter` do Multer verifica se o `Content-Type` é `image/jpeg`, `image/jpg`, `image/png` ou `image/gif`. Arquivos com tipo diferente são rejeitados antes do upload.
+
+2. **Magic bytes** — após salvar o arquivo em disco, o middleware `validarImagem` lê os primeiros 8 bytes e compara com as assinaturas reais de cada formato. Se o conteúdo não corresponder ao tipo declarado (ex: executável com extensão `.jpg`), o arquivo é **deletado imediatamente** e a requisição retorna `400 Bad Request`.
+
+> Essa validação em dois estágios previne upload de arquivos maliciosos com extensão falsificada.
+
+---
+
+### Integridade de Identidade (Anti-Spoofing)
+
+Em todos os endpoints que registram a autoria de uma ação, o `usu_id` do usuário **nunca é aceito do body da requisição** — ele é sempre extraído do token JWT decodificado (`req.user.id`). Isso impede que um usuário crie recursos em nome de outro.
+
+Endpoints afetados:
+
+| Endpoint                         | Campo ignorado do body   |
+|----------------------------------|--------------------------|
+| `POST /api/mensagens/enviar`     | `usu_id_remetente`       |
+| `POST /api/sugestoes`            | `usu_id`                 |
+| `POST /api/veiculos`             | `usu_id`                 |
+| `POST /api/caronas/solicitar`    | `usu_id_passageiro`      |
+| `POST /api/solicitacoes/criar`   | `usu_id_passageiro`      |
+
+---
+
+### Transações de Banco de Dados
+
+Operações que envolvem múltiplas escritas em tabelas diferentes são executadas em **transação atômica** — se qualquer passo falhar, todas as alterações são desfeitas via `ROLLBACK`.
+
+| Método                                   | Escritas na transação                                              | Risco sem transação                                           |
+|------------------------------------------|--------------------------------------------------------------------|---------------------------------------------------------------|
+| `UsuarioController.cadastrar`            | INSERT em USUARIOS → USUARIOS_REGISTROS → PERFIL                  | Registro órfão sem PERFIL quebraria o endpoint de perfil      |
+| `SolicitacaoController.responderSolicitacao` | UPDATE SOLICITACOES_CARONA + UPDATE CARONAS (subtrai vagas)   | Passageiro "aceito" sem vagas subtraídas — overbooking         |
+| `SolicitacaoController.cancelarSolicitacao`  | UPDATE SOLICITACOES_CARONA + UPDATE CARONAS (devolve vagas)   | Cancelamento sem devolução de vagas — contador inconsistente   |
+
+Em `responderSolicitacao`, a re-verificação de vagas usa `SELECT ... FOR UPDATE` dentro da transação, bloqueando a linha da carona para prevenir race conditions de overbooking concorrente.
+
+**Padrão usado:**
+```javascript
+let conn;
+try {
+    conn = await db.getConnection();
+    await conn.beginTransaction();
+    // writes usando conn.query()
+    await conn.commit();
+} catch (error) {
+    if (conn) await conn.rollback();
+} finally {
+    if (conn) conn.release();
+}
+```
+
+---
+
 ## Regras de Negócio
 
 ### Níveis de verificação (`usu_verificacao`)
@@ -264,14 +351,14 @@ Para se desvincular, cancele via `PUT /api/solicitacoes/:soli_id/cancelar` — o
 
 ### Usuários — `/api/usuarios`
 
-| Método | Rota              | Proteção          | Descrição                                  |
-|--------|-------------------|-------------------|--------------------------------------------|
-| POST   | `/cadastro`       | Público           | Cadastra novo usuário                      |
-| POST   | `/login`          | Público           | Faz login e retorna token JWT              |
-| GET    | `/perfil/:id`     | Público           | Retorna perfil e foto do usuário           |
-| PUT    | `/:id`            | [JWT] próprio / [DEV] | Atualiza nome, email ou senha         |
-| PUT    | `/:id/foto`       | [JWT] próprio / [DEV] | Atualiza foto de perfil               |
-| DELETE | `/:id`            | [JWT] próprio / [DEV] | Desativa conta (soft delete)          |
+| Método | Rota              | Proteção              | Descrição                                  |
+|--------|-------------------|-----------------------|--------------------------------------------|
+| POST   | `/cadastro`       | Público               | Cadastra novo usuário                      |
+| POST   | `/login`          | Público               | Faz login e retorna token JWT              |
+| GET    | `/perfil/:id`     | [JWT]                 | Retorna perfil e foto do usuário           |
+| PUT    | `/:id`            | [JWT] próprio / [DEV] | Atualiza nome, email ou senha              |
+| PUT    | `/:id/foto`       | [JWT] próprio / [DEV] | Atualiza foto de perfil                    |
+| DELETE | `/:id`            | [JWT] próprio / [DEV] | Desativa conta (soft delete)               |
 
 **Cadastro — campos obrigatórios:**
 ```json
@@ -383,9 +470,8 @@ Vincula usuários a cursos. O `cur_usu_id` gerado é necessário ao criar uma ca
 
 | Método | Rota            | Proteção | Descrição                          |
 |--------|-----------------|----------|------------------------------------|
-| GET    | `/`             | Público  | Lista caronas abertas              |
-| GET    | `/publica`      | Público  | Alias para listar caronas abertas  |
-| GET    | `/:caro_id`     | Público  | Detalhes de uma carona             |
+| GET    | `/`             | [JWT]    | Lista caronas abertas              |
+| GET    | `/:caro_id`     | [JWT]    | Detalhes de uma carona             |
 | POST   | `/oferecer`     | [JWT]    | Cria nova carona                   |
 | POST   | `/solicitar`    | [JWT]    | Cria solicitação de participação   |
 | PUT    | `/:caro_id`     | [JWT]    | Atualiza dados da carona           |
@@ -424,8 +510,9 @@ Vincula usuários a cursos. O `cur_usu_id` gerado é necessário ao criar uma ca
 
 **Solicitar carona — campos obrigatórios:**
 ```json
-{ "car_id": 1, "usu_id_passageiro": 2, "sol_vaga_soli": 1 }
+{ "car_id": 1, "sol_vaga_soli": 1 }
 ```
+> `usu_id_passageiro` é extraído automaticamente do token JWT — não deve ser enviado no body.
 > **Restrição:** requer `usu_verificacao >= 1` ou `usu_verificacao = 5` dentro do prazo.
 
 **Responder solicitação:**
@@ -492,11 +579,11 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 ```json
 {
   "car_id": 1,
-  "usu_id_remetente": 2,
   "usu_id_destinatario": 1,
   "men_texto": "Olá, posso pegar carona?"
 }
 ```
+> `usu_id_remetente` é extraído automaticamente do token JWT — não deve ser enviado no body.
 
 ---
 
@@ -512,8 +599,9 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 
 **Criar sugestão/denúncia — campos obrigatórios:**
 ```json
-{ "usu_id": 1, "sug_texto": "Melhore o sistema de busca.", "sug_tipo": 1 }
+{ "sug_texto": "Melhore o sistema de busca.", "sug_tipo": 1 }
 ```
+> `usu_id` é extraído automaticamente do token JWT — não deve ser enviado no body.
 `sug_tipo`: 0=Denúncia, 1=Sugestão
 
 **Responder (Admin/Dev):**

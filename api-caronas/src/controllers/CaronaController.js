@@ -123,6 +123,17 @@ class CaronaController {
                 return res.status(400).json({ error: "Vagas disponíveis devem ser maior que zero." });
             }
 
+            // Valida que a data da carona não está no passado
+            const dataCarona = new Date(car_data);
+            if (isNaN(dataCarona.getTime())) {
+                return res.status(400).json({ error: "car_data inválida." });
+            }
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0); // compara apenas a data, sem hora
+            if (dataCarona < hoje) {
+                return res.status(400).json({ error: "A data da carona não pode ser no passado." });
+            }
+
             // REGRA DE NEGÓCIO: Para oferecer carona, o motorista precisa ter usu_verificacao = 2
             // usu_verificacao 0 = não verificado | 1 = matrícula verificada | 2 = matrícula + veículo registrado
             // O usu_id vem do token JWT decodificado pelo authMiddleware (req.user.id)
@@ -211,6 +222,21 @@ class CaronaController {
                 return res.status(400).json({ error: "car_status inválido. Use 0, 1, 2 ou 3." });
             }
 
+            // Verifica se o motorista autenticado é o dono desta carona
+            // Apenas o motorista que criou pode alterar os dados
+            const [dono] = await db.query(
+                `SELECT cu.usu_id FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [caro_id]
+            );
+            if (dono.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            if (dono[0].usu_id !== req.user.id) {
+                return res.status(403).json({ error: "Sem permissão para alterar esta carona." });
+            }
+
             // Monta a query com apenas os campos enviados
             const campos = [];
             const valores = [];
@@ -248,6 +274,20 @@ class CaronaController {
 
             if (!caro_id || isNaN(caro_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
+            }
+
+            // Verifica se o motorista autenticado é o dono desta carona
+            const [dono] = await db.query(
+                `SELECT cu.usu_id FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [caro_id]
+            );
+            if (dono.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            if (dono[0].usu_id !== req.user.id) {
+                return res.status(403).json({ error: "Sem permissão para cancelar esta carona." });
             }
 
             // Soft delete: muda status para 0 (Cancelada)

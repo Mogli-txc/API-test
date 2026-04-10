@@ -12,17 +12,10 @@ const authMiddleware = require('../middlewares/authMiddleware');
 /**
  * ROTA: GET /api/caronas
  * Descrição: Lista todas as caronas disponíveis no sistema
- * Acesso: Público (qualquer pessoa pode visualizar)
+ * Acesso: PROTEGIDO - Requer autenticação (apenas usuários verificados usam o sistema)
  * Retorna: Array de caronas com informações de origem, destino e vagas
  */
-router.get('/', CaronaController.listarTodas);
-
-/**
- * ROTA: GET /api/caronas/publica
- * Descrição: Lista todas as caronas disponíveis no sistema (rota pública)
- * Acesso: Público
- */
-router.get('/publica', CaronaController.listarTodas);
+router.get('/', authMiddleware, CaronaController.listarTodas);
 
 /**
  * ROTA: POST /api/caronas/oferecer
@@ -45,9 +38,9 @@ router.post('/solicitar', authMiddleware, CaronaController.solicitar);
 /**
  * ROTA: GET /api/caronas/:caro_id
  * Descrição: Recupera detalhes de uma carona específica
- * Acesso: Público
+ * Acesso: PROTEGIDO - Requer autenticação
  */
-router.get('/:caro_id', CaronaController.obterPorId);
+router.get('/:caro_id', authMiddleware, CaronaController.obterPorId);
 
 /**
  * ROTA: PUT /api/caronas/:caro_id
