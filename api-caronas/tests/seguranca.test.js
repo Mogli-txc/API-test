@@ -250,7 +250,9 @@ async function teste4_TokenInvalido() {
 }
 
 /**
- * TESTE 5: Listar caronas (rota pública, sem autenticação)
+ * TESTE 5: Rota genuinamente pública (infra/escolas, sem autenticação)
+ * Nota: /api/caronas foi movida para exigir JWT.
+ * /api/infra/escolas permanece pública para uso sem conta.
  */
 async function teste5_RotaPublica() {
   log(`\n${cores.azul}${'='.repeat(60)}${cores.reset}`);
@@ -261,7 +263,7 @@ async function teste5_RotaPublica() {
     const opcoes = {
       hostname: 'localhost',
       port: 3000,
-      path: '/api/caronas/publica',
+      path: '/api/infra/escolas',
       method: 'GET'
     };
 
@@ -280,35 +282,55 @@ async function teste5_RotaPublica() {
 }
 
 /**
- * REFATORAÇÃO PARA USAR BLOCOS test() DO JEST
+ * BLOCOS JEST — usam supertest para não depender de servidor externo.
+ * As funções fazerRequisicao/teste* acima ficam para execução manual
+ * via node tests/seguranca.test.js com servidor rodando.
  */
+const request = require('supertest');
+const app     = require('../src/server');
+
 describe('Testes de Segurança - API de Caronas', () => {
+
   test('Teste 1: Acesso Negado SEM Token JWT', async () => {
-    const { passou } = await teste1_AcessoNegadoSemToken();
-    expect(passou).toBe(true);
+    const res = await request(app)
+      .post('/api/caronas/oferecer')
+      .send({ cur_usu_id: 1, vei_id: 1, car_desc: 'Carona teste', car_data: '2026-03-25 08:00', car_vagas_dispo: 3 });
+    expect(res.status).toBe(403);
   });
 
   test('Teste 2: Gerar Token JWT (Login)', async () => {
-    const { passou, token } = await teste2_GerarTokenJWT();
-    expect(passou).toBe(true);
-    expect(token).toBeDefined();
+    const res = await request(app)
+      .post('/api/usuarios/login')
+      .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('token');
   });
 
   test('Teste 3: Acesso Permitido COM Token JWT', async () => {
-    const { token } = await teste2_GerarTokenJWT();
-    const { passou } = await teste3_AcessoPermitidoComToken(token);
-    expect(passou).toBe(true);
+    const loginRes = await request(app)
+      .post('/api/usuarios/login')
+      .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
+    const token = loginRes.body.token;
+
+    const res = await request(app)
+      .get('/api/caronas')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
   });
 
   test('Teste 4: Token Inválido/Mal-formatado', async () => {
-    const { passou } = await teste4_TokenInvalido();
-    expect(passou).toBe(true);
+    const res = await request(app)
+      .post('/api/caronas/oferecer')
+      .set('Authorization', 'Bearer token_invalido')
+      .send({});
+    expect(res.status).toBe(401);
   });
 
   test('Teste 5: Rota Pública (Sem Autenticação)', async () => {
-    const { passou } = await teste5_RotaPublica();
-    expect(passou).toBe(true);
+    const res = await request(app).get('/api/infra/escolas');
+    expect(res.status).toBe(200);
   });
+
 });
 
 /**
@@ -318,25 +340,14 @@ describe('Testes de Segurança - API de Caronas', () => {
  */
 describe('Testes de Role - Permissões por Tipo de Perfil', () => {
 
-  /**
-   * Registra um usuário comum (per_tipo=0) e retorna seu token.
-   * Usado nos testes negativos (quem NÃO deve ter acesso).
-   */
   async function registrarUsuarioComum() {
     const email = `teste.role.${Date.now()}@escola.com`;
-    const opcoesCadastro = {
-      hostname: 'localhost', port: 3000,
-      path: '/api/usuarios/cadastro', method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    };
-    await fazerRequisicao(opcoesCadastro, { usu_email: email, usu_senha: 'senha123' });
-
-    const opcoesLogin = {
-      hostname: 'localhost', port: 3000,
-      path: '/api/usuarios/login', method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    };
-    const respLogin = await fazerRequisicao(opcoesLogin, { usu_email: email, usu_senha: 'senha123' });
+    await request(app)
+      .post('/api/usuarios/cadastro')
+      .send({ usu_email: email, usu_senha: 'senha123' });
+    const respLogin = await request(app)
+      .post('/api/usuarios/login')
+      .send({ usu_email: email, usu_senha: 'senha123' });
     return respLogin.body?.token ?? null;
   }
 
@@ -344,66 +355,58 @@ describe('Testes de Role - Permissões por Tipo de Perfil', () => {
     const tokenComum = await registrarUsuarioComum();
     expect(tokenComum).toBeDefined();
 
-    const resposta = await fazerRequisicao({
-      hostname: 'localhost', port: 3000,
-      path: '/api/sugestoes', method: 'GET',
-      headers: { 'Authorization': `Bearer ${tokenComum}` }
-    });
-
-    expect(resposta.status).toBe(403);
+    const res = await request(app)
+      .get('/api/sugestoes')
+      .set('Authorization', `Bearer ${tokenComum}`);
+    expect(res.status).toBe(403);
   });
 
   test('Teste 7: Desenvolvedor PODE listar sugestões (200)', async () => {
-    const { token } = await teste2_GerarTokenJWT(); // admin@escola.com = per_tipo=2
+    const loginRes = await request(app)
+      .post('/api/usuarios/login')
+      .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
+    const token = loginRes.body.token;
     expect(token).toBeDefined();
 
-    const resposta = await fazerRequisicao({
-      hostname: 'localhost', port: 3000,
-      path: '/api/sugestoes', method: 'GET',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-
-    expect(resposta.status).toBe(200);
+    const res = await request(app)
+      .get('/api/sugestoes')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
   });
 
   test('Teste 8: Usuário comum NÃO pode deletar sugestão (403)', async () => {
     const tokenComum = await registrarUsuarioComum();
     expect(tokenComum).toBeDefined();
 
-    const resposta = await fazerRequisicao({
-      hostname: 'localhost', port: 3000,
-      path: '/api/sugestoes/1', method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${tokenComum}` }
-    });
-
-    expect(resposta.status).toBe(403);
+    const res = await request(app)
+      .delete('/api/sugestoes/1')
+      .set('Authorization', `Bearer ${tokenComum}`);
+    expect(res.status).toBe(403);
   });
 
   test('Teste 9: Usuário comum NÃO pode listar alunos de curso (403)', async () => {
     const tokenComum = await registrarUsuarioComum();
     expect(tokenComum).toBeDefined();
 
-    const resposta = await fazerRequisicao({
-      hostname: 'localhost', port: 3000,
-      path: '/api/matriculas/curso/1', method: 'GET',
-      headers: { 'Authorization': `Bearer ${tokenComum}` }
-    });
-
-    expect(resposta.status).toBe(403);
+    const res = await request(app)
+      .get('/api/matriculas/curso/1')
+      .set('Authorization', `Bearer ${tokenComum}`);
+    expect(res.status).toBe(403);
   });
 
   test('Teste 10: Desenvolvedor PODE listar alunos de curso (200)', async () => {
-    const { token } = await teste2_GerarTokenJWT();
+    const loginRes = await request(app)
+      .post('/api/usuarios/login')
+      .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
+    const token = loginRes.body.token;
     expect(token).toBeDefined();
 
-    const resposta = await fazerRequisicao({
-      hostname: 'localhost', port: 3000,
-      path: '/api/matriculas/curso/1', method: 'GET',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-
-    expect(resposta.status).toBe(200);
+    const res = await request(app)
+      .get('/api/matriculas/curso/1')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
   });
+
 });
 
 /**
@@ -458,5 +461,7 @@ async function executarTestes() {
   }
 }
 
-// Executa os testes
-executarTestes();
+// Executa os testes somente em modo manual (fora do Jest)
+if (typeof jest === 'undefined') {
+  executarTestes();
+}

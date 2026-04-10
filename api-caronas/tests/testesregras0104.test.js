@@ -510,14 +510,18 @@ describe('Regra 3 — Vínculo único bloqueado via adição direta em CARONA_PE
 describe('Verificação final — estado do banco após todos os testes', () => {
 
     it('VF.1 — carona_A deve estar finalizada (status=3)', async () => {
-        const res = await request(app).get(`/api/caronas/${car_id_A}`);
+        const res = await request(app)
+            .get(`/api/caronas/${car_id_A}`)
+            .set('Authorization', `Bearer ${token_A}`);
         expect(res.status).toBe(200);
         expect(res.body.carona.car_status).toBe(3);
     });
 
     it('VF.2 — carona_B deve continuar aberta (status=1) com passageiroVinculado aceito', async () => {
         // PASSO 1: carona_B não deve ter sido alterada pelos testes
-        const res = await request(app).get(`/api/caronas/${car_id_B}`);
+        const res = await request(app)
+            .get(`/api/caronas/${car_id_B}`)
+            .set('Authorization', `Bearer ${token_B}`);
         expect(res.status).toBe(200);
         expect(res.body.carona.car_status).toBe(1);
     });

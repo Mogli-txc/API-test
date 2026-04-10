@@ -73,7 +73,8 @@ const limiter = rateLimit({
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: "Muitas requisições. Tente novamente em alguns minutos." }
+    message: { error: "Muitas requisições. Tente novamente em alguns minutos." },
+    skip: () => process.env.NODE_ENV === 'test' // Desabilitado em testes para não bloquear seeds
 });
 app.use(limiter);
 
@@ -87,7 +88,8 @@ const authLimiter = rateLimit({
     max: 10,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: "Muitas tentativas de autenticação. Tente novamente em 15 minutos." }
+    message: { error: "Muitas tentativas de autenticação. Tente novamente em 15 minutos." },
+    skip: () => process.env.NODE_ENV === 'test' // Desabilitado em testes para não bloquear seeds
 });
 app.use('/api/usuarios/login', authLimiter);
 app.use('/api/usuarios/cadastro', authLimiter);

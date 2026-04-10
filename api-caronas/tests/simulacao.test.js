@@ -341,8 +341,10 @@ describe('Usuário 1 — Motorista aceita e abre o chat', () => {
     });
 
     it('1.6.1 — Vagas da carona devem ter diminuído após aceite', async () => {
-        // PASSO 1: busca os detalhes atuais da carona
-        const res = await request(app).get(`/api/caronas/${car_id1}`);
+        // PASSO 1: busca os detalhes atuais da carona (requer JWT)
+        const res = await request(app)
+            .get(`/api/caronas/${car_id1}`)
+            .set('Authorization', `Bearer ${token1}`);
 
         // PASSO 2: 1 vaga foi solicitada, então car_vagas_dispo caiu de 2 para 1
         expect(res.status).toBe(200);
@@ -497,8 +499,10 @@ describe('Usuário 1 — Motorista finaliza a carona', () => {
 describe('Verificação final — pós finalização', () => {
 
     it('carona deve estar com status Finalizada (3)', async () => {
-        // PASSO 1: busca os detalhes da carona
-        const res = await request(app).get(`/api/caronas/${car_id1}`);
+        // PASSO 1: busca os detalhes da carona (requer JWT)
+        const res = await request(app)
+            .get(`/api/caronas/${car_id1}`)
+            .set('Authorization', `Bearer ${token1}`);
 
         // PASSO 2: confirma o status final
         expect(res.status).toBe(200);
@@ -533,10 +537,12 @@ describe('Verificação final — pós finalização', () => {
     });
 
     it('carona não deve mais aparecer na listagem de caronas abertas', async () => {
-        // PASSO 1: lista caronas públicas (apenas status = 1 = Aberta)
-        const res = await request(app).get('/api/caronas');
+        // PASSO 1: lista caronas (requer JWT; retorna apenas status = 1 = Aberta)
+        const res = await request(app)
+            .get('/api/caronas')
+            .set('Authorization', `Bearer ${token1}`);
 
-        // PASSO 2: a carona finalizada não deve aparecer na listagem pública
+        // PASSO 2: a carona finalizada não deve aparecer na listagem
         expect(res.status).toBe(200);
         const ids = res.body.caronas.map(c => c.car_id);
         expect(ids).not.toContain(car_id1);

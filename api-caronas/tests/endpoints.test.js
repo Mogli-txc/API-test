@@ -60,13 +60,17 @@ describe('Usuários', () => {
     });
 
     it('GET /perfil/:id — deve retornar 200 para ID existente', async () => {
-        const res = await request(app).get('/api/usuarios/perfil/1');
+        const res = await request(app)
+            .get('/api/usuarios/perfil/1')
+            .set('Authorization', `Bearer ${tokenTeste}`);
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('user');
     });
 
     it('GET /perfil/:id — deve retornar 404 para ID inexistente', async () => {
-        const res = await request(app).get('/api/usuarios/perfil/999999');
+        const res = await request(app)
+            .get('/api/usuarios/perfil/999999')
+            .set('Authorization', `Bearer ${tokenTeste}`);
         expect(res.status).toBe(404);
     });
 
@@ -120,15 +124,12 @@ describe('Infraestrutura', () => {
 
 describe('Caronas', () => {
 
-    it('GET /api/caronas — deve retornar 200 (público)', async () => {
-        const res = await request(app).get('/api/caronas');
+    it('GET /api/caronas — deve retornar 200 (requer JWT)', async () => {
+        const res = await request(app)
+            .get('/api/caronas')
+            .set('Authorization', `Bearer ${tokenTeste}`);
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('caronas');
-    });
-
-    it('GET /api/caronas/publica — deve retornar 200 (público)', async () => {
-        const res = await request(app).get('/api/caronas/publica');
-        expect(res.status).toBe(200);
     });
 
     it('POST /api/caronas/oferecer — deve retornar 400 se faltar campo (com token)', async () => {
@@ -140,12 +141,16 @@ describe('Caronas', () => {
     });
 
     it('GET /api/caronas/999999 — deve retornar 404 para ID inexistente', async () => {
-        const res = await request(app).get('/api/caronas/999999');
+        const res = await request(app)
+            .get('/api/caronas/999999')
+            .set('Authorization', `Bearer ${tokenTeste}`);
         expect(res.status).toBe(404);
     });
 
     it('GET /api/caronas/abc — ID inválido deve retornar 400', async () => {
-        const res = await request(app).get('/api/caronas/abc');
+        const res = await request(app)
+            .get('/api/caronas/abc')
+            .set('Authorization', `Bearer ${tokenTeste}`);
         expect(res.status).toBe(400);
     });
 
@@ -211,20 +216,20 @@ describe('Solicitações', () => {
         expect(res.status).toBe(403);
     });
 
-    it('GET /api/solicitacoes/carona/:id — deve retornar 200 com token', async () => {
+    it('GET /api/solicitacoes/carona/:id — deve retornar 403 se não for motorista', async () => {
+        // Carona 1 pertence a outro usuário — admin não é motorista dela
         const res = await request(app)
             .get('/api/solicitacoes/carona/1')
             .set('Authorization', `Bearer ${tokenTeste}`);
-        expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('solicitacoes');
+        expect(res.status).toBe(403);
     });
 
-    it('GET /api/solicitacoes/usuario/:id — deve retornar 200 com token', async () => {
+    it('GET /api/solicitacoes/usuario/:id — deve retornar 403 para ID que não é o próprio', async () => {
+        // tokenTeste é admin — admin não é o usuário 1, deve ser bloqueado
         const res = await request(app)
             .get('/api/solicitacoes/usuario/1')
             .set('Authorization', `Bearer ${tokenTeste}`);
-        expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('solicitacoes');
+        expect(res.status).toBe(403);
     });
 
 });
@@ -238,12 +243,12 @@ describe('Mensagens', () => {
         expect(res.status).toBe(403);
     });
 
-    it('GET /api/mensagens/carona/:id — deve retornar 200 com token', async () => {
+    it('GET /api/mensagens/carona/:id — deve retornar 403 se não for participante', async () => {
+        // Carona 1 pertence a outro usuário — admin não é participante dela
         const res = await request(app)
             .get('/api/mensagens/carona/1')
             .set('Authorization', `Bearer ${tokenTeste}`);
-        expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('mensagens');
+        expect(res.status).toBe(403);
     });
 
 });
@@ -295,12 +300,12 @@ describe('Passageiros Confirmados', () => {
         expect(res.status).toBe(403);
     });
 
-    it('GET /api/passageiros/carona/:id — deve retornar 200 com token', async () => {
+    it('GET /api/passageiros/carona/:id — deve retornar 403 se não for participante', async () => {
+        // Carona 1 pertence a outro usuário — admin não é participante dela
         const res = await request(app)
             .get('/api/passageiros/carona/1')
             .set('Authorization', `Bearer ${tokenTeste}`);
-        expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('passageiros');
+        expect(res.status).toBe(403);
     });
 
 });

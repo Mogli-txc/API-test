@@ -115,9 +115,16 @@ class MensagemController {
             }
             const ehMotorista = participante[0].motorista_id === req.user.id;
             if (!ehMotorista) {
+                // Permite acesso se:
+                // - está em CARONA_PESSOAS (confirmado pelo motorista), OU
+                // - tem solicitação aceita (sol_status=2) — já é passageiro, mas pode ainda não ter sido adicionado em CARONA_PESSOAS
                 const [passageiro] = await db.query(
-                    'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1',
-                    [caro_id, req.user.id]
+                    `SELECT 1 FROM CARONA_PESSOAS
+                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                     UNION
+                     SELECT 1 FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+                    [caro_id, req.user.id, caro_id, req.user.id]
                 );
                 if (passageiro.length === 0) {
                     return res.status(403).json({ error: "Sem permissão para visualizar esta conversa." });
