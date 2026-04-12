@@ -15,8 +15,11 @@ Desenvolvida com Node.js, Express e MySQL.
 6. [Segurança](#segurança)
 7. [Regras de Negócio](#regras-de-negócio)
 8. [Endpoints](#endpoints)
-9. [Testes](#testes)
-10. [Scripts](#scripts)
+9. [Admin](#admin----apiadmin)
+10. [Testes](#testes)
+11. [Scripts](#scripts)
+
+> **Última atualização:** Melhorias em 3 tiers — Tier 1 (Segurança): proteção de força bruta em OTP, esqueci-minha-senha com token HMAC, audit log, soft delete em solicitações/sugestões/passageiros; Tier 2 (Qualidade): helpers `authHelper`, `sanitize` e `auditLog` centralizando lógica duplicada, `keepAlive` no pool, parâmetros de rota padronizados (`car_id`); Tier 3 (Features): endpoints `/api/admin/stats/*` com escopo por escola para Admin e global para Dev. Mais: auditoria de segurança anterior (9 correções: C1–M3, B1) + 143 testes passando. Ver seção [Segurança](#segurança).
 
 ---
 
@@ -68,11 +71,18 @@ DB_NAME=bd_tcc_des_125_carona
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 
 JWT_SECRET=CHAVE_SUPER_SECRETA_API_CARONAS
+
+# Chave separada para hash dos OTPs (recomendado — mais seguro que reusar JWT_SECRET)
+# Gere com: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+OTP_SECRET=OUTRA_CHAVE_SECRETA_PARA_OTP
+
+# URL base da API (usada nos links de redefinição de senha no email)
+APP_URL=http://localhost:3000
 ```
 
 > Em `NODE_ENV=development`, o CORS é aberto (qualquer origem). Em `production`, apenas as origens em `ALLOWED_ORIGINS` são permitidas — isso protege o painel web admin sem afetar os apps mobile.
 >
-> As variáveis `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET` e `PORT` são **obrigatórias**. O servidor encerra na inicialização caso alguma esteja ausente.
+> As variáveis `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET` e `PORT` são **obrigatórias**. O servidor encerra na inicialização caso alguma esteja ausente. `OTP_SECRET` é recomendado — se ausente, o servidor exibe um aviso e usa `JWT_SECRET` como fallback.
 
 **4. Inicie o servidor:**
 ```bash
@@ -95,11 +105,12 @@ api-caronas/
 │       └── perfil.png              # Imagem padrão (fallback)
 │
 ├── infosdatabase/
-│   ├── create.sql                    # Criação das 13 tabelas
-│   ├── insert.sql                    # Dados de teste completos
-│   ├── select.sql                    # Consultas de teste
-│   ├── delete.sql                    # Scripts de limpeza
-│   └── apagar-banco.sql              # Remove todas as tabelas
+│   ├── create.sql                    # Criação das 15 tabelas (inclui AUDIT_LOG + colunas de segurança)
+│   ├── insert.sql                    # Dados de teste completos (9 usuários)
+│   ├── select.sql                    # Consultas de teste + queries de validação de segurança
+│   ├── delete.sql                    # Scripts de limpeza (Bloco 1: 4 usuários, Bloco 2: 9 usuários)
+│   ├── apagar-banco.sql              # Remove todas as tabelas
+│   └── test-api.http                 # Testes manuais — VS Code REST Client (50+ requisições)
 │
 └── src/
     ├── server.js                     # Inicialização, middlewares e roteamento
@@ -113,21 +124,27 @@ api-caronas/
     │   └── uploadHelper.js           # Factory Multer para upload de imagens
     │
     ├── utils/
-    │   └── gerarUrl.js               # Gera URL pública de imagem com fallback
+    │   ├── gerarUrl.js               # Gera URL pública de imagem com fallback
+    │   ├── mailer.js                 # Envio de emails (OTP e recuperação de senha)
+    │   ├── authHelper.js             # checkDevOrOwner() e getMotoristaId() — sem duplicação
+    │   ├── sanitize.js               # stripHtml() — sanitização XSS centralizada
+    │   └── auditLog.js               # registrarAudit() — helper de audit log (silent-failure)
     │
     ├── controllers/
-    │   ├── UsuarioController.js      # Cadastro, login, perfil, foto, atualização
+    │   ├── UsuarioController.js      # Cadastro, login, perfil, foto, atualização, forgot/reset-password
+    │   ├── AdminController.js        # Estatísticas do sistema para Admin e Dev
     │   ├── CaronaController.js       # Oferecer, listar, atualizar, cancelar caronas
-    │   ├── SolicitacaoController.js  # Solicitar, responder, cancelar vagas
-    │   ├── CaronaPessoasController.js# Passageiros confirmados
+    │   ├── SolicitacaoController.js  # Solicitar, responder, cancelar vagas (soft delete)
+    │   ├── CaronaPessoasController.js# Passageiros confirmados (soft delete)
     │   ├── MensagemController.js     # Chat motorista/passageiro
     │   ├── VeiculoController.js      # Cadastro de veículos
     │   ├── PontoEncontroController.js# Pontos de parada de uma carona
     │   ├── MatriculaController.js    # Matrícula de usuários em cursos
-    │   └── SugestaoDenunciaController.js # Sugestões e denúncias
+    │   └── SugestaoDenunciaController.js # Sugestões e denúncias (soft delete)
     │
     └── routes/
         ├── usuarioRoutes.js
+        ├── adminRoutes.js
         ├── caronaRoutes.js
         ├── solicitacaoRoutes.js
         ├── caronaPessoasRoutes.js
@@ -149,6 +166,9 @@ Requisição HTTP
     → roleMiddleware.js  (valida per_tipo quando a rota exige papel específico)
     → uploadHelper.js    (processa arquivo quando necessário)
     → controllers/*.js   (lógica de negócio + queries no banco)
+        → authHelper.js  (checkDevOrOwner / getMotoristaId)
+        → sanitize.js    (stripHtml em campos de texto livre)
+        → auditLog.js    (registrarAudit — silent-failure)
     → Resposta JSON
 ```
 
@@ -177,6 +197,22 @@ Rotas que exigem papel específico são marcadas como **[ADMIN]** (per_tipo 1 ou
 
 > `per_escola_id` é preenchido apenas para Administradores e define qual escola eles gerenciam. Desenvolvedores e Usuários têm `NULL`.
 
+### Conta suspensa (`per_habilitado`)
+
+O campo `per_habilitado` na tabela `PERFIL` controla se o usuário pode fazer login:
+
+| Valor | Significado                                                   |
+|-------|---------------------------------------------------------------|
+| `0`   | Conta desabilitada — login bloqueado com `403 Forbidden`      |
+| `1`   | Conta ativa — login permitido                                 |
+
+**Ciclo de vida:**
+- `per_habilitado = 0` ao criar o registro (via cadastro)
+- `per_habilitado = 1` definido automaticamente após verificação de email (OTP confirmado)
+- `per_habilitado = 0` pode ser reaplicado por um Admin para suspender a conta
+
+> Esta verificação ocorre no `POST /api/usuarios/login`, antes do bcrypt, retornando `403` com a mensagem `"Conta desabilitada. Entre em contato com o administrador."` [fix C2]
+
 ---
 
 ## Banco de Dados
@@ -197,7 +233,17 @@ Rotas que exigem papel específico são marcadas como **[ADMIN]** (per_tipo 1 ou
 | SOLICITACOES_CARONA  | Solicitações de participação em caronas             |
 | CARONA_PESSOAS       | Passageiros confirmados em uma carona               |
 | MENSAGENS            | Chat entre motorista e passageiro (soft delete)     |
-| SUGESTAO_DENUNCIA    | Sugestões e denúncias dos usuários                  |
+| SUGESTAO_DENUNCIA    | Sugestões e denúncias dos usuários (soft delete)    |
+| AUDIT_LOG            | Registro imutável de ações sensíveis no sistema     |
+
+**Colunas adicionadas em USUARIOS (segurança):**
+
+| Coluna                  | Tipo       | Finalidade                                                            |
+|-------------------------|------------|-----------------------------------------------------------------------|
+| `usu_otp_tentativas`    | INT        | Contador de tentativas erradas de OTP (reset a 0 no sucesso)         |
+| `usu_otp_bloqueado_ate` | DATETIME   | Bloqueio automático por 30 min após 3 falhas de OTP                  |
+| `usu_reset_hash`        | VARCHAR(64)| Hash HMAC-SHA256 do token de redefinição de senha (15 min)           |
+| `usu_reset_expira`      | DATETIME   | Expiração do token de redefinição de senha                           |
 
 ---
 
@@ -218,14 +264,15 @@ O `helmet` é aplicado como primeiro middleware e define automaticamente cabeça
 
 ### Rate Limiting
 
-Duas camadas de limite de requisições por IP:
+Três camadas de limite de requisições por IP:
 
-| Camada     | Rotas                                | Limite               |
-|------------|--------------------------------------|----------------------|
-| Global     | Todas as rotas                       | 100 req / 15 minutos |
-| Auth       | `/api/usuarios/login` e `/cadastro`  | 10 req / 15 minutos  |
+| Camada     | Rotas                                                                                        | Limite               |
+|------------|----------------------------------------------------------------------------------------------|----------------------|
+| Global     | Todas as rotas                                                                               | 100 req / 15 minutos |
+| Auth       | `/login`, `/cadastro`, `/verificar-email`, `/reenviar-otp`, `/forgot-password`, `/reset-password` | 10 req / 15 minutos  |
+| Escrita    | `/api/solicitacoes/criar`, `/api/mensagens/enviar`, `/api/caronas/oferecer`                  | 30 req / minuto      |
 
-A camada de autenticação protege contra ataques de força bruta em credenciais. Ambas retornam `429 Too Many Requests` com mensagem de erro quando o limite é atingido.
+A camada Auth protege contra força bruta em credenciais e enumeração de OTP. A camada Escrita previne spam de solicitações, mensagens e caronas em massa. Todas retornam `429 Too Many Requests` com mensagem de erro quando o limite é atingido. Em `NODE_ENV=test` todas as camadas são desabilitadas para não interferir em seeds.
 
 ---
 
@@ -238,6 +285,20 @@ O upload de fotos de perfil (`PUT /api/usuarios/:id/foto`) passa por duas camada
 2. **Magic bytes** — após salvar o arquivo em disco, o middleware `validarImagem` lê os primeiros 8 bytes e compara com as assinaturas reais de cada formato. Se o conteúdo não corresponder ao tipo declarado (ex: executável com extensão `.jpg`), o arquivo é **deletado imediatamente** e a requisição retorna `400 Bad Request`.
 
 > Essa validação em dois estágios previne upload de arquivos maliciosos com extensão falsificada.
+
+---
+
+### Controle de Propriedade (Ownership)
+
+Antes de editar ou deletar recursos, a API verifica se o recurso pertence ao usuário autenticado. Caso não pertença, retorna `404` (para não revelar a existência do recurso a terceiros).
+
+| Fix | Endpoint                              | Verificação aplicada                                           |
+|-----|---------------------------------------|----------------------------------------------------------------|
+| C1  | `PUT /api/mensagens/:mens_id`         | Mensagem deve pertencer ao remetente autenticado               |
+| C1  | `DELETE /api/mensagens/:mens_id`      | Idem — verificação antes do soft delete                        |
+| A3  | `GET /api/sugestoes/:sug_id`          | Sugestão deve pertencer ao criador; Admin/Dev podem ver todas  |
+| M2  | `GET /api/veiculos/usuario/:usu_id`   | Listagem só permitida ao próprio usuário ou Desenvolvedor      |
+| #18 | `POST /api/caronas/oferecer`          | `cur_usu_id` (matrícula) deve pertencer ao motorista autenticado |
 
 ---
 
@@ -254,6 +315,105 @@ Endpoints afetados:
 | `POST /api/veiculos`             | `usu_id`                 |
 | `POST /api/caronas/solicitar`    | `usu_id_passageiro`      |
 | `POST /api/solicitacoes/criar`   | `usu_id_passageiro`      |
+
+---
+
+### Sanitização de Entrada (Anti-XSS)
+
+O campo `car_desc` (descrição de carona) e `sug_resposta` (resposta a sugestões) passam por sanitização antes de ser gravados:
+
+```javascript
+const stripHtml = (str) => str.replace(/<[^>]*>/g, '');
+const car_desc_limpa = stripHtml(car_desc.trim()); // [fix A2]
+```
+
+Tags HTML são removidas para prevenir XSS armazenado. Além disso, o campo é validado com 3–255 caracteres.
+
+A função `stripHtml` está centralizada em `src/utils/sanitize.js` e importada em todos os controllers que recebem campos de texto livre — sem cópia de código.
+
+---
+
+### Proteção de Dados Sensíveis
+
+O endpoint `GET /api/usuarios/perfil/:id` não retorna mais os campos `per_tipo` e `per_habilitado` na resposta. [fix A1]
+
+> Esses campos são internos ao sistema de controle de acesso e não devem ser expostos ao app mobile.
+
+---
+
+### Whitelist de Campos Atualizáveis
+
+Os endpoints de atualização dinâmica (`PUT /api/usuarios/:id` e `PUT /api/caronas/:car_id`) validam os campos recebidos contra uma lista explícita de colunas permitidas antes de montar o SQL: [fix M1]
+
+```javascript
+const COLUNAS_PERMITIDAS = ['usu_nome = ?', 'usu_email = ?', 'usu_senha = ?'];
+if (!campos.every(c => COLUNAS_PERMITIDAS.includes(c))) {
+    return res.status(400).json({ error: "Campo inválido detectado." });
+}
+```
+
+Qualquer campo fora da whitelist aborta a requisição com `400 Bad Request`.
+
+---
+
+### Proteção de Força Bruta em OTP
+
+O endpoint `POST /api/usuarios/verificar-email` limita tentativas erradas de OTP:
+
+| Evento                              | Ação                                                              |
+|-------------------------------------|-------------------------------------------------------------------|
+| OTP correto                         | `usu_otp_tentativas = 0`, `usu_otp_bloqueado_ate = NULL`         |
+| OTP errado (tentativas < 3)         | Incrementa `usu_otp_tentativas`                                   |
+| OTP errado (3ª falha)               | Define `usu_otp_bloqueado_ate = NOW() + 30 minutos`              |
+| Acesso enquanto bloqueado           | Retorna `429` — *"Muitas tentativas. Aguarde X minutos."*        |
+| Reenvio de OTP (`/reenviar-otp`)    | Zera `usu_otp_tentativas` e `usu_otp_bloqueado_ate`              |
+
+---
+
+### Recuperação de Senha (Forgot / Reset Password)
+
+Fluxo seguro de redefinição de senha em dois passos:
+
+**Passo 1 — `POST /api/usuarios/forgot-password`**
+- Recebe `{ "usu_email": "..." }`
+- Gera 32 bytes aleatórios; armazena o hash HMAC-SHA256 em `usu_reset_hash` e a expiração (15 min) em `usu_reset_expira`
+- Envia email com o token em texto plano; o hash nunca sai do banco
+- Sempre retorna `200` (sem confirmar se o email existe — previne enumeração)
+
+**Passo 2 — `POST /api/usuarios/reset-password`**
+- Recebe `{ "token": "...", "nova_senha": "..." }`
+- Rehasha o token recebido e compara com `usu_reset_hash`; verifica expiração
+- Em caso de sucesso: atualiza a senha com bcrypt cost 12, limpa `usu_reset_hash` e `usu_reset_expira`
+- Token inválido ou expirado retorna `400`
+
+---
+
+### Audit Log
+
+Ações sensíveis são registradas silenciosamente na tabela `AUDIT_LOG` via `src/utils/auditLog.js`. O helper nunca lança exceções — uma falha de escrita no log apenas emite um `console.warn` e a operação principal prossegue normalmente.
+
+| Ação registrada     | Trigger                                          |
+|---------------------|--------------------------------------------------|
+| `CADASTRO`          | Novo usuário criado                              |
+| `LOGIN`             | Login bem-sucedido                               |
+| `LOGIN_FALHA`       | Tentativa de login com senha incorreta           |
+| `SENHA_RESET`       | Senha redefinida via forgot-password             |
+| `DELETAR_USU`       | Conta desativada (soft delete)                   |
+
+---
+
+### Soft Delete — Política
+
+Nenhuma exclusão física é executada em dados de usuários. Todos os recursos sensíveis usam soft delete:
+
+| Tabela               | Campo de exclusão      | Valor ao "deletar"         |
+|----------------------|------------------------|----------------------------|
+| USUARIOS             | `usu_status`           | `0`                        |
+| CARONAS              | `car_status`           | `0`                        |
+| MENSAGENS            | `men_deletado_em`      | `NOW()`                    |
+| SUGESTAO_DENUNCIA    | `sug_deletado_em`      | `NOW()`                    |
+| SOLICITACOES_CARONA  | `sol_status`           | `0`                        |
+| CARONA_PESSOAS       | `car_pes_status`       | `0`                        |
 
 ---
 
@@ -301,12 +461,16 @@ O campo `usu_verificacao` na tabela `USUARIOS` controla o nível de acesso do us
 
 **Ciclo de vida da verificação:**
 ```
-Cadastro inicial  → usu_verificacao = 5, usu_verificacao_expira = NOW() + 5 dias
-5 dias depois     → acesso bloqueado até completar o cadastro
-Envia comprovante → usu_verificacao = 1, usu_verificacao_expira = NOW() + 6 meses
-Cadastra veículo  → usu_verificacao = 2, usu_verificacao_expira (inalterado)
-6 meses depois    → acesso bloqueado até novo envio de comprovante
+Cadastro inicial        → usu_verificacao = 5, per_habilitado = 0, expira = NOW() + 5 dias
+Confirma OTP (email)    → usu_verificacao = 5 (inalterado), per_habilitado = 1 (login liberado)
+5 dias depois           → acesso bloqueado até completar o cadastro
+Envia comprovante       → usu_verificacao = 1, usu_verificacao_expira = NOW() + 6 meses
+Cadastra veículo        → usu_verificacao = 2, usu_verificacao_expira (inalterado)
+6 meses depois          → acesso bloqueado até novo envio de comprovante
+Admin suspende conta    → per_habilitado = 0 (login bloqueado independente do usu_verificacao)
 ```
+
+> A confirmação de email (`POST /api/usuarios/verificar-email`) é responsável por ativar `per_habilitado = 1`. Sem essa etapa, o login retorna `403` mesmo com credenciais corretas. [fix C2]
 
 O campo `usu_verificacao_expira` é unificado para todos os níveis:
 
@@ -351,14 +515,18 @@ Para se desvincular, cancele via `PUT /api/solicitacoes/:soli_id/cancelar` — o
 
 ### Usuários — `/api/usuarios`
 
-| Método | Rota              | Proteção              | Descrição                                  |
-|--------|-------------------|-----------------------|--------------------------------------------|
-| POST   | `/cadastro`       | Público               | Cadastra novo usuário                      |
-| POST   | `/login`          | Público               | Faz login e retorna token JWT              |
-| GET    | `/perfil/:id`     | [JWT]                 | Retorna perfil e foto do usuário           |
-| PUT    | `/:id`            | [JWT] próprio / [DEV] | Atualiza nome, email ou senha              |
-| PUT    | `/:id/foto`       | [JWT] próprio / [DEV] | Atualiza foto de perfil                    |
-| DELETE | `/:id`            | [JWT] próprio / [DEV] | Desativa conta (soft delete)               |
+| Método | Rota                  | Proteção              | Descrição                                          |
+|--------|-----------------------|-----------------------|----------------------------------------------------|
+| POST   | `/cadastro`           | Público               | Cadastra novo usuário                              |
+| POST   | `/login`              | Público               | Faz login e retorna token JWT                      |
+| POST   | `/verificar-email`    | Público               | Confirma OTP e ativa conta (`per_habilitado = 1`)  |
+| POST   | `/reenviar-otp`       | Público               | Reenvia OTP e reseta contador de tentativas        |
+| POST   | `/forgot-password`    | Público               | Gera token de redefinição e envia por email        |
+| POST   | `/reset-password`     | Público               | Redefine senha com token válido (15 min)           |
+| GET    | `/perfil/:id`         | [JWT]                 | Retorna perfil e foto do usuário                   |
+| PUT    | `/:id`                | [JWT] próprio / [DEV] | Atualiza nome, email ou senha                      |
+| PUT    | `/:id/foto`           | [JWT] próprio / [DEV] | Atualiza foto de perfil                            |
+| DELETE | `/:id`                | [JWT] próprio / [DEV] | Desativa conta (soft delete)                       |
 
 **Cadastro — campos obrigatórios:**
 ```json
@@ -367,16 +535,26 @@ Para se desvincular, cancele via `PUT /api/solicitacoes/:soli_id/cancelar` — o
   "usu_senha": "senha123"
 }
 ```
-O usuário é criado com `usu_verificacao = 5` (cadastro temporário, 5 dias para solicitar caronas).
+O usuário é criado com `usu_verificacao = 0` (aguardando OTP) e `per_habilitado = 0` (login bloqueado até confirmação de email).
 Os demais campos (`usu_nome`, `usu_telefone`, `usu_matricula`, `usu_endereco` etc.) são opcionais e podem ser preenchidos depois via `PUT /:id`.
 
 > **Autorização:** `PUT /:id`, `PUT /:id/foto` e `DELETE /:id` só podem ser executados pelo próprio usuário ou por um Desenvolvedor (`per_tipo=2`). Tentar alterar outro usuário sem essa permissão retorna `403 Forbidden`.
 
-**Resposta do cadastro:**
+> **SMTP não-fatal:** Se o servidor de email estiver indisponível, o cadastro ainda é concluído com `201`. A mensagem de retorno indica que o email não pôde ser enviado, e o OTP pode ser reenvio via `POST /api/usuarios/reenviar-otp`.
+
+**Resposta do cadastro (SMTP ativo):**
 ```json
 {
-  "message": "Usuário cadastrado com sucesso! Complete seu perfil para acesso completo.",
-  "usuario": { "usu_id": 7, "usu_email": "joao@escola.edu.br", "usu_verificacao": 5 }
+  "message": "Usuário cadastrado! Verifique seu email com o código enviado.",
+  "usuario": { "usu_id": 7, "usu_email": "joao@escola.edu.br", "usu_verificacao": 0 }
+}
+```
+
+**Resposta do cadastro (SMTP indisponível):**
+```json
+{
+  "message": "Usuário cadastrado! Não foi possível enviar o email de verificação. Use o endpoint de reenvio.",
+  "usuario": { "usu_id": 7, "usu_email": "joao@escola.edu.br", "usu_verificacao": 0 }
 }
 ```
 
@@ -450,7 +628,7 @@ Vincula usuários a cursos. O `cur_usu_id` gerado é necessário ao criar uma ca
 | Método | Rota                  | Proteção | Descrição                        |
 |--------|-----------------------|----------|----------------------------------|
 | POST   | `/`                   | [JWT]    | Cadastra veículo                 |
-| GET    | `/usuario/:usua_id`   | [JWT]    | Lista veículos ativos do usuário |
+| GET    | `/usuario/:usu_id`    | [JWT]    | Lista veículos ativos do usuário |
 
 **Cadastrar veículo — campos obrigatórios:**
 ```json
@@ -468,14 +646,15 @@ Vincula usuários a cursos. O `cur_usu_id` gerado é necessário ao criar uma ca
 
 ### Caronas — `/api/caronas`
 
-| Método | Rota            | Proteção | Descrição                          |
-|--------|-----------------|----------|------------------------------------|
-| GET    | `/`             | [JWT]    | Lista caronas abertas              |
-| GET    | `/:caro_id`     | [JWT]    | Detalhes de uma carona             |
-| POST   | `/oferecer`     | [JWT]    | Cria nova carona                   |
-| POST   | `/solicitar`    | [JWT]    | Cria solicitação de participação   |
-| PUT    | `/:caro_id`     | [JWT]    | Atualiza dados da carona           |
-| DELETE | `/:caro_id`     | [JWT]    | Cancela carona (soft delete)       |
+| Método | Rota        | Proteção | Descrição                    |
+|--------|-------------|----------|------------------------------|
+| GET    | `/`         | [JWT]    | Lista caronas abertas        |
+| GET    | `/:car_id`  | [JWT]    | Detalhes de uma carona       |
+| POST   | `/oferecer` | [JWT]    | Cria nova carona             |
+| PUT    | `/:car_id`  | [JWT]    | Atualiza dados da carona     |
+| DELETE | `/:car_id`  | [JWT]    | Cancela carona (soft delete) |
+
+> **[fix M3]** A rota `POST /api/caronas/solicitar` foi removida. Use `POST /api/solicitacoes/criar` — endpoint canônico para solicitar vagas.
 
 **Criar carona — campos obrigatórios:**
 ```json
@@ -488,7 +667,7 @@ Vincula usuários a cursos. O `cur_usu_id` gerado é necessário ao criar uma ca
   "car_vagas_dispo": 3
 }
 ```
-`cur_usu_id` é o ID da matrícula do motorista (tabela CURSOS_USUARIOS).
+`cur_usu_id` é o ID da matrícula do motorista (tabela CURSOS_USUARIOS). Deve pertencer ao motorista autenticado — validado no servidor. [fix #18]
 
 > **Restrição:** requer `usu_verificacao = 2`. O `vei_id` deve pertencer ao motorista autenticado.
 
@@ -502,11 +681,11 @@ Vincula usuários a cursos. O `cur_usu_id` gerado é necessário ao criar uma ca
 |--------|-------------------------|----------|------------------------------------|
 | POST   | `/criar`                | [JWT]    | Passageiro solicita vaga           |
 | GET    | `/:soli_id`             | [JWT]    | Detalhes de uma solicitação        |
-| GET    | `/carona/:caro_id`      | [JWT]    | Lista solicitações de uma carona   |
-| GET    | `/usuario/:usua_id`     | [JWT]    | Lista solicitações de um usuário   |
+| GET    | `/carona/:car_id`       | [JWT]    | Lista solicitações de uma carona   |
+| GET    | `/usuario/:usu_id`      | [JWT]    | Lista solicitações de um usuário   |
 | PUT    | `/:soli_id/responder`   | [JWT]    | Motorista aceita ou recusa         |
 | PUT    | `/:soli_id/cancelar`    | [JWT]    | Passageiro cancela solicitação     |
-| DELETE | `/:soli_id`             | [JWT]    | Remove solicitação permanentemente |
+| DELETE | `/:soli_id`             | [JWT]    | Remove solicitação (soft delete — sol_status=0) |
 
 **Solicitar carona — campos obrigatórios:**
 ```json
@@ -533,7 +712,7 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 | POST   | `/`                   | [JWT]    | Adiciona passageiro confirmado  |
 | GET    | `/carona/:car_id`     | [JWT]    | Lista passageiros de uma carona |
 | PUT    | `/:car_pes_id`        | [JWT]    | Atualiza status do passageiro   |
-| DELETE | `/:car_pes_id`        | [ADMIN]  | Remove passageiro da carona     |
+| DELETE | `/:car_pes_id`        | [ADMIN]  | Remove passageiro (soft delete — car_pes_status=0) |
 
 **Adicionar passageiro:**
 ```json
@@ -546,10 +725,10 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 
 ### Pontos de Encontro — `/api/pontos`
 
-| Método | Rota                  | Proteção | Descrição                       |
-|--------|-----------------------|----------|---------------------------------|
-| POST   | `/`                   | Público  | Cadastra ponto de encontro      |
-| GET    | `/carona/:caro_id`    | Público  | Lista pontos de uma carona      |
+| Método | Rota                 | Proteção | Descrição                       |
+|--------|----------------------|----------|---------------------------------|
+| POST   | `/`                  | Público  | Cadastra ponto de encontro      |
+| GET    | `/carona/:car_id`    | Público  | Lista pontos de uma carona      |
 
 **Criar ponto — campos obrigatórios:**
 ```json
@@ -570,8 +749,8 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 
 | Método | Rota                  | Proteção | Descrição                        |
 |--------|-----------------------|----------|----------------------------------|
-| POST   | `/enviar`             | [JWT]    | Envia mensagem no chat da carona |
-| GET    | `/carona/:caro_id`    | [JWT]    | Lista conversa de uma carona     |
+| POST   | `/enviar`            | [JWT]    | Envia mensagem no chat da carona |
+| GET    | `/carona/:car_id`    | [JWT]    | Lista conversa de uma carona     |
 | PUT    | `/:mens_id`           | [JWT]    | Edita mensagem                   |
 | DELETE | `/:mens_id`           | [JWT]    | Remove mensagem (soft delete)    |
 
@@ -595,7 +774,7 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 | GET    | `/`                 | [ADMIN]  | Lista sugestões/denúncias (Admin: escopo escola, Dev: todas) |
 | GET    | `/:sug_id`          | [JWT]    | Detalhes de uma sugestão/denúncia    |
 | PUT    | `/:sug_id/responder`| [ADMIN]  | Responde e fecha o registro          |
-| DELETE | `/:sug_id`          | [DEV]    | Remove permanentemente               |
+| DELETE | `/:sug_id`          | [DEV]    | Remove registro (soft delete — sug_deletado_em) |
 
 **Criar sugestão/denúncia — campos obrigatórios:**
 ```json
@@ -614,6 +793,35 @@ Gerencia passageiros aceitos em uma carona (tabela CARONA_PESSOAS).
 
 ---
 
+### Admin — `/api/admin`
+
+Estatísticas do sistema para painéis de gestão. Todos os endpoints exigem **[JWT] + [ADMIN]** (per_tipo 1 ou 2).
+
+| Método | Rota                  | Acesso         | Descrição                                                       |
+|--------|-----------------------|----------------|-----------------------------------------------------------------|
+| GET    | `/stats/usuarios`     | [ADMIN] / [DEV]| Totais de usuários por status e verificação                     |
+| GET    | `/stats/caronas`      | [ADMIN] / [DEV]| Totais de caronas por status                                    |
+| GET    | `/stats/sugestoes`    | [ADMIN] / [DEV]| Totais de sugestões/denúncias por tipo e status                 |
+| GET    | `/stats/sistema`      | [DEV]          | Resumo consolidado de todos os módulos (apenas Desenvolvedor)   |
+
+> **Escopo:** Administrador (`per_tipo = 1`) vê apenas dados vinculados à sua escola (`per_escola_id`). Desenvolvedor (`per_tipo = 2`) vê o sistema inteiro. Todas as queries de Admin usam JOIN com CURSOS → ESCOLAS para filtrar por `esc_id`. `stats/sistema` usa `Promise.all` para executar as 5 queries em paralelo.
+
+**Exemplo de resposta — `GET /api/admin/stats/sistema`:**
+```json
+{
+  "message": "Resumo geral do sistema",
+  "sistema": {
+    "usuarios":     { "total": 42, "ativos": 38 },
+    "caronas":      { "total": 15, "abertas": 4 },
+    "solicitacoes": { "total": 30, "aceitas": 18 },
+    "mensagens":    { "total": 120 },
+    "veiculos":     { "total": 10 }
+  }
+}
+```
+
+---
+
 ## Testes
 
 ```bash
@@ -622,20 +830,50 @@ npm test        # Executa todos os testes com Jest
 
 Os testes estão em `tests/` e usam `supertest` para simular requisições HTTP sem subir o servidor manualmente.
 
-### Cobertura atual — 118 testes
+### Cobertura atual — 143 testes
 
 | Arquivo                        | Testes | O que cobre                                                                                      |
 |--------------------------------|--------|--------------------------------------------------------------------------------------------------|
-| `endpoints.test.js`            | ~50    | Cadastro, login, perfil, CRUD de caronas/veículos/matrículas/solicitações/mensagens/pontos/sugestões/passageiros, erros 400/404 |
+| `endpoints.test.js`            | 33     | Cadastro, login, perfil, CRUD de caronas/veículos/matrículas/solicitações/mensagens/pontos/sugestões/passageiros, erros 400/404 |
 | `seguranca.test.js`            | 10     | Sem token (403), token inválido (401), acesso com token válido (200), rota pública, permissões por per_tipo (5 casos) |
 | `db.test.js`                   | 25     | Conexão com o banco, SELECT em todas as 13 tabelas, 10 JOINs replicando queries dos controllers |
 | `simulacao.test.js`            | 28     | Fluxo ponta a ponta: cadastro → verificação → veículo → carona → solicitação → aceite → chat → finalização |
-| `regras_verificacao.test.js`   | 8      | Regras de verificação para oferecer e solicitar carona (níveis 0/1/2, validade expirada e ativa) |
+| `regras_verificacao.test.js`   | 8      | Regras de verificação para oferecer e solicitar carona (níveis 0/1/2, validade expirada e ativa, rota removida) |
+| `testesregras0104.test.js`     | 37     | Regras de negócio: motorista não solicita própria carona (R1), carona ativa bloqueia R2), vínculo único (R3), cadastro temporário (CT) |
 | `test2903.test.js`             | 2      | Conectividade e banco correto                                                                    |
 
-**Total: 123 testes**
-
 > O `globalSetup` (`tests/setup.js`) cria automaticamente o usuário `admin@escola.com` (senha `123456`) com `usu_verificacao = 2`, `per_tipo = 2` (Desenvolvedor) e validade de 6 meses antes de qualquer teste. Não é necessário executar scripts SQL manualmente para rodar os testes.
+
+> **Ativação de conta nos testes:** Testes que criam usuários via `POST /api/usuarios/cadastro` e em seguida fazem login precisam ativar a conta diretamente no banco antes de logar (simula confirmação de OTP sem SMTP). O padrão usado é atualizar `usu_verificacao` e `per_habilitado = 1` via helper `setVerificacao` / `ativarConta` — ambos disponíveis nos arquivos de teste que precisam disso.
+
+---
+
+### Testes manuais via REST Client
+
+O arquivo `infosdatabase/test-api.http` contém mais de 50 requisições HTTP cobrindo todos os recursos e cenários de segurança. Compatível com a extensão **REST Client** do VS Code.
+
+**Para usar:**
+1. Execute `infosdatabase/insert.sql` no banco (Bloco 2 — 9 usuários de teste)
+2. Abra o arquivo no VS Code com a extensão REST Client instalada
+3. Execute as seções na ordem: Infra → Cadastro/OTP → Login → recursos
+
+**Seções do arquivo:**
+
+| Seção                  | Cenários cobertos                                                        |
+|------------------------|--------------------------------------------------------------------------|
+| Infra (público)        | GET escolas, GET cursos                                                  |
+| Cadastro + OTP         | Cadastro, verificar email, fluxo completo                                |
+| Login                  | 5 cenários de bloqueio: usu_status=0, verificacao=0, per_habilitado=0   |
+| Perfil                 | GET próprio, GET outro usuário, PUT atualizar [A1]                       |
+| Veículos               | Cadastrar, listar próprio, listar de outro (bloqueio) [M2]               |
+| Matrículas             | Criar, listar por usuário, listar por curso                              |
+| Caronas                | Oferecer, listar, detalhar, atualizar, cancelar, XSS em car_desc [A2]   |
+| Solicitações           | Solicitar, responder (aceitar/recusar), cancelar                         |
+| Passageiros            | Listar, atualizar status                                                 |
+| Pontos de encontro     | Criar, listar por carona                                                 |
+| Mensagens              | Enviar, listar, editar própria, editar de outro (bloqueio) [C1]          |
+| Sugestões/Denúncias    | Criar, listar (Admin), detalhar própria, detalhar de outro (bloqueio) [A3] |
+| Falhas de autenticação | Sem token, token inválido, recurso inexistente                           |
 
 ---
 

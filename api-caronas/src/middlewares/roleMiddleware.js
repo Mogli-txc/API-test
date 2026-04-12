@@ -55,7 +55,8 @@ const checkRole = (tiposPermitidos) => async (req, res, next) => {
 
     } catch (error) {
         console.error("[ERRO] roleMiddleware:", error);
-        return res.status(500).json({ error: "Erro ao verificar permissões." });
+        // Princípio de default-deny: falha de banco não deve conceder acesso
+        return res.status(403).json({ error: "Não foi possível verificar permissões." });
     }
 };
 

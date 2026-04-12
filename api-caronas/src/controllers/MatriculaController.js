@@ -9,6 +9,7 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+const { checkDevOrOwner } = require('../utils/authHelper');
 
 class MatriculaController {
 
@@ -24,12 +25,15 @@ class MatriculaController {
     async matricular(req, res) {
         try {
             // PASSO 1: Extrai os dados da requisição
-            const { usu_id, cur_id, cur_usu_dataFinal } = req.body;
+            // usu_id é ignorado do body — o usuário matriculado é sempre o autenticado (req.user.id)
+            // Aceitar usu_id do body permitiria matricular outros usuários em cursos
+            const usu_id = req.user.id;
+            const { cur_id, cur_usu_dataFinal } = req.body;
 
             // PASSO 2: Valida campos obrigatórios
-            if (!usu_id || !cur_id || !cur_usu_dataFinal) {
+            if (!cur_id || !cur_usu_dataFinal) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: usu_id, cur_id, cur_usu_dataFinal."
+                    error: "Campos obrigatórios: cur_id, cur_usu_dataFinal."
                 });
             }
 
@@ -79,7 +83,12 @@ class MatriculaController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // PASSO 3: Busca as matrículas com nome do curso e escola via JOIN
+            // PASSO 3: Apenas o próprio usuário pode ver suas matrículas (ou Desenvolvedor)
+            if (!await checkDevOrOwner(req.user.id, usu_id)) {
+                return res.status(403).json({ error: "Sem permissão para ver matrículas de outro usuário." });
+            }
+
+            // PASSO 4: Busca as matrículas com nome do curso e escola via JOIN
             const [matriculas] = await db.query(
                 `SELECT cu.cur_usu_id, cu.cur_id, cu.cur_usu_dataFinal,
                         c.cur_nome AS curso, c.cur_semestre,
@@ -92,7 +101,7 @@ class MatriculaController {
                 [usu_id]
             );
 
-            // PASSO 4: Resposta de sucesso
+            // PASSO 5: Resposta de sucesso
             return res.status(200).json({
                 message:   `Matrículas do usuário ${usu_id} listadas.`,
                 total:     matriculas.length,
@@ -178,13 +187,25 @@ class MatriculaController {
                 return res.status(400).json({ error: "ID de matrícula inválido." });
             }
 
-            // PASSO 3: Remove a matrícula do banco
+            // PASSO 3: Verifica se a matrícula pertence ao usuário autenticado (ou é Desenvolvedor)
+            const [matricula] = await db.query(
+                'SELECT usu_id FROM CURSOS_USUARIOS WHERE cur_usu_id = ?',
+                [cur_usu_id]
+            );
+            if (matricula.length === 0) {
+                return res.status(404).json({ error: "Matrícula não encontrada." });
+            }
+            if (!await checkDevOrOwner(req.user.id, matricula[0].usu_id)) {
+                return res.status(403).json({ error: "Sem permissão para cancelar a matrícula de outro usuário." });
+            }
+
+            // PASSO 4: Remove a matrícula do banco
             await db.query(
                 'DELETE FROM CURSOS_USUARIOS WHERE cur_usu_id = ?',
                 [cur_usu_id]
             );
 
-            // PASSO 4: Resposta sem conteúdo (sucesso)
+            // PASSO 5: Resposta sem conteúdo (sucesso)
             return res.status(204).send();
 
         } catch (error) {

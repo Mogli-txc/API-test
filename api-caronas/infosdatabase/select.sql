@@ -9,7 +9,7 @@
 --   [C] SELECTs de teste  — simulam chamadas reais do Back-end
 --
 -- LEGENDA DE STATUS (referência rápida):
--- USUARIOS:         usu_verificacao (0=Não verificado, 1=Matrícula verificada,
+-- USUARIOS:         usu_verificacao (0=Não verificado (aguarda OTP), 1=Matrícula verificada,
 --                                    2=Matrícula + veículo, 5=Cadastro temporário 5 dias)
 --                   usu_status      (0=Inativo, 1=Ativo)
 -- PERFIL:           per_tipo        (0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total))
@@ -20,12 +20,17 @@
 -- CARONAS:          car_status      (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
 -- PONTO_ENCONTROS:  pon_tipo        (0=Partida, 1=Destino)
 --                   pon_status      (0=Inativo, 1=Ativo)
--- MENSAGENS:        men_status      (0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida)
---                   men_deletado_em (NULL=visível; datetime=soft-deletada)
--- SOLICITACOES:     sol_status      (0=Cancelado, 1=Enviado, 2=Aceito, 3=Negado)
--- CARONA_PESSOAS:   car_pes_status  (0=Cancelado, 1=Aceito, 2=Negado)
--- SUGESTAO:         sug_status      (0=Fechado, 1=Aberto, 3=Em análise)
---                   sug_tipo        (0=Denúncia, 1=Sugestão)
+-- MENSAGENS:        men_status          (0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida)
+--                   men_deletado_em     (NULL=visível; datetime=soft-deletada)
+-- SOLICITACOES:     sol_status          (0=Cancelado, 1=Enviado, 2=Aceito, 3=Negado)
+-- CARONA_PESSOAS:   car_pes_status      (0=Cancelado, 1=Aceito, 2=Negado)
+-- SUGESTAO:         sug_status          (0=Fechado, 1=Aberto, 3=Em análise)
+--                   sug_tipo            (0=Denúncia, 1=Sugestão)
+--                   sug_deletado_em     (NULL=ativo; datetime=soft-deletada)
+-- USUARIOS (novos): usu_otp_tentativas  (INT DEFAULT 0)
+--                   usu_otp_bloqueado_ate (DATETIME NULL — bloqueio após 3 falhas OTP)
+--                   usu_reset_hash      (VARCHAR(64) NULL — hash HMAC do token forgot-password)
+--                   usu_reset_expira    (DATETIME NULL — expiração do token reset, 15 min)
 -- =====================================================
 
 
@@ -127,23 +132,41 @@ FROM USUARIOS
 WHERE usu_email = 'carlos.silva@aluno.inova.br'
   AND usu_senha = 'hash_carlos_1';
 
--- [C] TESTE: Verificar se usuário pode acessar o app (ativo + verificado)
+-- [C] TESTE: Verificar se usuário pode acessar o app (ativo + OTP confirmado)
+-- verificacao != 0 cobre todos os níveis válidos: 1 (matrícula), 2 (veículo), 5 (temporário)
 SELECT usu_id, usu_nome
 FROM USUARIOS
 WHERE usu_id = 1
   AND usu_status = 1
-  AND usu_verificacao = 1;
+  AND usu_verificacao != 0;
 
--- [C] TESTE: Listar apenas usuários ativos e verificados
-SELECT usu_id, usu_nome, usu_email
+-- [C] TESTE: Listar apenas usuários ativos e com acesso liberado (OTP confirmado)
+SELECT usu_id, usu_nome, usu_email, usu_verificacao
 FROM USUARIOS
 WHERE usu_status = 1
-  AND usu_verificacao = 1;
+  AND usu_verificacao != 0;
 
--- [C] TESTE: Listar inativos ou não verificados (painel de moderação)
+-- [C] TESTE: Listar inativos ou aguardando OTP (painel de moderação)
 SELECT usu_id, usu_nome, usu_email, usu_verificacao, usu_status
 FROM USUARIOS
 WHERE usu_status = 0 OR usu_verificacao = 0;
+
+-- [C] TESTE: Listar usuários aguardando confirmação de OTP
+-- verificacao=0 + status=1 → cadastrado mas email não confirmado ainda
+SELECT usu_id, usu_email, usu_otp_expira
+FROM USUARIOS
+WHERE usu_verificacao = 0
+  AND usu_status = 1
+ORDER BY usu_otp_expira ASC;
+
+-- [C] TESTE: Verificar OTP de um usuário (valida antes de confirmar o email)
+-- Compara hash do OTP fornecido com o armazenado e verifica se não expirou
+SELECT usu_id, usu_verificacao, usu_otp_hash, usu_otp_expira
+FROM USUARIOS
+WHERE usu_email = 'pendente.otp@aluno.inova.br'
+  AND usu_status = 1
+  AND usu_verificacao = 0
+  AND usu_otp_expira > NOW();
 
 -- [C] TESTE: Dados públicos de um usuário (tela de perfil)
 SELECT usu_id, usu_nome, usu_foto, usu_descricao, usu_horario_habitual
@@ -702,9 +725,14 @@ ORDER BY m.men_id ASC;
 -- =====================================================
 -- 13. SUGESTAO_DENUNCIA
 -- =====================================================
+-- OBS: sug_deletado_em IS NULL filtra registros soft-deletados.
+--      Todas as consultas operacionais devem incluir esse filtro.
 
--- [A] Todas as sugestões e denúncias
+-- [A] Todas as sugestões e denúncias (incluindo soft-deletadas, para auditoria)
 SELECT * FROM SUGESTAO_DENUNCIA;
+
+-- [A] Apenas registros ativos (excluindo soft-deletadas)
+SELECT * FROM SUGESTAO_DENUNCIA WHERE sug_deletado_em IS NULL;
 
 -- [B] Sugestões/denúncias com autor, respondente e tipos legíveis
 SELECT
@@ -732,6 +760,7 @@ SELECT
 FROM SUGESTAO_DENUNCIA sd
 INNER JOIN USUARIOS u ON sd.usu_id = u.usu_id
 WHERE sd.sug_status IN (1, 3)
+  AND sd.sug_deletado_em IS NULL
 ORDER BY sd.sug_data ASC;
 
 -- [C] TESTE: Fila filtrada por escola — escopo do Administrador (per_tipo=1)
@@ -741,6 +770,7 @@ INNER JOIN CURSOS_USUARIOS cu ON sd.usu_id = cu.usu_id
 INNER JOIN CURSOS          c  ON cu.cur_id = c.cur_id
 WHERE c.esc_id = 1  -- substituir pelo per_escola_id do admin logado
   AND sd.sug_status IN (1, 3)
+  AND sd.sug_deletado_em IS NULL
 ORDER BY sd.sug_data ASC;
 
 -- [C] TESTE: Apenas DENÚNCIAS pendentes (moderação prioritária)
@@ -752,6 +782,7 @@ FROM SUGESTAO_DENUNCIA sd
 INNER JOIN USUARIOS u ON sd.usu_id = u.usu_id
 WHERE sd.sug_tipo = 0
   AND sd.sug_status IN (1, 3)
+  AND sd.sug_deletado_em IS NULL
 ORDER BY sd.sug_data ASC;
 
 -- [C] TESTE: Histórico de um usuário (tela "Minhas solicitações" no app)
@@ -764,6 +795,7 @@ SELECT
     sug_resposta
 FROM SUGESTAO_DENUNCIA
 WHERE usu_id = 2
+  AND sug_deletado_em IS NULL
 ORDER BY sug_data DESC;
 
 -- [C] TESTE: Resumo por status (card de contagem no painel admin)
@@ -775,6 +807,7 @@ SELECT
     END AS status,
     COUNT(*) AS total
 FROM SUGESTAO_DENUNCIA
+WHERE sug_deletado_em IS NULL
 GROUP BY sug_status
 ORDER BY sug_status;
 
@@ -822,8 +855,10 @@ UNION ALL SELECT 'Usuarios',            COUNT(*) FROM USUARIOS
 UNION ALL SELECT 'Veiculos',            COUNT(*) FROM VEICULOS
 UNION ALL SELECT 'Caronas',             COUNT(*) FROM CARONAS
 UNION ALL SELECT 'Solicitacoes',        COUNT(*) FROM SOLICITACOES_CARONA
-UNION ALL SELECT 'Mensagens',           COUNT(*) FROM MENSAGENS
-UNION ALL SELECT 'Sugestoes/Denuncias', COUNT(*) FROM SUGESTAO_DENUNCIA;
+UNION ALL SELECT 'Carona_Pessoas',      COUNT(*) FROM CARONA_PESSOAS
+UNION ALL SELECT 'Mensagens',           COUNT(*) FROM MENSAGENS WHERE men_deletado_em IS NULL
+UNION ALL SELECT 'Sugestoes/Denuncias', COUNT(*) FROM SUGESTAO_DENUNCIA WHERE sug_deletado_em IS NULL
+UNION ALL SELECT 'Audit_Log',           COUNT(*) FROM AUDIT_LOG;
 
 -- [GERAL] Painel dev: distribuição de perfis por tipo de acesso
 SELECT
@@ -836,3 +871,231 @@ SELECT
 FROM PERFIL
 GROUP BY per_tipo
 ORDER BY per_tipo;
+
+
+-- =====================================================
+-- QUERIES DE VALIDAÇÃO — NOVAS IMPLEMENTAÇÕES DE SEGURANÇA
+-- Cenários adicionados após auditoria (2026-04)
+-- =====================================================
+
+-- [C2] Usuários que passam no usu_status + usu_verificacao mas são bloqueados no per_habilitado
+-- Resultado esperado: usu_id=9 (Fábio Suspenso) — conta ativa, verificada, mas perfil desabilitado
+SELECT u.usu_id, u.usu_nome, u.usu_email,
+       u.usu_status, u.usu_verificacao, p.per_habilitado
+FROM USUARIOS u
+INNER JOIN PERFIL p ON u.usu_id = p.usu_id
+WHERE u.usu_status = 1
+  AND u.usu_verificacao != 0
+  AND p.per_habilitado = 0;
+
+-- [C2] Confirmar que usu_id=7 (Novo) pode fazer login após verificarEmail habilitar per_habilitado=1
+SELECT u.usu_id, u.usu_nome, u.usu_verificacao, p.per_habilitado
+FROM USUARIOS u
+INNER JOIN PERFIL p ON u.usu_id = p.usu_id
+WHERE u.usu_id = 7;
+
+-- [A1] Confirmar que GET /api/usuarios/perfil/:id NÃO retorna per_tipo nem per_habilitado
+-- A query do controller agora é apenas sobre USUARIOS (sem JOIN PERFIL):
+SELECT u.usu_id, u.usu_nome, u.usu_telefone,
+       u.usu_descricao, u.usu_foto, u.usu_endereco
+FROM USUARIOS u
+WHERE u.usu_id = 6;  -- Admin: per_tipo=2 NÃO deve aparecer na resposta da API
+
+-- [C1] Mensagens e seus donos (testa ownership de editar/deletar)
+-- Esperado: apenas usu_id_remetente pode editar/deletar cada mensagem
+SELECT men_id, usu_id_remetente, usu_id_destinatario, men_texto, men_deletado_em
+FROM MENSAGENS
+WHERE car_id = 1
+ORDER BY men_id;
+
+-- [C1] Simular verificação de ownership: Lucas (usu_id=5) tenta editar men_id=1 (da Mariana)
+-- Resultado esperado: 0 linhas (ownership falhou → API retorna 404)
+SELECT men_id FROM MENSAGENS
+WHERE men_id = 1
+  AND usu_id_remetente = 5  -- Lucas (não é dono)
+  AND men_deletado_em IS NULL;
+
+-- [C1] Lucas (usu_id=5) editando a própria mensagem (men_id=4)
+-- Resultado esperado: 1 linha (ownership OK → API autoriza UPDATE)
+SELECT men_id FROM MENSAGENS
+WHERE men_id = 4
+  AND usu_id_remetente = 5  -- Lucas (é o dono)
+  AND men_deletado_em IS NULL;
+
+-- [A3] Sugestões por dono — Carlos (usu_id=1) só deve ver sug_id=3
+SELECT sug_id, usu_id, sug_tipo, sug_status, sug_texto
+FROM SUGESTAO_DENUNCIA
+WHERE usu_id = 1;
+
+-- [A3] Lucas (usu_id=5) tentando ver sug_id=1 (da Mariana — usu_id=2)
+-- Resultado esperado: 0 linhas (API retorna 403 para não-admin)
+SELECT sug_id FROM SUGESTAO_DENUNCIA
+WHERE sug_id = 1 AND usu_id = 5;  -- Lucas não é o autor
+
+-- [M2] Veículos de Pedro (usu_id=3) — Carlos (usu_id=1) não deve ter acesso via API
+-- A query abaixo simula o que o controller faz; a API bloqueia antes de chegar aqui
+SELECT vei_id, vei_marca_modelo, vei_tipo, vei_vagas
+FROM VEICULOS
+WHERE usu_id = 3 AND vei_status = 1;
+
+-- [M2] Verificar ownership em listarPorUsuario: req.user.id != usu_id do params
+-- Simula Carlos (1) tentando listar veículos de Pedro (3)
+-- API bloqueia antes da query se não for Dev; este select confirma os dados esperados
+SELECT p.per_tipo FROM PERFIL p WHERE p.usu_id = 1;  -- Carlos: per_tipo=0 → bloqueado
+
+-- [A2] Confirmar que car_desc não contém HTML armazenado (deve estar limpo após stripHtml)
+SELECT car_id, car_desc
+FROM CARONAS
+WHERE car_desc LIKE '%<%' OR car_desc LIKE '%>%';  -- Resultado esperado: 0 linhas
+
+-- [M1] Verificação de whitelist — só colunas conhecidas nos UPDATEs
+-- Esta validação é feita no código; use as queries abaixo para confirmar estado pós-update
+SELECT car_id, car_desc, car_vagas_dispo, car_status FROM CARONAS WHERE car_id = 1;
+SELECT usu_id, usu_nome, usu_email FROM USUARIOS WHERE usu_id = 1;
+
+-- [GERAL] Dashboard de segurança: contas bloqueadas por tipo de bloqueio
+SELECT
+    'Inativas (usu_status=0)'             AS motivo_bloqueio, COUNT(*) AS total FROM USUARIOS WHERE usu_status = 0
+UNION ALL
+SELECT 'Aguardando OTP (verificacao=0)',  COUNT(*) FROM USUARIOS WHERE usu_verificacao = 0 AND usu_status = 1
+UNION ALL
+SELECT 'Perfil desabilitado (per_habilitado=0)',
+       COUNT(*) FROM USUARIOS u INNER JOIN PERFIL p ON u.usu_id = p.usu_id
+       WHERE u.usu_status = 1 AND u.usu_verificacao != 0 AND p.per_habilitado = 0;
+
+
+-- =====================================================
+-- 14. AUDIT_LOG — Rastreabilidade de ações
+-- Gerenciado por src/utils/auditLog.js (silent-failure)
+-- =====================================================
+
+-- [A] Todos os registros de auditoria
+SELECT * FROM AUDIT_LOG ORDER BY criado_em DESC;
+
+-- [B] Registros com nome do usuário que realizou a ação
+SELECT
+    al.audit_id,
+    al.acao,
+    al.tabela,
+    al.registro_id,
+    u.usu_email AS usuario,
+    al.ip,
+    al.criado_em
+FROM AUDIT_LOG al
+LEFT JOIN USUARIOS u ON al.usu_id = u.usu_id
+ORDER BY al.criado_em DESC;
+
+-- [C] TESTE: Histórico de login de um usuário específico
+SELECT acao, ip, criado_em
+FROM AUDIT_LOG
+WHERE usu_id = 1
+  AND acao IN ('LOGIN', 'LOGIN_FALHA')
+ORDER BY criado_em DESC;
+
+-- [C] TESTE: Tentativas de login com falha nas últimas 24 horas (detecção de ataque)
+SELECT
+    usu_id, ip, COUNT(*) AS tentativas, MAX(criado_em) AS ultima_tentativa
+FROM AUDIT_LOG
+WHERE acao = 'LOGIN_FALHA'
+  AND criado_em >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+GROUP BY usu_id, ip
+ORDER BY tentativas DESC;
+
+-- [C] TESTE: Contas deletadas (soft) nos últimos 7 dias
+SELECT al.audit_id, u.usu_email, al.ip, al.criado_em
+FROM AUDIT_LOG al
+LEFT JOIN USUARIOS u ON al.usu_id = u.usu_id
+WHERE al.acao = 'DELETAR_USU'
+  AND al.criado_em >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+ORDER BY al.criado_em DESC;
+
+-- [C] TESTE: Redefinições de senha nos últimos 7 dias
+SELECT al.usu_id, u.usu_email, al.ip, al.criado_em
+FROM AUDIT_LOG al
+LEFT JOIN USUARIOS u ON al.usu_id = u.usu_id
+WHERE al.acao = 'SENHA_RESET'
+  AND al.criado_em >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+ORDER BY al.criado_em DESC;
+
+-- [C] TESTE: Distribuição de ações (resumo para o painel dev)
+SELECT acao, COUNT(*) AS total
+FROM AUDIT_LOG
+GROUP BY acao
+ORDER BY total DESC;
+
+
+-- =====================================================
+-- QUERIES DE VALIDAÇÃO — TIER 1 (Segurança adicional)
+-- Novas implementações após segundo ciclo de melhorias
+-- =====================================================
+
+-- [OTP] Contas com OTP bloqueado no momento (3 falhas — bloqueio ativo)
+-- Resultado esperado em ambiente limpo: 0 linhas
+SELECT usu_id, usu_email, usu_otp_tentativas, usu_otp_bloqueado_ate
+FROM USUARIOS
+WHERE usu_otp_bloqueado_ate IS NOT NULL
+  AND usu_otp_bloqueado_ate > NOW();
+
+-- [OTP] Contas com histórico de falhas de OTP mas bloqueio expirado (desbloqueadas)
+SELECT usu_id, usu_email, usu_otp_tentativas, usu_otp_bloqueado_ate
+FROM USUARIOS
+WHERE usu_otp_tentativas > 0
+  AND (usu_otp_bloqueado_ate IS NULL OR usu_otp_bloqueado_ate <= NOW());
+
+-- [RESET] Tokens de recuperação de senha ainda válidos (em uso ativo)
+SELECT usu_id, usu_email, usu_reset_expira
+FROM USUARIOS
+WHERE usu_reset_hash IS NOT NULL
+  AND usu_reset_expira > NOW();
+
+-- [RESET] Tokens de recuperação expirados não limpos (anomalia — devem ser NULL após uso)
+-- Resultado esperado: 0 linhas (o controller limpa após uso bem-sucedido)
+SELECT usu_id, usu_email, usu_reset_expira
+FROM USUARIOS
+WHERE usu_reset_hash IS NOT NULL
+  AND usu_reset_expira <= NOW();
+
+-- [SOFT-DELETE] Sugestões/denúncias removidas logicamente (administração)
+SELECT sug_id, usu_id, sug_tipo, sug_status, sug_deletado_em
+FROM SUGESTAO_DENUNCIA
+WHERE sug_deletado_em IS NOT NULL
+ORDER BY sug_deletado_em DESC;
+
+-- [SOFT-DELETE] Solicitações canceladas via soft-delete (sol_status=0)
+SELECT sol_id, usu_id_passageiro, car_id, sol_status
+FROM SOLICITACOES_CARONA
+WHERE sol_status = 0
+ORDER BY sol_id DESC;
+
+-- [SOFT-DELETE] Passageiros removidos de caronas via soft-delete (car_pes_status=0)
+SELECT car_pes_id, car_id, usu_id, car_pes_status, car_pes_data
+FROM CARONA_PESSOAS
+WHERE car_pes_status = 0
+ORDER BY car_pes_id DESC;
+
+-- [ADMIN] Estatísticas de usuários por escola — replica a query do AdminController (per_tipo=1)
+-- Substitua esc_id=1 pelo per_escola_id do administrador logado
+SELECT
+    COUNT(DISTINCT u.usu_id)         AS total,
+    SUM(u.usu_status = 1)            AS ativos,
+    SUM(u.usu_status = 0)            AS inativos,
+    SUM(u.usu_verificacao = 0)       AS aguardando_otp,
+    SUM(u.usu_verificacao = 5)       AS acesso_temporario,
+    SUM(u.usu_verificacao = 1)       AS matricula_verificada,
+    SUM(u.usu_verificacao = 2)       AS completos
+FROM USUARIOS u
+INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+INNER JOIN CURSOS           c  ON cu.cur_id = c.cur_id
+WHERE c.esc_id = 1;
+
+-- [ADMIN] Estatísticas de caronas por escola — replica AdminController (per_tipo=1)
+SELECT
+    COUNT(*)               AS total,
+    SUM(c.car_status = 1)  AS abertas,
+    SUM(c.car_status = 2)  AS em_espera,
+    SUM(c.car_status = 3)  AS finalizadas,
+    SUM(c.car_status = 0)  AS canceladas
+FROM CARONAS c
+INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+INNER JOIN CURSOS           cr ON cu.cur_id   = cr.cur_id
+WHERE cr.esc_id = 1;

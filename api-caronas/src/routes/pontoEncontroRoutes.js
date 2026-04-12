@@ -3,7 +3,7 @@
  *
  * Endpoints:
  * - POST /api/pontos/               → Cadastra ponto de encontro (PROTEGIDO)
- * - GET  /api/pontos/carona/:caro_id → Lista pontos de uma carona (PROTEGIDO)
+ * - GET  /api/pontos/carona/:car_id  → Lista pontos de uma carona (PROTEGIDO)
  */
 
 const express               = require('express');
@@ -15,6 +15,6 @@ const auth                  = require('../middlewares/authMiddleware'); // Adici
 router.post('/', auth, PontoEncontroController.criar);
 
 // Lista pontos de uma carona — apenas usuários autenticados
-router.get('/carona/:caro_id', auth, PontoEncontroController.listarPorCarona);
+router.get('/carona/:car_id', auth, PontoEncontroController.listarPorCarona);
 
 module.exports = router;

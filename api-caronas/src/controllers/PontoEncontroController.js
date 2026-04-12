@@ -75,27 +75,26 @@ class PontoEncontroController {
     async listarPorCarona(req, res) {
         try {
             // PASSO 1: Extrai o ID da carona
-            const { caro_id } = req.params;
+            const { car_id } = req.params;
 
             // PASSO 2: Validação do ID
-            if (!caro_id || isNaN(caro_id)) {
+            if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
             // PASSO 3: Busca no banco ordenado pela ordem dos pontos
-            // SELECT * FROM PONTO_ENCONTROS WHERE car_id = ? AND pon_status = 1 ORDER BY pon_ordem
             const [pontos] = await db.query(
                 `SELECT pon_id, pon_nome, pon_endereco, pon_endereco_geom,
                         pon_tipo, pon_ordem, pon_status
                  FROM PONTO_ENCONTROS
                  WHERE car_id = ? AND pon_status = 1
                  ORDER BY pon_ordem ASC`,
-                [caro_id]
+                [car_id]
             );
 
             // PASSO 4: Resposta de sucesso
             return res.status(200).json({
-                message: `Rota da carona ${caro_id} recuperada.`,
+                message: `Rota da carona ${car_id} recuperada.`,
                 total:   pontos.length,
                 pontos
             });

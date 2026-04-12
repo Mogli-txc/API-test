@@ -21,39 +21,32 @@ router.get('/', authMiddleware, CaronaController.listarTodas);
  * ROTA: POST /api/caronas/oferecer
  * Descrição: Cria uma nova carona (oferecida por um condutor)
  * Acesso: PROTEGIDO - Requer Token JWT válido no header Authorization
- * Campos obrigatórios: cur_usu_id, vei_id, caro_desc, caro_data, caro_vagasDispo
+ * Campos obrigatórios: cur_usu_id, vei_id, car_desc, car_data, car_vagas_dispo
  * MER: Tabela CARONAS
  */
 router.post('/oferecer', authMiddleware, CaronaController.criar);
 
-/**
- * ROTA: POST /api/caronas/solicitar
- * Descrição: Cria uma solicitação para participar de uma carona
- * Acesso: PROTEGIDO - Requer Token JWT válido
- * Campos obrigatórios: caro_id, usua_id, soli_vagaSolicitadas
- * MER: Tabela SOLICITACOES_CARONA
- */
-router.post('/solicitar', authMiddleware, CaronaController.solicitar);
+// Solicitações de carona: use POST /api/solicitacoes/criar (SolicitacaoController)
 
 /**
- * ROTA: GET /api/caronas/:caro_id
+ * ROTA: GET /api/caronas/:car_id
  * Descrição: Recupera detalhes de uma carona específica
  * Acesso: PROTEGIDO - Requer autenticação
  */
-router.get('/:caro_id', authMiddleware, CaronaController.obterPorId);
+router.get('/:car_id', authMiddleware, CaronaController.obterPorId);
 
 /**
- * ROTA: PUT /api/caronas/:caro_id
+ * ROTA: PUT /api/caronas/:car_id
  * Descrição: Atualiza os dados de uma carona (apenas o proprietário pode)
  * Acesso: PROTEGIDO - Requer Token JWT
  */
-router.put('/:caro_id', authMiddleware, CaronaController.atualizar);
+router.put('/:car_id', authMiddleware, CaronaController.atualizar);
 
 /**
- * ROTA: DELETE /api/caronas/:caro_id
+ * ROTA: DELETE /api/caronas/:car_id
  * Descrição: Cancela uma carona (apenas o proprietário pode)
  * Acesso: PROTEGIDO - Requer Token JWT
  */
-router.delete('/:caro_id', authMiddleware, CaronaController.deletar);
+router.delete('/:car_id', authMiddleware, CaronaController.deletar);
 
 module.exports = router;

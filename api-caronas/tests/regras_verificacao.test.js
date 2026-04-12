@@ -46,6 +46,8 @@ async function setVerificacao(usu_id, nivel, expira) {
         'UPDATE USUARIOS SET usu_verificacao = ?, usu_verificacao_expira = ? WHERE usu_id = ?',
         [nivel, expira, usu_id]
     );
+    // Garante per_habilitado=1 — login bloqueia contas com per_habilitado=0
+    await db.execute('UPDATE PERFIL SET per_habilitado = 1 WHERE usu_id = ?', [usu_id]);
     await db.end();
 }
 
@@ -76,7 +78,11 @@ beforeAll(async () => {
 
     usu_id = cadastro.body.usuario.usu_id;
 
-    // PASSO 2: faz login e obtém o token JWT
+    // PASSO 2: ativa conta (simula confirmação de OTP) para permitir login após fix C2
+    // usu_verificacao=5 é o nível temporário inicial; os testes individuais ajustam depois
+    await setVerificacao(usu_id, 5, EXPIRA_FUTURO);
+
+    // PASSO 3: faz login e obtém o token JWT
     const login = await request(app)
         .post('/api/usuarios/login')
         .send({ usu_email: email, usu_senha: 'senha123' });
@@ -189,19 +195,16 @@ describe('Solicitar carona — regras de verificação', () => {
         expect(res.body.error).toMatch(/matrícula verificada/i);
     });
 
-    it('CASO E2 — usu_verificacao=0 via rota /caronas/solicitar: também deve retornar 403', async () => {
-        // PASSO 1: mantém o usuário como não verificado
-        await setVerificacao(usu_id, 0, null);
-
-        // PASSO 2: tenta solicitar via rota alternativa (CaronaController.solicitar)
+    it('CASO E2 — rota /caronas/solicitar foi removida (fix M3): deve retornar 404', async () => {
+        // PASSO 1: rota POST /api/caronas/solicitar foi removida na auditoria de segurança (fix M3)
+        // O endpoint canônico é POST /api/solicitacoes/criar (coberto pelo CASO E)
         const res = await request(app)
             .post('/api/caronas/solicitar')
             .set('Authorization', `Bearer ${token}`)
             .send(bodySolicitar);
 
-        // PASSO 3: a regra se aplica em ambas as rotas
-        expect(res.status).toBe(403);
-        expect(res.body.error).toMatch(/matrícula verificada/i);
+        // PASSO 2: 404 — rota não existe mais
+        expect(res.status).toBe(404);
     });
 
     it('CASO F — usu_verificacao=1 mas expirado: deve retornar 403 com mensagem de expiração', async () => {

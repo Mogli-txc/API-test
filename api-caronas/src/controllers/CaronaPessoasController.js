@@ -36,7 +36,22 @@ class CaronaPessoasController {
                 });
             }
 
-            // PASSO 3: Verifica se o passageiro já está nesta carona
+            // PASSO 3: Verifica se o usuário autenticado é o motorista desta carona
+            // Apenas o motorista pode confirmar passageiros em sua carona
+            const [motorista] = await db.query(
+                `SELECT cu.usu_id FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [car_id]
+            );
+            if (motorista.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            if (motorista[0].usu_id !== req.user.id) {
+                return res.status(403).json({ error: "Sem permissão para adicionar passageiros nesta carona." });
+            }
+
+            // PASSO 4: Verifica se o passageiro já está nesta carona
             const [existente] = await db.query(
                 'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ?',
                 [car_id, usu_id]
@@ -175,7 +190,24 @@ class CaronaPessoasController {
                 return res.status(400).json({ error: "Status inválido. Use 0 (Cancelado), 1 (Aceito) ou 2 (Negado)." });
             }
 
-            // PASSO 4: Atualiza o status no banco
+            // PASSO 4: Verifica se o usuário autenticado é o motorista da carona
+            // Apenas o motorista pode alterar o status dos passageiros confirmados
+            const [registro] = await db.query(
+                `SELECT cp.car_id, cu.usu_id AS motorista_id
+                 FROM CARONA_PESSOAS cp
+                 INNER JOIN CARONAS c         ON cp.car_id      = c.car_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
+                 WHERE cp.car_pes_id = ?`,
+                [car_pes_id]
+            );
+            if (registro.length === 0) {
+                return res.status(404).json({ error: "Registro não encontrado." });
+            }
+            if (registro[0].motorista_id !== req.user.id) {
+                return res.status(403).json({ error: "Sem permissão para alterar o status deste passageiro." });
+            }
+
+            // PASSO 5: Atualiza o status no banco
             const [resultado] = await db.query(
                 'UPDATE CARONA_PESSOAS SET car_pes_status = ? WHERE car_pes_id = ?',
                 [car_pes_status, car_pes_id]
@@ -185,7 +217,7 @@ class CaronaPessoasController {
                 return res.status(404).json({ error: "Registro não encontrado." });
             }
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:    "Status atualizado com sucesso!",
                 passageiro: { car_pes_id: parseInt(car_pes_id), car_pes_status: parseInt(car_pes_status) }
@@ -199,9 +231,11 @@ class CaronaPessoasController {
 
     /**
      * MÉTODO: remover
-     * Remove um passageiro da carona (hard delete).
+     * Remove um passageiro da carona (soft delete: car_pes_status = 0).
+     * Preserva o histórico — o registro permanece no banco com status Cancelado.
+     * Apenas o motorista pode remover passageiros.
      *
-     * Tabela: CARONA_PESSOAS (DELETE)
+     * Tabela: CARONA_PESSOAS (UPDATE car_pes_status)
      * Parâmetro: car_pes_id (via URL)
      */
     async remover(req, res) {
@@ -214,13 +248,29 @@ class CaronaPessoasController {
                 return res.status(400).json({ error: "ID inválido." });
             }
 
-            // PASSO 3: Remove o registro do banco
+            // PASSO 3: Verifica se o usuário autenticado é o motorista da carona
+            const [registro] = await db.query(
+                `SELECT cp.car_id, cu.usu_id AS motorista_id
+                 FROM CARONA_PESSOAS cp
+                 INNER JOIN CARONAS c         ON cp.car_id     = c.car_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE cp.car_pes_id = ?`,
+                [car_pes_id]
+            );
+            if (registro.length === 0) {
+                return res.status(404).json({ error: "Registro não encontrado." });
+            }
+            if (registro[0].motorista_id !== req.user.id) {
+                return res.status(403).json({ error: "Sem permissão para remover este passageiro." });
+            }
+
+            // PASSO 4: Soft delete — muda status para 0 (Cancelado) sem apagar o registro
             await db.query(
-                'DELETE FROM CARONA_PESSOAS WHERE car_pes_id = ?',
+                'UPDATE CARONA_PESSOAS SET car_pes_status = 0 WHERE car_pes_id = ?',
                 [car_pes_id]
             );
 
-            // PASSO 4: Resposta sem conteúdo (sucesso)
+            // PASSO 5: Resposta sem conteúdo (sucesso)
             return res.status(204).send();
 
         } catch (error) {

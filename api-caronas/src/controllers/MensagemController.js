@@ -9,6 +9,7 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+const { stripHtml } = require('../utils/sanitize');
 
 class MensagemController {
 
@@ -48,9 +49,10 @@ class MensagemController {
                 return res.status(400).json({ error: "IDs devem ser numéricos." });
             }
 
-            // PASSO 4: Validação do comprimento da mensagem (limite da coluna no banco: 255)
-            // trim() remove espaços em branco das bordas antes de validar o conteúdo
-            const men_texto_trim = men_texto.trim();
+            // PASSO 4: Sanitização e validação do texto
+            // stripHtml remove tags HTML para prevenir XSS armazenado
+            // trim() remove espaços em branco das bordas
+            const men_texto_trim = stripHtml(men_texto.trim());
             if (men_texto_trim.length < 1 || men_texto_trim.length > 255) {
                 return res.status(400).json({ error: "Mensagem deve ter entre 1 e 255 caracteres." });
             }
@@ -95,7 +97,7 @@ class MensagemController {
     async listarConversa(req, res) {
         try {
             // PASSO 1: Extrai o ID da carona
-            const { caro_id } = req.params;
+            const { car_id: caro_id } = req.params;
 
             // PASSO 2: Validação do ID
             if (!caro_id || isNaN(caro_id)) {
@@ -176,24 +178,28 @@ class MensagemController {
                 return res.status(400).json({ error: "ID de mensagem inválido." });
             }
 
-            // PASSO 3: Validação do novo texto
-            // trim() remove espaços em branco das bordas antes de validar
-            const men_texto_trim = men_texto ? men_texto.trim() : '';
+            // PASSO 3: Sanitização e validação do novo texto
+            // stripHtml remove tags HTML para prevenir XSS armazenado
+            const men_texto_trim = men_texto ? stripHtml(men_texto.trim()) : '';
             if (men_texto_trim.length < 1 || men_texto_trim.length > 255) {
                 return res.status(400).json({ error: "Mensagem deve ter entre 1 e 255 caracteres." });
             }
 
-            // PASSO 4: Atualização no banco (usa o texto já trimado)
-            // UPDATE MENSAGENS SET men_texto = ? WHERE men_id = ?
-            const [resultado] = await db.query(
+            // PASSO 4: Verifica se a mensagem existe e pertence ao remetente autenticado
+            // Retorna 404 em ambos os casos (não encontrada ou não é dono) para não revelar existência a terceiros
+            const [mensagem] = await db.query(
+                'SELECT men_id FROM MENSAGENS WHERE men_id = ? AND usu_id_remetente = ? AND men_deletado_em IS NULL',
+                [mens_id, req.user.id]
+            );
+            if (mensagem.length === 0) {
+                return res.status(404).json({ error: "Mensagem não encontrada." });
+            }
+
+            // PASSO 5: Atualização no banco (usa o texto já trimado)
+            await db.query(
                 'UPDATE MENSAGENS SET men_texto = ? WHERE men_id = ?',
                 [men_texto_trim, mens_id]
             );
-
-            // affectedRows = 0 significa que nenhuma linha foi alterada (ID não existe)
-            if (resultado.affectedRows === 0) {
-                return res.status(404).json({ error: "Mensagem não encontrada." });
-            }
 
             // PASSO 5: Resposta de sucesso
             return res.status(200).json({
@@ -224,16 +230,21 @@ class MensagemController {
                 return res.status(400).json({ error: "ID de mensagem inválido." });
             }
 
-            // PASSO 3: Soft delete — registra data de remoção sem apagar o registro
-            // UPDATE MENSAGENS SET men_deletado_em = NOW() WHERE men_id = ?
-            const [resultado] = await db.query(
-                'UPDATE MENSAGENS SET men_deletado_em = NOW() WHERE men_id = ? AND men_deletado_em IS NULL',
-                [mens_id]
+            // PASSO 3: Verifica se a mensagem existe e pertence ao remetente autenticado
+            // Retorna 404 em ambos os casos (não encontrada ou não é dono) para não revelar existência a terceiros
+            const [mensagem] = await db.query(
+                'SELECT men_id FROM MENSAGENS WHERE men_id = ? AND usu_id_remetente = ? AND men_deletado_em IS NULL',
+                [mens_id, req.user.id]
             );
-
-            if (resultado.affectedRows === 0) {
+            if (mensagem.length === 0) {
                 return res.status(404).json({ error: "Mensagem não encontrada." });
             }
+
+            // PASSO 4: Soft delete — registra data de remoção sem apagar o registro
+            await db.query(
+                'UPDATE MENSAGENS SET men_deletado_em = NOW() WHERE men_id = ?',
+                [mens_id]
+            );
 
             // PASSO 4: Resposta de sucesso (204 = sem conteúdo no retorno)
             return res.status(204).send();

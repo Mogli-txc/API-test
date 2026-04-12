@@ -1,40 +1,51 @@
 /**
  * CONTROLLER DE USUÁRIOS
  *
- * Senhas armazenadas como hash bcryptjs.
+ * Senhas armazenadas como hash bcryptjs (custo 12).
  * Login atualiza data do último acesso em USUARIOS_REGISTROS.
  * Cadastro cria registros em USUARIOS, USUARIOS_REGISTROS e PERFIL automaticamente.
+ * Email verificado via OTP de 6 dígitos enviado ao endereço cadastrado.
  *
  * Valores de usu_verificacao no banco:
- *   0 = Não verificado
+ *   0 = Não verificado (aguardando OTP)
  *   1 = Matrícula verificada
  *   2 = Matrícula + veículo registrado
  *   5 = Cadastro temporário (acesso por 5 dias para pedir caronas)
  *
  * Colunas do banco usadas:
  * USUARIOS: usu_id, usu_nome, usu_email, usu_senha, usu_telefone,
- *           usu_matricula, usu_endereco, usu_endereco_geom, usu_status, usu_verificacao
+ *           usu_matricula, usu_endereco, usu_endereco_geom, usu_status,
+ *           usu_verificacao, usu_verificacao_expira, usu_otp_hash, usu_otp_expira
  * USUARIOS_REGISTROS: usu_id, usu_criado_em, usu_data_login, usu_atualizado_em
  * PERFIL: per_id, usu_id, per_nome, per_data, per_tipo, per_habilitado
  */
 
-const jwt          = require('jsonwebtoken');
-const bcrypt       = require('bcryptjs');
-const db           = require('../config/database');    // Pool de conexão MySQL
-const { gerarUrl } = require('../utils/gerarUrl');     // Gera URLs públicas de imagens
+const jwt            = require('jsonwebtoken');
+const bcrypt         = require('bcryptjs');
+const crypto         = require('crypto');
+const db             = require('../config/database');
+const { gerarUrl }   = require('../utils/gerarUrl');
+const { gerarOtp, hashOtp, enviarOtp } = require('../utils/mailer');
+const { checkDevOrOwner } = require('../utils/authHelper');
+const { registrarAudit } = require('../utils/auditLog');
+
+// Regex básico de formato de email (RFC 5322 simplificado)
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 class UsuarioController {
 
     /**
      * MÉTODO: cadastrar
-     * Insere um novo usuário no banco e cria seus registros auxiliares.
+     * Insere um novo usuário no banco, cria seus registros auxiliares e
+     * envia um OTP de verificação por email.
      *
-     * PASSO 1: Cadastro inicial — só e-mail e senha são obrigatórios.
-     *   O usuário recebe usu_verificacao = 5 (cadastro temporário) e pode
-     *   pedir caronas por 5 dias. Os demais dados são preenchidos depois.
+     * PASSO 1: Valida email (formato) e senha (mínimo 8 caracteres).
      *
-     * PASSO 2: Demais dados (nome, telefone, matrícula etc.) são opcionais
-     *   e podem ser atualizados pelo usuário posteriormente via MÉTODO: atualizar.
+     * PASSO 2: Cadastro em transação atômica — USUARIOS → USUARIOS_REGISTROS → PERFIL.
+     *   O usuário recebe usu_verificacao = 0 (não verificado) até confirmar o OTP.
+     *
+     * PASSO 3: Gera OTP de 6 dígitos, armazena o hash no banco com validade de 10
+     *   minutos e envia o código por email. Login bloqueado até verificação.
      *
      * Tabelas: USUARIOS → USUARIOS_REGISTROS → PERFIL
      * Campos obrigatórios no body: usu_email, usu_senha
@@ -47,17 +58,24 @@ class UsuarioController {
             usu_foto, usu_descricao, usu_horario_habitual
         } = req.body;
 
-        // Validação dos campos obrigatórios — apenas email e senha no cadastro inicial
+        // PASSO 1: Validação de campos obrigatórios
         if (!usu_email || !usu_senha) {
             return res.status(400).json({
                 error: "Campos obrigatórios: usu_email e usu_senha."
             });
         }
 
-        // conn declarado antes do try para que o finally consiga liberar em qualquer caminho
+        if (!EMAIL_REGEX.test(usu_email)) {
+            return res.status(400).json({ error: "Formato de email inválido." });
+        }
+
+        if (usu_senha.length < 8) {
+            return res.status(400).json({ error: "A senha deve ter no mínimo 8 caracteres." });
+        }
+
         let conn;
         try {
-            // Verifica se já existe um usuário com o mesmo e-mail (leitura via pool, antes da transação)
+            // Verifica duplicidade de email antes de abrir transação
             const [existente] = await db.query(
                 'SELECT usu_id FROM USUARIOS WHERE usu_email = ?',
                 [usu_email]
@@ -66,39 +84,34 @@ class UsuarioController {
                 return res.status(409).json({ error: "E-mail já cadastrado." });
             }
 
-            // Gera o hash da senha antes de salvar no banco
-            // O número 10 é o "custo" do hash — quanto maior, mais seguro e mais lento
-            const senhaHash = await bcrypt.hash(usu_senha, 10);
+            // Custo 12 — equilíbrio entre segurança e desempenho (2^12 iterações)
+            const senhaHash = await bcrypt.hash(usu_senha, 12);
 
-            // PASSO 1-3: Os três INSERTs são executados em transação atômica.
-            // Se qualquer um falhar, todos são desfeitos — evita registros órfãos
-            // (ex: USUARIOS sem PERFIL correspondente quebraria o endpoint de perfil).
+            // PASSO 2: Transação atômica — evita registros órfãos
             conn = await db.getConnection();
             await conn.beginTransaction();
 
-            // PASSO 1: Insere o usuário com usu_verificacao = 5 (cadastro temporário: 5 dias de acesso)
-            // usu_verificacao_expira recebe NOW() + 5 dias — reutiliza o mesmo campo de expiração
+            // PASSO 2a: Insere usuário com usu_verificacao = 0 (aguardando OTP)
             const [resultado] = await conn.query(
                 `INSERT INTO USUARIOS
                     (usu_nome, usu_email, usu_senha, usu_telefone, usu_matricula,
                      usu_endereco, usu_endereco_geom, usu_foto, usu_descricao,
-                     usu_horario_habitual, usu_verificacao, usu_verificacao_expira, usu_status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5, DATE_ADD(NOW(), INTERVAL 5 DAY), 1)`,
+                     usu_horario_habitual, usu_verificacao, usu_status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
                 [usu_nome || null, usu_email, senhaHash, usu_telefone || null, usu_matricula || null,
                  usu_endereco || null, usu_endereco_geom || null,
                  usu_foto || null, usu_descricao || null, usu_horario_habitual || null]
             );
 
-            const novoId = resultado.insertId; // ID gerado automaticamente pelo banco
+            const novoId = resultado.insertId;
 
-            // PASSO 2: Cria o registro de datas do usuário em USUARIOS_REGISTROS (relação 1:1)
+            // PASSO 2b: Cria o registro de datas em USUARIOS_REGISTROS
             await conn.query(
-                `INSERT INTO USUARIOS_REGISTROS (usu_id, usu_criado_em)
-                 VALUES (?, NOW())`,
+                `INSERT INTO USUARIOS_REGISTROS (usu_id, usu_criado_em) VALUES (?, NOW())`,
                 [novoId]
             );
 
-            // PASSO 3: Cria o perfil padrão do usuário em PERFIL
+            // PASSO 2c: Cria o perfil padrão em PERFIL
             await conn.query(
                 `INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado)
                  VALUES (?, ?, NOW(), 0, 0)`,
@@ -107,9 +120,34 @@ class UsuarioController {
 
             await conn.commit();
 
+            // PASSO 3: Gera OTP, armazena hash e envia email
+            // Feito fora da transação para não manter a conexão aberta durante o envio SMTP
+            const otp     = gerarOtp();
+            const otpHash = hashOtp(otp);
+
+            await db.query(
+                `UPDATE USUARIOS
+                 SET usu_otp_hash = ?, usu_otp_expira = DATE_ADD(NOW(), INTERVAL 10 MINUTE)
+                 WHERE usu_id = ?`,
+                [otpHash, novoId]
+            );
+
+            // Envio de email é não-crítico: falha de SMTP não desfaz o cadastro
+            let emailEnviado = true;
+            try {
+                await enviarOtp(usu_email, otp);
+            } catch (emailError) {
+                emailEnviado = false;
+                console.warn("[AVISO] cadastrar: falha ao enviar OTP por email:", emailError.message);
+            }
+
+            await registrarAudit({ tabela: 'USUARIOS', registroId: novoId, acao: 'CADASTRO', ip: req.ip });
+
             return res.status(201).json({
-                message: "Usuário cadastrado com sucesso!",
-                usuario: { usu_id: novoId, usu_email, usu_verificacao: 5 }
+                message: emailEnviado
+                    ? "Usuário cadastrado! Verifique seu email com o código enviado."
+                    : "Usuário cadastrado! Não foi possível enviar o email de verificação. Use o endpoint de reenvio.",
+                usuario: { usu_id: novoId, usu_email, usu_verificacao: 0 }
             });
 
         } catch (error) {
@@ -122,8 +160,174 @@ class UsuarioController {
     }
 
     /**
+     * MÉTODO: verificarEmail
+     * Valida o OTP enviado por email e libera o acesso do usuário.
+     *
+     * PASSO 1: Busca usuário pelo email e verifica se está aguardando OTP.
+     * PASSO 2: Confere se o OTP não expirou e se o hash bate.
+     * PASSO 3: Atualiza usu_verificacao = 5 (acesso temporário por 5 dias) e limpa OTP.
+     *
+     * Campos obrigatórios no body: usu_email, otp
+     */
+    verificarEmail = async (req, res) => {
+        try {
+            const { usu_email, otp } = req.body;
+
+            if (!usu_email || !otp) {
+                return res.status(400).json({ error: "Campos obrigatórios: usu_email e otp." });
+            }
+
+            // PASSO 1: Busca usuário (inclui colunas de controle de tentativas)
+            const [rows] = await db.query(
+                `SELECT usu_id, usu_verificacao, usu_otp_hash, usu_otp_expira,
+                        usu_otp_tentativas, usu_otp_bloqueado_ate
+                 FROM USUARIOS WHERE usu_email = ? AND usu_status = 1`,
+                [usu_email]
+            );
+
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "Usuário não encontrado." });
+            }
+
+            const usuario = rows[0];
+
+            if (usuario.usu_verificacao !== 0) {
+                return res.status(409).json({ error: "Email já verificado." });
+            }
+
+            // PASSO 2: Verifica bloqueio por excesso de tentativas
+            // usu_otp_tentativas e usu_otp_bloqueado_ate são colunas adicionadas via migration 001
+            if (usuario.usu_otp_bloqueado_ate && new Date(usuario.usu_otp_bloqueado_ate) > new Date()) {
+                const minutos = Math.ceil((new Date(usuario.usu_otp_bloqueado_ate) - new Date()) / 60000);
+                return res.status(429).json({
+                    error: `Muitas tentativas incorretas. Tente novamente em ${minutos} minuto(s).`
+                });
+            }
+
+            // PASSO 3: Verifica expiração e hash do OTP
+            if (!usuario.usu_otp_hash || !usuario.usu_otp_expira) {
+                return res.status(400).json({ error: "Nenhum código pendente. Solicite um novo." });
+            }
+
+            const expirado = new Date(usuario.usu_otp_expira) < new Date();
+            if (expirado) {
+                return res.status(410).json({ error: "Código expirado. Solicite um novo." });
+            }
+
+            const hashFornecido = hashOtp(otp.toString().trim());
+            if (hashFornecido !== usuario.usu_otp_hash) {
+                // Incrementa contador de tentativas falhas e bloqueia após 3
+                const tentativas = (usuario.usu_otp_tentativas || 0) + 1;
+                const bloqueio   = tentativas >= 3
+                    ? new Date(Date.now() + 30 * 60 * 1000) // +30 minutos
+                    : null;
+
+                await db.query(
+                    `UPDATE USUARIOS
+                     SET usu_otp_tentativas    = ?,
+                         usu_otp_bloqueado_ate = ?
+                     WHERE usu_id = ?`,
+                    [tentativas, bloqueio, usuario.usu_id]
+                );
+
+                if (bloqueio) {
+                    return res.status(429).json({
+                        error: "Muitas tentativas incorretas. Conta bloqueada por 30 minutos."
+                    });
+                }
+
+                return res.status(401).json({
+                    error: `Código inválido. Tentativas restantes: ${3 - tentativas}.`
+                });
+            }
+
+            // PASSO 4: Libera acesso e limpa OTP + contadores do banco
+            await db.query(
+                `UPDATE USUARIOS
+                 SET usu_verificacao        = 5,
+                     usu_verificacao_expira = DATE_ADD(NOW(), INTERVAL 5 DAY),
+                     usu_otp_hash           = NULL,
+                     usu_otp_expira         = NULL,
+                     usu_otp_tentativas     = 0,
+                     usu_otp_bloqueado_ate  = NULL
+                 WHERE usu_id = ?`,
+                [usuario.usu_id]
+            );
+
+            // PASSO 4: Habilita o perfil — sem isso o login seria bloqueado pela verificação de per_habilitado
+            // Usuários recém-cadastrados começam com per_habilitado=0 até confirmar o email
+            await db.query(
+                'UPDATE PERFIL SET per_habilitado = 1 WHERE usu_id = ?',
+                [usuario.usu_id]
+            );
+
+            return res.status(200).json({
+                message: "Email verificado com sucesso! Você já pode fazer login."
+            });
+
+        } catch (error) {
+            console.error("[ERRO] verificarEmail:", error);
+            return res.status(500).json({ error: "Erro ao verificar email." });
+        }
+    }
+
+    /**
+     * MÉTODO: reenviarOtp
+     * Gera um novo OTP e reenvia ao email cadastrado.
+     * Só funciona para usuários com usu_verificacao = 0.
+     *
+     * Campo obrigatório no body: usu_email
+     */
+    reenviarOtp = async (req, res) => {
+        try {
+            const { usu_email } = req.body;
+
+            if (!usu_email) {
+                return res.status(400).json({ error: "Campo obrigatório: usu_email." });
+            }
+
+            const [rows] = await db.query(
+                `SELECT usu_id, usu_verificacao FROM USUARIOS WHERE usu_email = ? AND usu_status = 1`,
+                [usu_email]
+            );
+
+            // Responde com 200 mesmo se não encontrar — evita enumeração de emails
+            if (rows.length === 0 || rows[0].usu_verificacao !== 0) {
+                return res.status(200).json({
+                    message: "Se o email existir e estiver pendente, um novo código será enviado."
+                });
+            }
+
+            const otp     = gerarOtp();
+            const otpHash = hashOtp(otp);
+
+            // Reenvio reseta tentativas e bloqueio — o usuário receberá um código novo
+            await db.query(
+                `UPDATE USUARIOS
+                 SET usu_otp_hash          = ?,
+                     usu_otp_expira        = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+                     usu_otp_tentativas    = 0,
+                     usu_otp_bloqueado_ate = NULL
+                 WHERE usu_id = ?`,
+                [otpHash, rows[0].usu_id]
+            );
+
+            await enviarOtp(usu_email, otp);
+
+            return res.status(200).json({
+                message: "Se o email existir e estiver pendente, um novo código será enviado."
+            });
+
+        } catch (error) {
+            console.error("[ERRO] reenviarOtp:", error);
+            return res.status(500).json({ error: "Erro ao reenviar código." });
+        }
+    }
+
+    /**
      * MÉTODO: login
      * Busca o usuário pelo e-mail, compara a senha e retorna um token JWT.
+     * Bloqueia login se o email ainda não foi verificado (usu_verificacao = 0).
      *
      * Tabelas: USUARIOS (leitura), USUARIOS_REGISTROS (atualiza data de login)
      * Campos no body: usu_email, usu_senha
@@ -138,9 +342,9 @@ class UsuarioController {
                 });
             }
 
-            // Busca o usuário pelo e-mail no banco
             const [rows] = await db.query(
-                'SELECT usu_id, usu_nome, usu_email, usu_senha, usu_status FROM USUARIOS WHERE usu_email = ?',
+                `SELECT usu_id, usu_nome, usu_email, usu_senha, usu_status, usu_verificacao
+                 FROM USUARIOS WHERE usu_email = ?`,
                 [usu_email]
             );
 
@@ -150,24 +354,40 @@ class UsuarioController {
 
             const usuario = rows[0];
 
-            // Verifica se a conta está ativa (usu_status = 1)
             if (!usuario.usu_status) {
                 return res.status(403).json({ error: "Conta inativa." });
             }
 
-            // Compara a senha enviada com o hash salvo no banco
+            // Bloqueia login até o email ser verificado via OTP
+            if (usuario.usu_verificacao === 0) {
+                return res.status(403).json({
+                    error: "Email não verificado. Confirme o código enviado para seu email."
+                });
+            }
+
+            // Bloqueia login se o perfil estiver desabilitado pelo administrador
+            // Cobre usuários comuns (per_tipo=0) que não passam pelo checkRole
+            const [perfil] = await db.query(
+                'SELECT per_habilitado FROM PERFIL WHERE usu_id = ?',
+                [usuario.usu_id]
+            );
+            if (perfil.length > 0 && perfil[0].per_habilitado === 0) {
+                return res.status(403).json({ error: "Conta desabilitada. Entre em contato com o administrador." });
+            }
+
             const senhaValida = await bcrypt.compare(usu_senha, usuario.usu_senha);
             if (!senhaValida) {
+                await registrarAudit({ tabela: 'USUARIOS', registroId: usuario.usu_id, acao: 'LOGIN_FALHA', ip: req.ip });
                 return res.status(401).json({ error: "E-mail ou senha inválidos." });
             }
 
-            // Atualiza a data do último login em USUARIOS_REGISTROS
             await db.query(
                 'UPDATE USUARIOS_REGISTROS SET usu_data_login = NOW() WHERE usu_id = ?',
                 [usuario.usu_id]
             );
 
-            // Gera o token JWT com o ID e e-mail do usuário, válido por 24h
+            await registrarAudit({ tabela: 'USUARIOS', registroId: usuario.usu_id, acao: 'LOGIN', usuId: usuario.usu_id, ip: req.ip });
+
             const token = jwt.sign(
                 { id: usuario.usu_id, email: usuario.usu_email },
                 process.env.JWT_SECRET,
@@ -205,13 +425,10 @@ class UsuarioController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // Busca usuário e seu perfil com JOIN entre as tabelas
             const [rows] = await db.query(
-                `SELECT u.usu_id, u.usu_nome, u.usu_email, u.usu_telefone,
-                        u.usu_descricao, u.usu_foto, u.usu_endereco,
-                        p.per_tipo, p.per_habilitado
+                `SELECT u.usu_id, u.usu_nome, u.usu_telefone,
+                        u.usu_descricao, u.usu_foto, u.usu_endereco
                  FROM USUARIOS u
-                 LEFT JOIN PERFIL p ON u.usu_id = p.usu_id
                  WHERE u.usu_id = ?`,
                 [id]
             );
@@ -221,8 +438,6 @@ class UsuarioController {
             }
 
             const usuario = rows[0];
-
-            // Converte o nome do arquivo salvo no banco para URL pública completa
             usuario.usu_foto = gerarUrl(usuario.usu_foto, 'usuarios', 'perfil.png');
 
             return res.status(200).json({
@@ -239,28 +454,22 @@ class UsuarioController {
     /**
      * MÉTODO: atualizar
      * Atualiza os dados do usuário no banco.
+     * Exige confirmação da senha atual quando usu_senha é enviado.
      *
      * Tabelas: USUARIOS (UPDATE), USUARIOS_REGISTROS (atualiza data)
      * Campos opcionais no body: usu_nome, usu_email, usu_senha
+     * Campo obrigatório ao trocar senha: senha_atual
      */
     atualizar = async (req, res) => {
         try {
             const { id } = req.params;
-            const { usu_nome, usu_email, usu_senha } = req.body;
+            const { usu_nome, usu_email, usu_senha, senha_atual } = req.body;
 
             if (!id || isNaN(id)) {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // Desenvolvedor (per_tipo=2) pode editar qualquer usuário
-            // Demais perfis só podem editar o próprio
-            const [perfil] = await db.query(
-                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
-                [req.user.id]
-            );
-            const isDev = perfil.length > 0 && perfil[0].per_tipo === 2;
-
-            if (!isDev && req.user.id !== parseInt(id)) {
+            if (!await checkDevOrOwner(req.user.id, id)) {
                 return res.status(403).json({ error: "Sem permissão para alterar este usuário." });
             }
 
@@ -268,26 +477,60 @@ class UsuarioController {
                 return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
             }
 
-            // Monta a query dinamicamente com os campos enviados
-            const campos = [];
+            // Exige confirmação da senha atual para trocar a senha
+            if (usu_senha) {
+                if (!senha_atual) {
+                    return res.status(400).json({ error: "senha_atual é obrigatória para trocar a senha." });
+                }
+
+                if (usu_senha.length < 8) {
+                    return res.status(400).json({ error: "A nova senha deve ter no mínimo 8 caracteres." });
+                }
+
+                const [usuarioAtual] = await db.query(
+                    'SELECT usu_senha FROM USUARIOS WHERE usu_id = ?',
+                    [id]
+                );
+
+                if (usuarioAtual.length === 0) {
+                    return res.status(404).json({ error: "Usuário não encontrado." });
+                }
+
+                const senhaValida = await bcrypt.compare(senha_atual, usuarioAtual[0].usu_senha);
+                if (!senhaValida) {
+                    return res.status(401).json({ error: "Senha atual incorreta." });
+                }
+            }
+
+            if (usu_email && !EMAIL_REGEX.test(usu_email)) {
+                return res.status(400).json({ error: "Formato de email inválido." });
+            }
+
+            const campos  = [];
             const valores = [];
 
             if (usu_nome)  { campos.push('usu_nome = ?');  valores.push(usu_nome); }
             if (usu_email) { campos.push('usu_email = ?'); valores.push(usu_email); }
             if (usu_senha) {
-                const senhaHash = await bcrypt.hash(usu_senha, 10);
+                // Custo 12 — mantém consistência com o cadastro
+                const senhaHash = await bcrypt.hash(usu_senha, 12);
                 campos.push('usu_senha = ?');
                 valores.push(senhaHash);
             }
 
-            valores.push(id); // WHERE usu_id = ?
+            valores.push(id);
+
+            // Whitelist: apenas colunas conhecidas podem entrar na query
+            const COLUNAS_PERMITIDAS = ['usu_nome = ?', 'usu_email = ?', 'usu_senha = ?'];
+            if (!campos.every(c => COLUNAS_PERMITIDAS.includes(c))) {
+                return res.status(400).json({ error: "Campo inválido detectado." });
+            }
 
             await db.query(
                 `UPDATE USUARIOS SET ${campos.join(', ')} WHERE usu_id = ?`,
                 valores
             );
 
-            // Registra a data de atualização
             await db.query(
                 'UPDATE USUARIOS_REGISTROS SET usu_atualizado_em = NOW() WHERE usu_id = ?',
                 [id]
@@ -323,29 +566,19 @@ class UsuarioController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // Desenvolvedor (per_tipo=2) pode atualizar foto de qualquer usuário
-            const [perfil] = await db.query(
-                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
-                [req.user.id]
-            );
-            const isDev = perfil.length > 0 && perfil[0].per_tipo === 2;
-
-            if (!isDev && req.user.id !== parseInt(id)) {
+            if (!await checkDevOrOwner(req.user.id, id)) {
                 return res.status(403).json({ error: "Sem permissão para alterar este usuário." });
             }
 
-            // req.file é preenchido pelo uploadHelper quando o upload é bem-sucedido
             if (!req.file) {
                 return res.status(400).json({ error: "Nenhuma imagem enviada." });
             }
 
-            // Salva apenas o nome do arquivo no banco (não o caminho completo)
             await db.query(
                 'UPDATE USUARIOS SET usu_foto = ? WHERE usu_id = ?',
                 [req.file.filename, id]
             );
 
-            // Retorna a URL pública da foto recém-salva
             const urlFoto = gerarUrl(req.file.filename, 'usuarios', 'perfil.png');
 
             return res.status(200).json({
@@ -356,6 +589,151 @@ class UsuarioController {
         } catch (error) {
             console.error("[ERRO] atualizarFoto:", error);
             return res.status(500).json({ error: "Erro ao atualizar foto de perfil." });
+        }
+    }
+
+    /**
+     * MÉTODO: esqueceuSenha
+     * Gera um token de redefinição de senha e envia por email.
+     * Responde com 200 mesmo se o email não existir — evita enumeração de usuários.
+     *
+     * PASSO 1: Busca usuário pelo email.
+     * PASSO 2: Gera token seguro de 32 bytes, armazena o hash no banco com validade de 15 minutos.
+     * PASSO 3: Envia link de redefinição por email.
+     *
+     * Requer colunas no banco: usu_reset_hash (VARCHAR 64), usu_reset_expira (DATETIME)
+     * Campo obrigatório no body: usu_email
+     */
+    esqueceuSenha = async (req, res) => {
+        try {
+            const { usu_email } = req.body;
+
+            if (!usu_email) {
+                return res.status(400).json({ error: "Campo obrigatório: usu_email." });
+            }
+
+            // Resposta padrão — evita enumeração de emails (200 em qualquer caso)
+            const msgPadrao = "Se o email estiver cadastrado, você receberá um link de redefinição em breve.";
+
+            const [rows] = await db.query(
+                'SELECT usu_id FROM USUARIOS WHERE usu_email = ? AND usu_status = 1',
+                [usu_email]
+            );
+
+            if (rows.length === 0) {
+                return res.status(200).json({ message: msgPadrao });
+            }
+
+            const usu_id = rows[0].usu_id;
+
+            // PASSO 2: Token de 32 bytes em hex (URL-safe) + hash para armazenamento
+            const token     = crypto.randomBytes(32).toString('hex');
+            const tokenHash = crypto
+                .createHmac('sha256', process.env.OTP_SECRET || process.env.JWT_SECRET)
+                .update(token)
+                .digest('hex');
+
+            await db.query(
+                `UPDATE USUARIOS
+                 SET usu_reset_hash   = ?,
+                     usu_reset_expira = DATE_ADD(NOW(), INTERVAL 15 MINUTE)
+                 WHERE usu_id = ?`,
+                [tokenHash, usu_id]
+            );
+
+            // PASSO 3: Envia email com link de redefinição
+            const appUrl  = process.env.APP_URL || 'http://localhost:3000';
+            const resetUrl = `${appUrl}/redefinir-senha?token=${token}&email=${encodeURIComponent(usu_email)}`;
+
+            let emailEnviado = true;
+            try {
+                await enviarOtp(usu_email, `Link para redefinir sua senha (válido por 15 min):\n${resetUrl}`);
+            } catch (emailError) {
+                emailEnviado = false;
+                console.warn("[AVISO] esqueceuSenha: falha ao enviar email:", emailError.message);
+            }
+
+            if (!emailEnviado) {
+                console.warn(`[AVISO] esqueceuSenha: token gerado para ${usu_email} mas email não enviado. Token: ${token}`);
+            }
+
+            return res.status(200).json({ message: msgPadrao });
+
+        } catch (error) {
+            console.error("[ERRO] esqueceuSenha:", error);
+            return res.status(500).json({ error: "Erro ao processar solicitação de redefinição." });
+        }
+    }
+
+    /**
+     * MÉTODO: redefinirSenha
+     * Valida o token de redefinição e atualiza a senha do usuário.
+     *
+     * PASSO 1: Busca usuário pelo email e verifica se tem reset pendente.
+     * PASSO 2: Confere se o token não expirou e se o hash bate.
+     * PASSO 3: Atualiza a senha e limpa o token do banco.
+     *
+     * Campos obrigatórios no body: usu_email, token, nova_senha
+     */
+    redefinirSenha = async (req, res) => {
+        try {
+            const { usu_email, token, nova_senha } = req.body;
+
+            if (!usu_email || !token || !nova_senha) {
+                return res.status(400).json({ error: "Campos obrigatórios: usu_email, token, nova_senha." });
+            }
+
+            if (nova_senha.length < 8) {
+                return res.status(400).json({ error: "A nova senha deve ter no mínimo 8 caracteres." });
+            }
+
+            // PASSO 1: Busca usuário
+            const [rows] = await db.query(
+                `SELECT usu_id, usu_reset_hash, usu_reset_expira
+                 FROM USUARIOS WHERE usu_email = ? AND usu_status = 1`,
+                [usu_email]
+            );
+
+            if (rows.length === 0 || !rows[0].usu_reset_hash) {
+                return res.status(400).json({ error: "Solicitação de redefinição inválida ou expirada." });
+            }
+
+            const usuario = rows[0];
+
+            // PASSO 2: Verifica expiração e hash do token
+            const expirado = new Date(usuario.usu_reset_expira) < new Date();
+            if (expirado) {
+                return res.status(410).json({ error: "Link de redefinição expirado. Solicite um novo." });
+            }
+
+            const tokenHash = crypto
+                .createHmac('sha256', process.env.OTP_SECRET || process.env.JWT_SECRET)
+                .update(token)
+                .digest('hex');
+
+            if (tokenHash !== usuario.usu_reset_hash) {
+                return res.status(401).json({ error: "Token de redefinição inválido." });
+            }
+
+            // PASSO 3: Atualiza a senha e limpa o token
+            const senhaHash = await bcrypt.hash(nova_senha, 12);
+
+            await db.query(
+                `UPDATE USUARIOS
+                 SET usu_senha       = ?,
+                     usu_reset_hash  = NULL,
+                     usu_reset_expira = NULL
+                 WHERE usu_id = ?`,
+                [senhaHash, usuario.usu_id]
+            );
+
+            await registrarAudit({ tabela: 'USUARIOS', registroId: usuario.usu_id, acao: 'SENHA_RESET', ip: req.ip });
+
+            return res.status(200).json({ message: "Senha redefinida com sucesso! Faça login com a nova senha." });
+
+        } catch (error) {
+            console.error("[ERRO] redefinirSenha:", error);
+            return res.status(500).json({ error: "Erro ao redefinir senha." });
         }
     }
 
@@ -374,22 +752,16 @@ class UsuarioController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // Desenvolvedor (per_tipo=2) pode desativar qualquer conta
-            const [perfil] = await db.query(
-                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
-                [req.user.id]
-            );
-            const isDev = perfil.length > 0 && perfil[0].per_tipo === 2;
-
-            if (!isDev && req.user.id !== parseInt(id)) {
+            if (!await checkDevOrOwner(req.user.id, id)) {
                 return res.status(403).json({ error: "Sem permissão para deletar este usuário." });
             }
 
-            // Soft delete: marca como inativo em vez de apagar do banco
             await db.query(
                 'UPDATE USUARIOS SET usu_status = 0 WHERE usu_id = ?',
                 [id]
             );
+
+            await registrarAudit({ tabela: 'USUARIOS', registroId: parseInt(id), acao: 'DELETAR_USU', usuId: req.user.id, ip: req.ip });
 
             return res.status(204).send();
 

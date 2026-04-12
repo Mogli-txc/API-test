@@ -4,9 +4,13 @@
 --            para testes e desenvolvimento do Back-end.
 --
 -- LEGENDA DE STATUS (referência rápida):
--- USUARIOS:         usu_verificacao (0=Não verificado, 1=Matrícula verificada,
---                                    2=Matrícula + veículo, 5=Cadastro temporário 5 dias)
---                   usu_status      (0=Inativo, 1=Ativo)
+-- USUARIOS:         usu_verificacao      (0=Não verificado (aguarda OTP), 1=Matrícula verificada,
+--                                         2=Matrícula + veículo, 5=Cadastro temporário 5 dias)
+--                   usu_status           (0=Inativo, 1=Ativo)
+--                   usu_otp_tentativas   (INT DEFAULT 0 — contador de falhas de OTP; reset no reenvio)
+--                   usu_otp_bloqueado_ate(DATETIME NULL — bloqueio automático após 3 falhas por 30 min)
+--                   usu_reset_hash       (VARCHAR(64) NULL — hash HMAC do token de recuperação de senha)
+--                   usu_reset_expira     (DATETIME NULL — expiração do token de recuperação; validade 15 min)
 -- PERFIL:           per_tipo        (0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total))
 --                   per_escola_id   (NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador)
 -- VEICULOS:         vei_tipo        (0=Moto, 1=Carro)
@@ -19,6 +23,7 @@
 -- CARONA_PESSOAS:   car_pes_status  (0=Cancelado, 1=Aceito, 2=Negado)
 -- SUGESTAO:         sug_status      (0=Fechado, 1=Aberto, 3=Em análise)
 --                   sug_tipo        (0=Denúncia, 1=Sugestão)
+--                   sug_deletado_em (DATETIME NULL — soft delete; NULL=ativo)
 -- =====================================================
 
 
@@ -72,27 +77,36 @@ INSERT INTO CURSOS (cur_semestre, cur_nome, esc_id) VALUES
 --
 -- usu_verificacao_expira:
 --   verificacao=1/2 → DATE_ADD(NOW(), INTERVAL 6 MONTH)  (renovação semestral)
---   verificacao=5   → DATE_ADD(NOW(), INTERVAL 5 DAY)    (janela do cadastro temporário)
---   verificacao=0   → NULL
+--   verificacao=5   → DATE_ADD(NOW(), INTERVAL 5 DAY)    (janela após OTP confirmado)
+--   verificacao=0   → NULL (aguardando OTP — login bloqueado)
+--
+-- Fluxo OTP: Cadastro define verificacao=0 → usuário confirma OTP → verificacao=5 + expira=+5 dias
 --
 -- Cenários de teste cobertos:
 --   - usu_id=1 (Carlos):   Motorista verificado e ativo, com horário habitual
 --   - usu_id=2 (Mariana):  Passageira verificada e ativa, com horário habitual
 --   - usu_id=3 (Pedro):    Motorista verificado e ativo, escola diferente (Campinas)
---   - usu_id=4 (Ana):      Conta NÃO verificada e inativa — testa bloqueio de login e expira=NULL
+--   - usu_id=4 (Ana):      Conta inativa (usu_status=0) e não verificada — testa "Conta inativa" no login
 --   - usu_id=5 (Lucas):    Verificado, sem foto e sem horário — testa campos NULL
---   - usu_id=6 (Admin):    Usuário administrador do sistema web
---   - usu_id=7 (Novo):     Cadastro temporário (verificacao=5) — só email e senha,
---                           demais campos NULL, acesso por 5 dias para pedir caronas
+--   - usu_id=6 (Admin):    Usuário desenvolvedor (per_tipo=2) com acesso total
+--   - usu_id=7 (Novo):       Cadastro temporário (verificacao=5) — OTP já confirmado,
+--                             só email e senha preenchidos, acesso por 5 dias para pedir caronas
+--   - usu_id=8 (Pendente):   Cadastro recente com OTP não confirmado — testa "Email não verificado" no login
+--                             verificacao=0 + usu_status=1 (ativo, mas aguarda OTP)
+--   - usu_id=9 (Suspenso):   Conta ativa (usu_status=1), email verificado (verificacao=1),
+--                             mas perfil desabilitado pelo admin (per_habilitado=0)
+--                             → testa bloqueio de login via per_habilitado (C2)
 -- =====================================================
 INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_verificacao_expira, usu_status, usu_email, usu_descricao, usu_endereco, usu_endereco_geom, usu_horario_habitual) VALUES
     ('Carlos Silva',  '11999991111', 'MAT2023001',  'hash_carlos_1',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',  'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP', '-23.5505,-46.6333', '07:30:00'),  -- usu_id=1
     ('Mariana Souza', '11988882222', 'MAT2023002',  'hash_mariana_2', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'mariana.souza@aluno.inova.br', 'Passageira tranquila, nunca me atraso.',            'Av. Brasil, 456, Jardins, São Paulo - SP',     '-23.5599,-46.6400', '07:45:00'),  -- usu_id=2
     ('Pedro Santos',  '19977773333', 'MAT2022099',  'hash_pedro_3',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'pedro.santos@uni.saber.br',    'Moto rápida, somente 1 passageiro.',               'Rua da Paz, 88, Vila Nova, Campinas - SP',     '-22.9056,-47.0608', '18:30:00'),  -- usu_id=3
-    ('Ana Oliveira',  '11966664444', 'MAT2024001',  'hash_ana_4',     0, NULL,                              0, 'ana.oliveira@aluno.inova.br',  NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL),         -- usu_id=4 (não verificada/inativa)
+    ('Ana Oliveira',  '11966664444', 'MAT2024001',  'hash_ana_4',     0, NULL,                              0, 'ana.oliveira@aluno.inova.br',  NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL),         -- usu_id=4 (inativa: usu_status=0 → resposta "Conta inativa")
     ('Lucas Pereira', '11955553333', 'MAT2023050',  'hash_lucas_5',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'lucas.pereira@aluno.inova.br', NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL),         -- usu_id=5 (sem foto, sem horário)
     ('Admin Sistema', '11900000001', 'ADMIN000001', 'hash_admin_6',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin@sistema.inova.br',       'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL),         -- usu_id=6
-    (NULL,            NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',    NULL,                                               NULL,                                          NULL,                NULL);          -- usu_id=7: Cadastro temporário (só email+senha)
+    (NULL,            NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',    NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=7: Temporário — OTP confirmado, per_habilitado=1 (habilitado automaticamente pelo verificarEmail)
+    (NULL,            NULL,          NULL,           'hash_pend_8',   0, NULL,                              1, 'pendente.otp@aluno.inova.br',  NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=8: Aguardando OTP — ativo mas login bloqueado (resposta "Email não verificado")
+    ('Fábio Suspenso', '11900000009', 'MAT2023099',  'hash_fabio_9',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                              'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL);          -- usu_id=9: usu_status=1 + verificacao=1 MAS per_habilitado=0 → testa bloqueio C2 no login
 
 
 -- =====================================================
@@ -118,7 +132,9 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
     (4, NULL,                        '2024-03-10 11:00:00', NULL),                    -- nunca logou
     (5, NOW(),                       NOW(),                 NULL),                    -- primeiro acesso
     (6, '2024-12-01 09:00:00',       '2022-01-01 08:00:00', '2024-12-01 09:00:00'), -- admin, conta antiga
-    (7, NULL,                        NOW(),                 NULL);                    -- cadastro temporário: nunca logou ainda
+    (7, NULL,                        NOW(),                 NULL),                    -- cadastro temporário: nunca logou ainda
+    (8, NULL,                        NOW(),                 NULL),                    -- OTP pendente: nunca logou (bloqueado até verificar)
+    (9, NULL,                        NOW(),                 NULL);                    -- Fábio: conta ativa e verificada, mas suspenso pelo admin
 
 
 -- =====================================================
@@ -133,7 +149,8 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
 --   - Carlos, Mariana, Pedro, Lucas: Usuários comuns (per_tipo=0)
 --   - Ana: Usuário inativo (per_habilitado=0) — testa bloqueio de acesso
 --   - Admin (usu_id=6): Desenvolvedor (per_tipo=2) — acesso total ao sistema
---   - Novo (usu_id=7): Temporário, sem perfil habilitado
+--   - Novo (usu_id=7): Temporário com OTP confirmado — per_habilitado=1 (habilitado pelo verificarEmail)
+--   - Fábio (usu_id=9): Conta ativa e verificada, desabilitada pelo admin (per_habilitado=0) — testa C2
 -- =====================================================
 -- per_tipo: 0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)
 -- per_escola_id: NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador
@@ -144,7 +161,9 @@ INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_es
     (4, 'Ana Oliveira',  NOW(), 0, 0, NULL),  -- usu_id=4: Ana      → Usuário inativo
     (5, 'Lucas Pereira', NOW(), 0, 1, NULL),  -- usu_id=5: Lucas    → Usuário comum
     (6, 'Admin Sistema', NOW(), 2, 1, NULL),  -- usu_id=6: Admin    → Desenvolvedor (acesso total)
-    (7, NULL,            NOW(), 0, 0, NULL);  -- usu_id=7: Novo     → Temporário
+    (7, NULL,            NOW(), 0, 1, NULL),   -- usu_id=7: Novo      → per_habilitado=1 (habilitado automaticamente após OTP)
+    (8, NULL,            NOW(), 0, 0, NULL),  -- usu_id=8: Pendente  → OTP não confirmado (per_habilitado=0 correto)
+    (9, 'Fábio Suspenso', NOW(), 0, 0, NULL); -- usu_id=9: Suspenso  → usu_status=1 + verificacao=1, mas per_habilitado=0 → testa C2
 
 
 -- =====================================================

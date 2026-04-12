@@ -32,7 +32,7 @@ describe('Usuários', () => {
                 usu_endereco_geom:  '-23.5505,-46.6333'
             });
         expect(res.status).toBe(201);
-        expect(res.body).toHaveProperty('message', 'Usuário cadastrado com sucesso!');
+        expect(res.body.message).toMatch(/cadastrado/i);
         expect(res.body.usuario).toHaveProperty('usu_id');
     });
 

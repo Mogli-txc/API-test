@@ -10,6 +10,7 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+const { checkDevOrOwner } = require('../utils/authHelper');
 
 class VeiculoController {
 
@@ -31,6 +32,10 @@ class VeiculoController {
                 return res.status(400).json({
                     error: "Campos obrigatórios: vei_marca_modelo, vei_tipo, vei_cor, vei_vagas."
                 });
+            }
+
+            if (![0, 1].includes(parseInt(vei_tipo))) {
+                return res.status(400).json({ error: "vei_tipo deve ser 0 (Moto) ou 1 (Carro)." });
             }
 
             if (isNaN(vei_vagas) || vei_vagas <= 0 || vei_vagas > 6) {
@@ -71,6 +76,11 @@ class VeiculoController {
 
             if (!usu_id || isNaN(usu_id)) {
                 return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+
+            // Apenas o próprio usuário pode listar seus veículos (ou Desenvolvedor)
+            if (!await checkDevOrOwner(req.user.id, usu_id)) {
+                return res.status(403).json({ error: "Sem permissão para listar veículos de outro usuário." });
             }
 
             // Busca apenas veículos ativos (vei_status = 1) do usuário

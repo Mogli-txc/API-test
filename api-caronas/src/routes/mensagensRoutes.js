@@ -14,17 +14,17 @@ const authMiddleware = require('../middlewares/authMiddleware');
  * ROTA: POST /api/mensagens/enviar
  * Descrição: Envia uma mensagem durante uma carona
  * Acesso: PROTEGIDO - Requer Token JWT
- * Campos obrigatórios: caro_id, remetente_id (ou vem do JWT), destinatario_id, mens_texto
+ * Campos obrigatórios: car_id, mens_texto (remetente_id vem do JWT)
  * Retorno: Status 201 com dados da mensagem criada
  * MER: Tabela MENSAGENS
  */
 router.post('/enviar', authMiddleware, MensagemController.enviarMensagem);
 
 /**
- * ROTA: GET /api/mensagens/carona/:caro_id
+ * ROTA: GET /api/mensagens/carona/:car_id
  * Descrição: Lista todas as mensagens de uma carona específica (thread de conversa)
  * Acesso: PROTEGIDO - Apenas participantes da carona podem ver
- * Parâmetros: caro_id (via URL)
+ * Parâmetros: car_id (via URL)
  * Retorno: Status 200 com array de mensagens ordenadas por data
  * Exemplo de Resposta:
 {
@@ -32,16 +32,15 @@ router.post('/enviar', authMiddleware, MensagemController.enviarMensagem);
   "mensagens": [
     {
       "mens_id": 1,
-      "caro_id": 1,
+      "car_id": 1,
       "remetente_id": 2,
-      "destinatario_id": 3,
       "mens_texto": "Olá, tudo bem?",
       "criado_em": "2026-03-17T12:00:00.000Z"
     }
   ]
 }
  */
-router.get('/carona/:caro_id', authMiddleware, MensagemController.listarConversa);
+router.get('/carona/:car_id', authMiddleware, MensagemController.listarConversa);
 
 /**
  * ROTA: DELETE /api/mensagens/:mens_id

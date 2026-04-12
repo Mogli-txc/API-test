@@ -14,7 +14,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
  * ROTA: POST /api/solicitacoes/criar
  * Descrição: Cria uma nova solicitação de participação em carona
  * Acesso: PROTEGIDO - Passageiro deve estar autenticado
- * Campos obrigatórios: caro_id, usua_id (passageiro), soli_vagaSolicitadas
+ * Campos obrigatórios: car_id, sol_vaga_soli (usu_id_passageiro vem do JWT)
  * Retorno: Status 201 com dados da solicitação criada
  * MER: Tabela SOLICITACOES_CARONA
  * Status Inicial: 'Pendente'
@@ -31,19 +31,19 @@ router.post('/criar', authMiddleware, SolicitacaoController.solicitarCarona);
 router.get('/:soli_id', authMiddleware, SolicitacaoController.obterPorId);
 
 /**
- * ROTA: GET /api/solicitacoes/carona/:caro_id
+ * ROTA: GET /api/solicitacoes/carona/:car_id
  * Descrição: Lista todas as solicitações de uma carona específica
  * Acesso: PROTEGIDO - Apenas o motorista da carona pode ver
- * Parâmetros: caro_id (via URL)
+ * Parâmetros: car_id (via URL)
  * Retorno: Status 200 com array de solicitações
  */
-router.get('/carona/:caro_id', authMiddleware, SolicitacaoController.listarPorCarona);
+router.get('/carona/:car_id', authMiddleware, SolicitacaoController.listarPorCarona);
 
 /**
  * ROTA: GET /api/solicitacoes/usuario/:usua_id
  * Descrição: Lista todas as solicitações feitas por um usuário (passageiro)
  * Acesso: PROTEGIDO - Apenas o próprio usuário pode ver suas solicitações
- * Parâmetros: usua_id (via URL)
+ * Parâmetros: usua_id = usu_id (via URL)
  * Retorno: Status 200 com array de solicitações
  */
 router.get('/usuario/:usua_id', authMiddleware, SolicitacaoController.listarPorUsuario);
@@ -55,7 +55,7 @@ router.get('/usuario/:usua_id', authMiddleware, SolicitacaoController.listarPorU
  * Parâmetros: soli_id (via URL)
  * Campos obrigatórios: novo_status ('Aceito' ou 'Recusado')
  * Retorno: Status 200 com solicitação atualizada
- * LÓGICA: Se 'Aceito', subtrai vagas de CARONAS.caro_vagasDispo
+ * LÓGICA: Se 'Aceito', subtrai vagas de CARONAS.car_vagas_dispo
  */
 router.put('/:soli_id/responder', authMiddleware, SolicitacaoController.responderSolicitacao);
 

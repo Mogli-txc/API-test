@@ -56,7 +56,7 @@ SELECT 'BLOCO 1 removido com sucesso.' AS Status;
 
 -- =====================================================
 -- BLOCO 2 — DELETE dos dados do INSERT DE TESTES
--- (6 usuários: Carlos, Mariana, Pedro, Ana, Lucas, Admin)
+-- (9 usuários: Carlos, Mariana, Pedro, Ana, Lucas, Admin, Novo, Pendente, Suspenso)
 -- =====================================================
 
 -- Nível 4: Tabelas que dependem de CARONAS e USUARIOS
@@ -69,16 +69,16 @@ DELETE FROM PONTO_ENCONTROS     WHERE car_id IN (1, 2, 3, 4, 5, 6);
 DELETE FROM CARONAS             WHERE cur_usu_id IN (1, 2, 3, 4, 5);
 
 -- Nível 2: Tabelas intermediárias
-DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (1, 2, 3, 4, 5, 6);
+DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
 DELETE FROM VEICULOS            WHERE usu_id IN (1, 3, 5);
 
 -- Nível 1: Tabelas dependentes de USUARIOS
-DELETE FROM SUGESTAO_DENUNCIA   WHERE usu_id IN (1, 2, 3, 4, 5, 6);
-DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4, 5, 6);
-DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4, 5, 6);
+DELETE FROM SUGESTAO_DENUNCIA   WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
+DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
+DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
 
 -- Nível 0: Usuários
-DELETE FROM USUARIOS            WHERE usu_id IN (1, 2, 3, 4, 5, 6);
+DELETE FROM USUARIOS            WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
 
 -- Cursos e Escolas (se quiser limpar também)
 DELETE FROM CURSOS              WHERE esc_id IN (1, 2, 3);
@@ -112,6 +112,21 @@ SELECT 'BLOCO 2 removido com sucesso.' AS Status;
 -- Apagar apenas as sugestões já fechadas
 -- DELETE FROM SUGESTAO_DENUNCIA WHERE sug_status = 0;
 
+-- Apagar apenas os registros de auditoria de um usuário específico
+-- (AUDIT_LOG não tem FK para USUARIOS — registros NÃO são removidos em cascata)
+-- DELETE FROM AUDIT_LOG WHERE usu_id = 1;
+
 -- Apagar um usuário específico e todos os seus dados
 -- (funciona pois as FKs estão configuradas com ON DELETE CASCADE)
+-- ATENÇÃO: registros do AUDIT_LOG referenciando este usu_id NÃO serão removidos.
 -- DELETE FROM USUARIOS WHERE usu_id = 4;
+
+
+-- =====================================================
+-- EXTRA — Limpeza completa do AUDIT_LOG (ambiente de testes)
+-- Execute este bloco ao reinicializar o banco para evitar
+-- registros orphan da sessão anterior.
+-- NÃO execute em produção — o audit log é imutável por design.
+-- =====================================================
+
+-- DELETE FROM AUDIT_LOG;

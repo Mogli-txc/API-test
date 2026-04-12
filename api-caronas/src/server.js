@@ -34,6 +34,7 @@ const solicitacaoRoutes  = require('./routes/solicitacaoRoutes');
 const caronaPessoasRoutes = require('./routes/caronaPessoasRoutes'); // Passageiros confirmados na carona
 const sugestaoRoutes     = require('./routes/sugestaoRoutes');       // Sugestões e denúncias
 const matriculaRoutes    = require('./routes/matriculaRoutes');      // Matrículas em cursos
+const adminRoutes        = require('./routes/adminRoutes');           // Estatísticas admin
 
 // Instancia a aplicação Express
 const app = express();
@@ -50,18 +51,16 @@ app.use(helmet({ contentSecurityPolicy: false }));
 
 /**
  * Middleware 1: CORS (Cross-Origin Resource Sharing)
- * Em desenvolvimento: permite qualquer origem (facilita testes locais).
- * Em produção: restringe às origens definidas em ALLOWED_ORIGINS no .env.
+ * Sempre restringe às origens definidas em ALLOWED_ORIGINS.
+ * Em development, fallback para localhost se a variável não estiver definida.
  * Apps mobile não são afetados por CORS — a restrição se aplica ao painel web admin.
  */
-const corsOptions = process.env.NODE_ENV === 'production'
-    ? {
-        origin: process.env.ALLOWED_ORIGINS
-            ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-            : [],
-        credentials: true
-      }
-    : {}; // Em development: CORS aberto
+const corsOptions = {
+    origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5173')
+        .split(',')
+        .map(o => o.trim()),
+    credentials: true
+};
 app.use(cors(corsOptions));
 
 /**
@@ -79,9 +78,9 @@ const limiter = rateLimit({
 app.use(limiter);
 
 /**
- * Middleware 2b: Rate Limiting estrito para autenticação
- * Limita cada IP a 10 tentativas por 15 minutos nos endpoints de login e cadastro.
- * Protege contra ataques de força bruta em credenciais.
+ * Middleware 2b: Rate Limiting estrito para autenticação e OTP
+ * Limita cada IP a 10 tentativas por 15 minutos nos endpoints de login, cadastro e OTP.
+ * Protege contra ataques de força bruta em credenciais e enumeração de OTP.
  */
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
@@ -93,6 +92,27 @@ const authLimiter = rateLimit({
 });
 app.use('/api/usuarios/login', authLimiter);
 app.use('/api/usuarios/cadastro', authLimiter);
+app.use('/api/usuarios/verificar-email', authLimiter);
+app.use('/api/usuarios/reenviar-otp', authLimiter);
+app.use('/api/usuarios/forgot-password', authLimiter);
+app.use('/api/usuarios/reset-password', authLimiter);
+
+/**
+ * Middleware 2c: Rate Limiting para endpoints de escrita autenticados
+ * Limita cada IP a 30 requisições por minuto nos endpoints de criação de dados.
+ * Protege contra spam de solicitações, mensagens e caronas em massa.
+ */
+const writeLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minuto
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Muitas requisições. Aguarde um momento antes de tentar novamente." },
+    skip: () => process.env.NODE_ENV === 'test'
+});
+app.use('/api/solicitacoes/criar', writeLimiter);
+app.use('/api/mensagens/enviar', writeLimiter);
+app.use('/api/caronas/oferecer', writeLimiter);
 
 /**
  * Middleware 2: Parsing de JSON
@@ -191,6 +211,12 @@ app.use('/api/sugestoes', sugestaoRoutes);
  */
 app.use('/api/matriculas', matriculaRoutes);
 
+/**
+ * Rotas Admin: Estatísticas do sistema (apenas Admin e Desenvolvedor)
+ * Base URL: /api/admin
+ */
+app.use('/api/admin', adminRoutes);
+
 // ========== TRATAMENTO DE ERROS ==========
 
 /**
@@ -210,10 +236,8 @@ app.use((req, res) => {
  * Captura erros não tratados em qualquer rota/middleware
  */
 app.use((err, req, res, next) => {
-    console.error("[ERRO GLOBAL]", {
-        message: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    // Stack trace nunca vai para o cliente — apenas para o log interno do servidor
+    console.error("[ERRO GLOBAL]", { message: err.message, stack: err.stack });
     return res.status(err.status || 500).json({
         error: err.message || "Erro interno do servidor"
     });
@@ -228,6 +252,11 @@ const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]
 if (missingEnvVars.length > 0) {
     console.error(`[ERRO] Variáveis de ambiente ausentes: ${missingEnvVars.join(', ')}`);
     process.exit(1); // Encerra o servidor
+}
+
+// OTP_SECRET recomendado mas não obrigatório — fallback para JWT_SECRET se ausente
+if (!process.env.OTP_SECRET) {
+    console.warn('[AVISO] OTP_SECRET não definido. Usando JWT_SECRET como fallback (menos seguro). Defina OTP_SECRET no .env.');
 }
 
 // Lê a porta do arquivo .env ou usa 3000 como padrão

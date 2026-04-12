@@ -14,6 +14,7 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+const { stripHtml } = require('../utils/sanitize');
 
 class SugestaoDenunciaController {
 
@@ -44,8 +45,10 @@ class SugestaoDenunciaController {
                 return res.status(400).json({ error: "sug_tipo inválido. Use 0 (Denúncia) ou 1 (Sugestão)." });
             }
 
-            // PASSO 4: Valida o comprimento do texto (limite do banco: 255)
-            if (sug_texto.trim().length < 5 || sug_texto.trim().length > 255) {
+            // PASSO 4: Sanitização e validação do texto
+            // stripHtml remove tags HTML para prevenir XSS armazenado
+            const sug_texto_limpo = stripHtml(sug_texto.trim());
+            if (sug_texto_limpo.length < 5 || sug_texto_limpo.length > 255) {
                 return res.status(400).json({ error: "Texto deve ter entre 5 e 255 caracteres." });
             }
 
@@ -53,7 +56,7 @@ class SugestaoDenunciaController {
             const [resultado] = await db.query(
                 `INSERT INTO SUGESTAO_DENUNCIA (usu_id, sug_texto, sug_data, sug_status, sug_tipo)
                  VALUES (?, ?, NOW(), 1, ?)`,
-                [usu_id, sug_texto.trim(), sug_tipo]
+                [usu_id, sug_texto_limpo, sug_tipo]
             );
 
             // PASSO 6: Resposta de sucesso
@@ -62,7 +65,7 @@ class SugestaoDenunciaController {
                 sugestao: {
                     sug_id:     resultado.insertId,
                     usu_id,
-                    sug_texto:  sug_texto.trim(),
+                    sug_texto:  sug_texto_limpo,
                     sug_tipo:   parseInt(sug_tipo),
                     sug_status: 1
                 }
@@ -147,9 +150,9 @@ class SugestaoDenunciaController {
                 return res.status(400).json({ error: "ID inválido." });
             }
 
-            // PASSO 3: Busca no banco com JOIN para o nome do autor
+            // PASSO 3: Busca no banco com JOIN para o nome do autor (inclui usu_id para verificar ownership)
             const [rows] = await db.query(
-                `SELECT s.sug_id, s.sug_texto, s.sug_data, s.sug_status,
+                `SELECT s.sug_id, s.usu_id, s.sug_texto, s.sug_data, s.sug_status,
                         s.sug_tipo, s.sug_resposta,
                         u.usu_nome AS autor
                  FROM SUGESTAO_DENUNCIA s
@@ -162,10 +165,26 @@ class SugestaoDenunciaController {
                 return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
             }
 
-            // PASSO 4: Resposta de sucesso
+            // PASSO 4: Verifica se o requester é o autor ou admin/dev
+            // Usuários comuns só podem ver as próprias sugestões/denúncias
+            if (rows[0].usu_id !== req.user.id) {
+                const [perfil] = await db.query(
+                    'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+                    [req.user.id]
+                );
+                const isAdminOuDev = perfil.length > 0 && perfil[0].per_tipo >= 1;
+                if (!isAdminOuDev) {
+                    return res.status(403).json({ error: "Sem permissão para visualizar esta sugestão/denúncia." });
+                }
+            }
+
+            // Remove usu_id interno antes de retornar (não precisa ir para o cliente)
+            const { usu_id: _usu_id, ...sugestao } = rows[0];
+
+            // PASSO 5: Resposta de sucesso
             return res.status(200).json({
                 message:  "Sugestão/Denúncia recuperada com sucesso.",
-                sugestao: rows[0]
+                sugestao
             });
 
         } catch (error) {
@@ -195,10 +214,11 @@ class SugestaoDenunciaController {
                 return res.status(400).json({ error: "ID inválido." });
             }
 
-            // PASSO 3: Valida a resposta
+            // PASSO 3: Valida e sanitiza a resposta
             if (!sug_resposta) {
                 return res.status(400).json({ error: "Campo obrigatório: sug_resposta." });
             }
+            const sug_resposta_limpa = stripHtml(sug_resposta.trim());
 
             // PASSO 4: Administrador só pode responder sugestões de usuários da sua escola
             if (per_tipo === 1) {
@@ -222,7 +242,7 @@ class SugestaoDenunciaController {
                 `UPDATE SUGESTAO_DENUNCIA
                  SET sug_resposta = ?, sug_id_resposta = ?, sug_status = 0
                  WHERE sug_id = ?`,
-                [sug_resposta, req.user.id, sug_id]
+                [sug_resposta_limpa, req.user.id, sug_id]
             );
 
             if (resultado.affectedRows === 0) {
@@ -232,7 +252,7 @@ class SugestaoDenunciaController {
             // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:  "Resposta registrada e sugestão/denúncia fechada.",
-                sugestao: { sug_id: parseInt(sug_id), sug_status: 0, sug_resposta }
+                sugestao: { sug_id: parseInt(sug_id), sug_status: 0, sug_resposta: sug_resposta_limpa }
             });
 
         } catch (error) {
@@ -243,10 +263,12 @@ class SugestaoDenunciaController {
 
     /**
      * MÉTODO: deletar
-     * Remove permanentemente uma sugestão ou denúncia.
+     * Soft delete de uma sugestão ou denúncia — marca sug_deletado_em em vez de remover.
+     * Preserva o histórico para auditoria. Apenas Desenvolvedor pode deletar.
      *
-     * Tabela: SUGESTAO_DENUNCIA (DELETE)
+     * Tabela: SUGESTAO_DENUNCIA (UPDATE sug_deletado_em)
      * Parâmetro: sug_id (via URL)
+     * Requer coluna: sug_deletado_em DATETIME NULL (ver migration 001)
      */
     async deletar(req, res) {
         try {
@@ -258,11 +280,15 @@ class SugestaoDenunciaController {
                 return res.status(400).json({ error: "ID inválido." });
             }
 
-            // PASSO 3: Remove do banco
-            await db.query(
-                'DELETE FROM SUGESTAO_DENUNCIA WHERE sug_id = ?',
+            // PASSO 3: Soft delete — registra data de remoção sem apagar o registro
+            const [resultado] = await db.query(
+                'UPDATE SUGESTAO_DENUNCIA SET sug_deletado_em = NOW() WHERE sug_id = ? AND sug_deletado_em IS NULL',
                 [sug_id]
             );
+
+            if (resultado.affectedRows === 0) {
+                return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
+            }
 
             // PASSO 4: Resposta sem conteúdo (sucesso)
             return res.status(204).send();

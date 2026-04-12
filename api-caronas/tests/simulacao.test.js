@@ -49,7 +49,16 @@ async function setVerificacao(usu_id, nivel, expira) {
         'UPDATE USUARIOS SET usu_verificacao = ?, usu_verificacao_expira = ? WHERE usu_id = ?',
         [nivel, expira, usu_id]
     );
+    // Garante per_habilitado=1 — necessário pois o login bloqueia contas com per_habilitado=0
+    await db.execute('UPDATE PERFIL SET per_habilitado = 1 WHERE usu_id = ?', [usu_id]);
     await db.end();
+}
+
+// Helper: ativa conta recém-cadastrada para permitir login (simula confirmação de OTP)
+async function ativarConta(usu_id) {
+    const expira = new Date();
+    expira.setDate(expira.getDate() + 5);
+    await setVerificacao(usu_id, 5, expira);
 }
 
 jest.setTimeout(15000);
@@ -107,6 +116,9 @@ describe('Usuário 1 — Motorista', () => {
         expect(res.status).toBe(201);
         expect(res.body.usuario).toHaveProperty('usu_id');
         usu_id1 = res.body.usuario.usu_id;
+
+        // PASSO 3: ativa conta (simula confirmação de OTP) para permitir login no próximo teste
+        await ativarConta(usu_id1);
     });
 
     it('1.2 — Login e obtenção do token JWT', async () => {
@@ -215,6 +227,9 @@ describe('Usuário 2 — Passageiro', () => {
         expect(res.status).toBe(201);
         expect(res.body.usuario).toHaveProperty('usu_id');
         usu_id2 = res.body.usuario.usu_id;
+
+        // PASSO 3: ativa conta (simula confirmação de OTP) para permitir login no próximo teste
+        await ativarConta(usu_id2);
     });
 
     it('2.2 — Login e obtenção do token JWT', async () => {
@@ -261,7 +276,7 @@ describe('Usuário 2 — Passageiro', () => {
     it('2.5 — Solicitação de vaga na carona do Usuário 1', async () => {
         // PASSO 1: solicita 1 vaga na carona criada pelo usuário 1
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token2}`)
             .send({
                 car_id:            car_id1,

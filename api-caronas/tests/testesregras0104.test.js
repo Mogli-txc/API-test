@@ -11,7 +11,7 @@
  *   Cadastro Temporário — verificacao=5 com acesso de 5 dias
  *
  * ENDPOINTS COBERTOS:
- *   POST /api/caronas/solicitar       (CaronaController.solicitar)
+ *   POST /api/solicitacoes/criar       (CaronaController.solicitar)
  *   POST /api/solicitacoes/criar      (SolicitacaoController.solicitarCarona)
  *   PUT  /api/solicitacoes/:id/responder
  *   POST /api/passageiros/            (CaronaPessoasController.adicionar)
@@ -55,6 +55,8 @@ async function setVerificacao(usu_id, nivel) {
         'UPDATE USUARIOS SET usu_verificacao = ?, usu_verificacao_expira = ? WHERE usu_id = ?',
         [nivel, expira, usu_id]
     );
+    // Garante per_habilitado=1 — login bloqueia contas com per_habilitado=0
+    await db.execute('UPDATE PERFIL SET per_habilitado = 1 WHERE usu_id = ?', [usu_id]);
     await db.end();
 }
 
@@ -121,6 +123,9 @@ beforeAll(async () => {
             .send({ usu_email: email, usu_senha: senha });
         const usu_id = cadRes.body.usuario.usu_id;
 
+        // Ativa conta (simula confirmação de OTP) — necessário para login após fix C2
+        await setVerificacao(usu_id, 5);
+
         // Login
         const loginRes = await request(app)
             .post('/api/usuarios/login')
@@ -168,12 +173,14 @@ beforeAll(async () => {
             .send({ usu_email: email, usu_senha: senha });
         const usu_id = cadRes.body.usuario.usu_id;
 
+        // Ativa conta antes do login (simula confirmação de OTP — necessário após fix C2)
+        await setVerificacao(usu_id, nivel);
+
         const loginRes = await request(app)
             .post('/api/usuarios/login')
             .send({ usu_email: email, usu_senha: senha });
         const token = loginRes.body.token;
 
-        await setVerificacao(usu_id, nivel);
         return { usu_id, token };
     }
 
@@ -187,7 +194,7 @@ beforeAll(async () => {
 
     // Passageiro vinculado solicita carona_B
     const solRes = await request(app)
-        .post('/api/caronas/solicitar')
+        .post('/api/solicitacoes/criar')
         .set('Authorization', `Bearer ${token_vinculado}`)
         .send({ car_id: car_id_B, sol_vaga_soli: 1 });
     const sol_id_B = solRes.body.solicitacao.sol_id;
@@ -201,11 +208,14 @@ beforeAll(async () => {
     // ---- Cria passageiroLivre (sem vínculo) ----
     ({ usu_id: usu_id_livre, token: token_livre } = await setupPassageiro(emailLivre));
 
-    // ---- Cria usuarioTemp (só email+senha → verificacao=5 automático) ----
+    // ---- Cria usuarioTemp (só email+senha → verificacao=5 via setVerificacao) ----
     const tempCadRes = await request(app)
         .post('/api/usuarios/cadastro')
         .send({ usu_email: emailTemp, usu_senha: 'senha123' });
     usu_id_temp = tempCadRes.body.usuario.usu_id;
+
+    // Simula confirmação de OTP com nível temporário (5 dias)
+    await setVerificacao(usu_id_temp, 5);
 
     const tempLoginRes = await request(app)
         .post('/api/usuarios/login')
@@ -238,7 +248,7 @@ describe('Cadastro Temporário — verificacao=5', () => {
     it('CT.2 — usuário temporário (verificacao=5) pode solicitar carona dentro do prazo', async () => {
         // PASSO 1: usuarioTemp solicita uma carona ativa
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_temp}`)
             .send({ car_id: car_id_C, sol_vaga_soli: 1 });
 
@@ -259,7 +269,7 @@ describe('Cadastro Temporário — verificacao=5', () => {
 
         // PASSO 2: solicita carona com o prazo expirado
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_temp}`)
             .send({ car_id: car_id_C, sol_vaga_soli: 1 });
 
@@ -277,10 +287,10 @@ describe('Cadastro Temporário — verificacao=5', () => {
 
 describe('Regra 1 — Motorista não pode solicitar a própria carona', () => {
 
-    it('R1.1 — via /api/caronas/solicitar: motoristaA solicita carona_A → 403', async () => {
+    it('R1.1 — via /api/solicitacoes/criar: motoristaA solicita carona_A → 403', async () => {
         // PASSO 1: motoristaA tenta solicitar a carona que ele mesmo criou
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_A}`)
             .send({ car_id: car_id_A, sol_vaga_soli: 1 });
 
@@ -301,10 +311,10 @@ describe('Regra 1 — Motorista não pode solicitar a própria carona', () => {
         expect(res.body.error).toMatch(/própria carona/i);
     });
 
-    it('R1.3 — via /api/caronas/solicitar: motoristaB solicita carona_B → 403', async () => {
+    it('R1.3 — via /api/solicitacoes/criar: motoristaB solicita carona_B → 403', async () => {
         // PASSO 1: valida que a regra se aplica a qualquer motorista, não só motoristaA
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_B}`)
             .send({ car_id: car_id_B, sol_vaga_soli: 1 });
 
@@ -325,7 +335,7 @@ describe('Regra 2 — Motorista com carona ativa não pode solicitar carona', ()
     it('R2.1 — carona_A status=1 (Aberta): motoristaA solicita carona_C → 403', async () => {
         // PASSO 1: carona_A está status=1 (Aberta), motoristaA tenta solicitar carona de outro
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_A}`)
             .send({ car_id: car_id_C, sol_vaga_soli: 1 });
 
@@ -355,7 +365,7 @@ describe('Regra 2 — Motorista com carona ativa não pode solicitar carona', ()
 
         // PASSO 2: motoristaA tenta solicitar carona_C — status 2 também conta como "em andamento"
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_A}`)
             .send({ car_id: car_id_C, sol_vaga_soli: 1 });
 
@@ -373,7 +383,7 @@ describe('Regra 2 — Motorista com carona ativa não pode solicitar carona', ()
 
         // PASSO 2: motoristaA (sem carona ativa agora) solicita carona_C
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_A}`)
             .send({ car_id: car_id_C, sol_vaga_soli: 1 });
 
@@ -391,11 +401,11 @@ describe('Regra 2 — Motorista com carona ativa não pode solicitar carona', ()
 
 describe('Regra 3 — Usuário não pode estar vinculado a mais de uma carona (via solicitar)', () => {
 
-    it('R3.1 — via /api/caronas/solicitar: passageiroVinculado tenta solicitar carona_C → 403', async () => {
+    it('R3.1 — via /api/solicitacoes/criar: passageiroVinculado tenta solicitar carona_C → 403', async () => {
         // PASSO 1: passageiroVinculado já tem sol_status=2 em carona_B (ativa, status=1)
         //          tenta agora solicitar carona_C → deve ser bloqueado pela Regra 3
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_vinculado}`)
             .send({ car_id: car_id_C, sol_vaga_soli: 1 });
 
@@ -419,7 +429,7 @@ describe('Regra 3 — Usuário não pode estar vinculado a mais de uma carona (v
     it('R3.3 — controle positivo: passageiroLivre (sem vínculo) pode solicitar carona_B → 201', async () => {
         // PASSO 1: passageiroLivre não tem nenhum vínculo ativo
         const res = await request(app)
-            .post('/api/caronas/solicitar')
+            .post('/api/solicitacoes/criar')
             .set('Authorization', `Bearer ${token_livre}`)
             .send({ car_id: car_id_B, sol_vaga_soli: 1 });
 

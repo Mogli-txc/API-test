@@ -18,6 +18,8 @@ const pool = mysql.createPool({
     database: process.env.DB_NAME,                    // Nome do banco: bd_tcc_des_125_caronas
     waitForConnections: true, // Espera uma conexão ficar livre se todas estiverem ocupadas
     connectionLimit:    10,   // Máximo de 10 conexões simultâneas
+    enableKeepAlive:    true, // Mantém conexões vivas — evita que o servidor MySQL encerre conexões ociosas
+    keepAliveInitialDelay: 0, // Envia o primeiro keep-alive imediatamente ao detectar ociosidade
 });
 
 module.exports = pool;

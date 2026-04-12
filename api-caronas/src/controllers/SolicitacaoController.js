@@ -9,6 +9,7 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+const { getMotoristaId } = require('../utils/authHelper');
 
 class SolicitacaoController {
 
@@ -216,28 +217,23 @@ class SolicitacaoController {
      * Lista todas as solicitações de uma carona (visível para o motorista).
      *
      * Tabela: SOLICITACOES_CARONA + USUARIOS (JOIN)
-     * Parâmetro: caro_id (via URL)
+     * Parâmetro: car_id (via URL)
      */
     async listarPorCarona(req, res) {
         try {
-            const { caro_id } = req.params;
+            const { car_id } = req.params;
 
-            if (!caro_id || isNaN(caro_id)) {
+            if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
             // Verifica se o usuário autenticado é o motorista desta carona
             // Apenas o motorista pode ver todas as solicitações da sua carona
-            const [motorista] = await db.query(
-                `SELECT cu.usu_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE c.car_id = ?`,
-                [caro_id]
-            );
-            if (motorista.length === 0) {
+            const motoristaId = await getMotoristaId(car_id);
+            if (motoristaId === null) {
                 return res.status(404).json({ error: "Carona não encontrada." });
             }
-            if (motorista[0].usu_id !== req.user.id) {
+            if (motoristaId !== req.user.id) {
                 return res.status(403).json({ error: "Sem permissão para visualizar solicitações desta carona." });
             }
 
@@ -248,13 +244,13 @@ class SolicitacaoController {
                  INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
                  WHERE s.car_id = ?
                  ORDER BY s.sol_id DESC`,
-                [caro_id]
+                [car_id]
             );
 
             return res.status(200).json({
                 message: "Solicitações da carona listadas",
                 total: solicitacoes.length,
-                caro_id: parseInt(caro_id),
+                car_id: parseInt(car_id),
                 solicitacoes
             });
 
@@ -485,9 +481,11 @@ class SolicitacaoController {
 
     /**
      * MÉTODO: deletarSolicitacao
-     * Remove permanentemente uma solicitação do banco (hard delete).
+     * Soft delete de uma solicitação — muda sol_status para 0 (Cancelado).
+     * Preserva o histórico de solicitações para auditoria.
+     * Apenas o motorista da carona pode deletar solicitações.
      *
-     * Tabela: SOLICITACOES_CARONA (DELETE)
+     * Tabela: SOLICITACOES_CARONA (UPDATE sol_status)
      * Parâmetro: soli_id (via URL)
      */
     async deletarSolicitacao(req, res) {
@@ -498,8 +496,25 @@ class SolicitacaoController {
                 return res.status(400).json({ error: "ID de solicitação inválido." });
             }
 
+            // PASSO 1: Verifica se o usuário autenticado é o motorista desta carona
+            const [sol] = await db.query(
+                `SELECT s.car_id, cu.usu_id AS usu_id_motorista
+                 FROM SOLICITACOES_CARONA s
+                 INNER JOIN CARONAS c         ON s.car_id       = c.car_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
+                 WHERE s.sol_id = ?`,
+                [soli_id]
+            );
+            if (sol.length === 0) {
+                return res.status(404).json({ error: "Solicitação não encontrada." });
+            }
+            if (sol[0].usu_id_motorista !== req.user.id) {
+                return res.status(403).json({ error: "Sem permissão para deletar esta solicitação." });
+            }
+
+            // PASSO 2: Soft delete — muda status para 0 (Cancelado)
             await db.query(
-                'DELETE FROM SOLICITACOES_CARONA WHERE sol_id = ?',
+                'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE sol_id = ?',
                 [soli_id]
             );
 

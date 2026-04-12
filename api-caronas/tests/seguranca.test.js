@@ -287,7 +287,17 @@ async function teste5_RotaPublica() {
  * via node tests/seguranca.test.js com servidor rodando.
  */
 const request = require('supertest');
+const mysql   = require('mysql2/promise');
 const app     = require('../src/server');
+
+async function getDb() {
+  return mysql.createConnection({
+    host:     process.env.DB_HOST || 'localhost',
+    user:     process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+  });
+}
 
 describe('Testes de Segurança - API de Caronas', () => {
 
@@ -342,9 +352,24 @@ describe('Testes de Role - Permissões por Tipo de Perfil', () => {
 
   async function registrarUsuarioComum() {
     const email = `teste.role.${Date.now()}@escola.com`;
-    await request(app)
+    const cadRes = await request(app)
       .post('/api/usuarios/cadastro')
       .send({ usu_email: email, usu_senha: 'senha123' });
+    const usu_id = cadRes.body?.usuario?.usu_id;
+
+    // Ativa conta diretamente no banco (simula confirmação de OTP sem SMTP)
+    // Precisa setar usu_verificacao != 0 (login bloqueia verificacao=0)
+    // e per_habilitado = 1 (login bloqueia per_habilitado=0)
+    if (usu_id) {
+      const db = await getDb();
+      await db.query(
+        'UPDATE USUARIOS SET usu_verificacao = 5, usu_verificacao_expira = DATE_ADD(NOW(), INTERVAL 5 DAY) WHERE usu_id = ?',
+        [usu_id]
+      );
+      await db.query('UPDATE PERFIL SET per_habilitado = 1 WHERE usu_id = ?', [usu_id]);
+      await db.end();
+    }
+
     const respLogin = await request(app)
       .post('/api/usuarios/login')
       .send({ usu_email: email, usu_senha: 'senha123' });

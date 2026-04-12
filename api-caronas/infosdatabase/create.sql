@@ -45,8 +45,14 @@ CREATE TABLE USUARIOS (
     usu_telefone        VARCHAR(11)                         COMMENT 'Telefone sem máscara (ex: 11999990000) (NULL no cadastro temporário)',
     usu_matricula       VARCHAR(100)                        COMMENT 'Foto/Comprovante da Matrícula (NULL no cadastro temporário)',
     usu_senha           VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash)',
-    usu_verificacao      TINYINT(1)   NOT NULL DEFAULT 5     COMMENT '0=Não verificado, 1=Matrícula verificada, 2=Matrícula + veículo, 5=Cadastro temporário (5 dias)',
+    usu_verificacao      TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Não verificado (aguardando OTP), 1=Matrícula verificada, 2=Matrícula + veículo, 5=Cadastro temporário (5 dias)',
     usu_verificacao_expira DATETIME                         COMMENT 'Expiração da verificação — semestral (nível 1/2) ou +5 dias do cadastro (nível 5)',
+    usu_otp_hash         VARCHAR(64)                        COMMENT 'Hash HMAC-SHA256 do código OTP de verificação de email (NULL após verificação)',
+    usu_otp_expira       DATETIME                           COMMENT 'Expiração do OTP — 10 minutos após geração (NULL após verificação)',
+    usu_otp_tentativas    INT          NOT NULL DEFAULT 0    COMMENT 'Contador de tentativas incorretas de OTP — resetado no reenvio',
+    usu_otp_bloqueado_ate DATETIME                          COMMENT 'Conta bloqueada até esta data após 3 tentativas OTP incorretas (NULL = desbloqueado)',
+    usu_reset_hash       VARCHAR(64)                        COMMENT 'Hash HMAC-SHA256 do token de redefinição de senha — validade 15 min (NULL = sem reset pendente)',
+    usu_reset_expira     DATETIME                           COMMENT 'Expiração do token de redefinição de senha (NULL = sem reset pendente)',
     usu_status           TINYINT(1)   NOT NULL               COMMENT '1=Ativo, 0=Inativo',
     usu_email           VARCHAR(180) NOT NULL UNIQUE        COMMENT 'Email Institucional para acesso (UNIQUE)',
     usu_descricao       VARCHAR(255)                        COMMENT 'Descrição do Usuário (NULL)',
@@ -114,6 +120,7 @@ CREATE TABLE SUGESTAO_DENUNCIA (
     sug_tipo       TINYINT      NOT NULL               COMMENT '1=Sugestão, 0=Denúncia',
     sug_id_resposta INT                                COMMENT 'Usuário que respondeu (FK, NULL)',
     sug_resposta   VARCHAR(255)                        COMMENT 'Resposta da sugestão (NULL)',
+    sug_deletado_em DATETIME                           COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
     PRIMARY KEY (sug_id)
 ) ENGINE = InnoDB;
 
@@ -320,3 +327,28 @@ ALTER TABLE CARONA_PESSOAS
         ON DELETE RESTRICT ON UPDATE CASCADE;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+
+-- =====================================================
+-- 15. Tabela AUDIT_LOG — Rastreabilidade de ações
+-- Registra ações sensíveis para fins de auditoria e segurança.
+-- Gerenciada por: src/utils/auditLog.js
+-- =====================================================
+DROP TABLE IF EXISTS AUDIT_LOG;
+CREATE TABLE AUDIT_LOG (
+    audit_id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Identificador do registro de auditoria (PK)',
+    tabela           VARCHAR(50)  NOT NULL               COMMENT 'Tabela afetada (ex: USUARIOS, CARONAS)',
+    registro_id      INT          NOT NULL               COMMENT 'ID do registro afetado',
+    acao             VARCHAR(30)  NOT NULL               COMMENT 'Código da ação (LOGIN, CADASTRO, DELETAR_USU...)',
+    dados_anteriores JSON                                COMMENT 'Estado anterior do registro em JSON (opcional)',
+    dados_novos      JSON                                COMMENT 'Novo estado do registro em JSON (opcional)',
+    usu_id           INT                                 COMMENT 'Usuário que realizou a ação (NULL = sistema)',
+    ip               VARCHAR(45)                         COMMENT 'Endereço IP da requisição (suporta IPv6)',
+    criado_em        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora do evento',
+    PRIMARY KEY (audit_id),
+    INDEX idx_audit_tabela_registro (tabela, registro_id),
+    INDEX idx_audit_usu_id (usu_id),
+    INDEX idx_audit_acao (acao),
+    INDEX idx_audit_criado_em (criado_em)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Audit log — rastreabilidade de ações sensíveis no sistema';

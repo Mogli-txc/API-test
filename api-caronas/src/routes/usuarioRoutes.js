@@ -13,26 +13,75 @@ const uploadImage       = require('../middlewares/uploadHelper');
 const { validarImagem } = uploadImage;
 
 const uploadUsuario = uploadImage('usuarios');
+const multer = require('multer');
+
+/**
+ * Wraps multer.single() to convert Multer errors into 400 responses.
+ * Without this, fileFilter rejections and file-size violations propagate
+ * to the global error handler as 500.
+ */
+function uploadFotoMiddleware(req, res, next) {
+    uploadUsuario.single('foto')(req, res, (err) => {
+        if (!err) return next();
+        if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: 'Arquivo muito grande. Tamanho máximo: 5 MB.' });
+        }
+        return res.status(400).json({ error: err.message || 'Erro no upload de arquivo.' });
+    });
+}
 
 // ========== ROTAS PÚBLICAS (SEM AUTENTICAÇÃO) ==========
 
 /**
  * ROTA: POST /api/usuarios/cadastro
- * Descrição: Registra um novo usuário no sistema
- * Acesso: Público - Qualquer pessoa pode se registrar
- * Campos obrigatórios: usua_nome, usua_email, usua_senha
- * Campo opcional: usua_matricula (ID da escola/instituição)
- * Retorno: Status 201 com dados do usuário criado (SEM senha)
+ * Descrição: Registra um novo usuário e envia OTP de verificação por email
+ * Acesso: Público
+ * Campos obrigatórios: usu_email, usu_senha (mínimo 8 caracteres)
+ * Retorno: Status 201 — login bloqueado até verificar o email
  */
 router.post('/cadastro', UsuarioController.cadastrar);
 
 /**
+ * ROTA: POST /api/usuarios/verificar-email
+ * Descrição: Valida o OTP enviado por email e libera o acesso do usuário
+ * Acesso: Público
+ * Campos obrigatórios: usu_email, otp
+ * Retorno: Status 200 após verificação bem-sucedida
+ */
+router.post('/verificar-email', UsuarioController.verificarEmail);
+
+/**
+ * ROTA: POST /api/usuarios/reenviar-otp
+ * Descrição: Reenvia um novo código OTP para o email cadastrado
+ * Acesso: Público — responde com 200 mesmo se email não existir (evita enumeração)
+ * Campo obrigatório: usu_email
+ */
+router.post('/reenviar-otp', UsuarioController.reenviarOtp);
+
+/**
+ * ROTA: POST /api/usuarios/forgot-password
+ * Descrição: Solicita redefinição de senha — envia link por email
+ * Acesso: Público — responde 200 mesmo se email não existir (evita enumeração)
+ * Campo obrigatório: usu_email
+ */
+router.post('/forgot-password', UsuarioController.esqueceuSenha);
+
+/**
+ * ROTA: POST /api/usuarios/reset-password
+ * Descrição: Valida o token e redefine a senha do usuário
+ * Acesso: Público
+ * Campos obrigatórios: usu_email, token, nova_senha
+ * Retorno: Status 200 após redefinição bem-sucedida
+ */
+router.post('/reset-password', UsuarioController.redefinirSenha);
+
+/**
  * ROTA: POST /api/usuarios/login
  * Descrição: Autentica o usuário e retorna um Token JWT
- * Acesso: Público - Qualquer pessoa pode fazer login
- * Campos obrigatórios: usua_email, usua_senha
+ * Acesso: Público - requer email verificado via OTP
+ * Campos obrigatórios: usu_email, usu_senha
  * Retorno: Status 200 com Token JWT (válido por 24 horas)
- * Efeito Colateral: Registra acesso na tabela REGISTROS_DE_USUARIOS
+ * Efeito Colateral: Registra acesso na tabela USUARIOS_REGISTROS
  */
 router.post('/login', UsuarioController.login);
 
@@ -65,7 +114,7 @@ router.put('/:id', authMiddleware, UsuarioController.atualizar);
  * Campo no body (multipart/form-data): foto
  * Retorno: Status 200 com a URL pública da nova foto
  */
-router.put('/:id/foto', authMiddleware, uploadUsuario.single('foto'), validarImagem, UsuarioController.atualizarFoto);
+router.put('/:id/foto', authMiddleware, uploadFotoMiddleware, validarImagem, UsuarioController.atualizarFoto);
 
 /**
  * ROTA: DELETE /api/usuarios/:id
