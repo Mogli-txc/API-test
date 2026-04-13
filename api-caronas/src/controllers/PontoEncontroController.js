@@ -11,6 +11,7 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+const { stripHtml } = require('../utils/sanitize');
 
 class PontoEncontroController {
 
@@ -36,13 +37,17 @@ class PontoEncontroController {
                 });
             }
 
+            // Sanitiza campos de texto livre para prevenir XSS armazenado
+            const nome_limpo     = stripHtml(pon_nome.trim());
+            const endereco_limpo = stripHtml(pon_endereco.trim());
+
             // PASSO 3: Inserção no banco com status 1 (Ativo)
             // INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status)
             const [resultado] = await db.query(
                 `INSERT INTO PONTO_ENCONTROS
                     (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status)
                  VALUES (?, ?, ?, ?, ?, ?, 1)`,
-                [car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem || null]
+                [car_id, endereco_limpo, pon_endereco_geom, pon_tipo, nome_limpo, pon_ordem || null]
             );
 
             // PASSO 4: Resposta de sucesso com ID gerado pelo banco
@@ -50,7 +55,7 @@ class PontoEncontroController {
                 message: "Ponto de encontro registrado!",
                 ponto: {
                     pon_id: resultado.insertId,
-                    car_id, pon_endereco, pon_tipo, pon_nome, pon_status: 1
+                    car_id, pon_endereco: endereco_limpo, pon_tipo, pon_nome: nome_limpo, pon_status: 1
                 }
             });
 
@@ -82,20 +87,28 @@ class PontoEncontroController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 3: Busca no banco ordenado pela ordem dos pontos
+            // PASSO 3: Parâmetros de paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 4: Busca no banco ordenado pela ordem dos pontos
             const [pontos] = await db.query(
                 `SELECT pon_id, pon_nome, pon_endereco, pon_endereco_geom,
                         pon_tipo, pon_ordem, pon_status
                  FROM PONTO_ENCONTROS
                  WHERE car_id = ? AND pon_status = 1
-                 ORDER BY pon_ordem ASC`,
-                [car_id]
+                 ORDER BY pon_ordem ASC
+                 LIMIT ? OFFSET ?`,
+                [car_id, limit, offset]
             );
 
-            // PASSO 4: Resposta de sucesso
+            // PASSO 5: Resposta de sucesso
             return res.status(200).json({
                 message: `Rota da carona ${car_id} recuperada.`,
                 total:   pontos.length,
+                page,
+                limit,
                 pontos
             });
 

@@ -245,9 +245,9 @@ describe('Grupo 2 — Admin Stats', () => {
         expect(res.body).toHaveProperty('sistema');
     });
 
-    it('2.5 — GET /api/admin/stats/usuarios — sem token deve retornar 403', async () => {
+    it('2.5 — GET /api/admin/stats/usuarios — sem token deve retornar 401', async () => {
         const res = await request(app).get('/api/admin/stats/usuarios');
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('2.6 — GET /api/admin/stats/sistema — usuário sem role admin deve retornar 403', async () => {

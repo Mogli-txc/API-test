@@ -2,7 +2,7 @@
  * ROTAS DE USUÁRIOS - Autenticação e Gerenciamento de Perfil
  * Controla: Cadastro, Login, Perfil, Atualização e Deleção
  * Segurança: Login gera JWT válido por 24 horas
- * MER: Tabelas USUARIOS, PERFIL, REGISTROS_DE_USUARIOS
+ * MER: Tabelas USUARIOS, PERFIL, USUARIOS_REGISTROS
  */
 
 const express = require('express');
@@ -80,10 +80,19 @@ router.post('/reset-password', UsuarioController.redefinirSenha);
  * Descrição: Autentica o usuário e retorna um Token JWT
  * Acesso: Público - requer email verificado via OTP
  * Campos obrigatórios: usu_email, usu_senha
- * Retorno: Status 200 com Token JWT (válido por 24 horas)
+ * Retorno: Status 200 com access_token (24h) + refresh_token (30 dias)
  * Efeito Colateral: Registra acesso na tabela USUARIOS_REGISTROS
  */
 router.post('/login', UsuarioController.login);
+
+/**
+ * ROTA: POST /api/usuarios/refresh
+ * Descrição: Troca um refresh token válido por novo access token + refresh token rotacionado
+ * Acesso: Público (o refresh token é a credencial)
+ * Campo obrigatório: refresh_token
+ * Retorno: Status 200 com novo token e novo refresh_token
+ */
+router.post('/refresh', UsuarioController.refreshToken);
 
 // ========== ROTAS PROTEGIDAS (REQUEREM AUTENTICAÇÃO JWT) ==========
 
@@ -100,8 +109,8 @@ router.get('/perfil/:id', authMiddleware, UsuarioController.perfil);
  * ROTA: PUT /api/usuarios/:id
  * Descrição: Atualiza os dados do usuário (nome, email, senha)
  * Acesso: PROTEGIDO - Apenas o próprio usuário pode atualizar
- * Parâmetro: id (usua_id via URL)
- * Campos atualizáveis: usua_nome, usua_email, usua_senha
+ * Parâmetro: id (usu_id via URL)
+ * Campos atualizáveis: usu_nome, usu_email, usu_senha
  * Retorno: Status 200 com dados atualizados
  */
 router.put('/:id', authMiddleware, UsuarioController.atualizar);
@@ -110,7 +119,7 @@ router.put('/:id', authMiddleware, UsuarioController.atualizar);
  * ROTA: PUT /api/usuarios/:id/foto
  * Descrição: Atualiza a foto de perfil do usuário
  * Acesso: PROTEGIDO - Apenas o próprio usuário pode atualizar sua foto
- * Parâmetro: id (usu_id via URL)
+ * Parâmetro: id (usu_id via URL) — mesmo usuário do JWT
  * Campo no body (multipart/form-data): foto
  * Retorno: Status 200 com a URL pública da nova foto
  */

@@ -183,14 +183,9 @@ class AdminController {
                 return res.status(403).json({ error: "Apenas Desenvolvedores podem ver o resumo global do sistema." });
             }
 
-            // Executa todas as queries em paralelo para melhor performance
-            const [
-                [usuarios],
-                [caronas],
-                [solicitacoes],
-                [mensagens],
-                [veiculos]
-            ] = await Promise.all([
+            // Executa todas as queries em paralelo.
+            // Promise.allSettled garante resposta parcial mesmo se uma query falhar.
+            const resultados = await Promise.allSettled([
                 db.query('SELECT COUNT(*) AS total, SUM(usu_status = 1) AS ativos FROM USUARIOS'),
                 db.query('SELECT COUNT(*) AS total, SUM(car_status = 1) AS abertas FROM CARONAS'),
                 db.query('SELECT COUNT(*) AS total, SUM(sol_status = 2) AS aceitas FROM SOLICITACOES_CARONA'),
@@ -198,14 +193,24 @@ class AdminController {
                 db.query('SELECT COUNT(*) AS total FROM VEICULOS WHERE vei_status = 1')
             ]);
 
+            // Extrai o primeiro objeto de cada resultado, ou null em caso de falha
+            const getValue = (result, idx) =>
+                result[idx].status === 'fulfilled' ? result[idx].value[0][0] : null;
+
+            const usuarios     = getValue(resultados, 0);
+            const caronas      = getValue(resultados, 1);
+            const solicitacoes = getValue(resultados, 2);
+            const mensagens    = getValue(resultados, 3);
+            const veiculos     = getValue(resultados, 4);
+
             return res.status(200).json({
                 message: "Resumo geral do sistema",
                 sistema: {
-                    usuarios:     { total: usuarios[0].total,     ativos: usuarios[0].ativos },
-                    caronas:      { total: caronas[0].total,      abertas: caronas[0].abertas },
-                    solicitacoes: { total: solicitacoes[0].total, aceitas: solicitacoes[0].aceitas },
-                    mensagens:    { total: mensagens[0].total },
-                    veiculos:     { total: veiculos[0].total }
+                    usuarios:     usuarios     ? { total: usuarios.total,         ativos: usuarios.ativos }   : null,
+                    caronas:      caronas      ? { total: caronas.total,          abertas: caronas.abertas }  : null,
+                    solicitacoes: solicitacoes ? { total: solicitacoes.total,      aceitas: solicitacoes.aceitas } : null,
+                    mensagens:    mensagens    ? { total: mensagens.total }        : null,
+                    veiculos:     veiculos     ? { total: veiculos.total }         : null
                 }
             });
 

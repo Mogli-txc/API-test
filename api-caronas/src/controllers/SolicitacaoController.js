@@ -237,20 +237,27 @@ class SolicitacaoController {
                 return res.status(403).json({ error: "Sem permissão para visualizar solicitações desta carona." });
             }
 
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
             const [solicitacoes] = await db.query(
                 `SELECT s.sol_id, s.usu_id_passageiro, s.sol_vaga_soli, s.sol_status,
                         u.usu_nome AS passageiro
                  FROM SOLICITACOES_CARONA s
                  INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
                  WHERE s.car_id = ?
-                 ORDER BY s.sol_id DESC`,
-                [car_id]
+                 ORDER BY s.sol_id DESC
+                 LIMIT ? OFFSET ?`,
+                [car_id, limit, offset]
             );
 
             return res.status(200).json({
                 message: "Solicitações da carona listadas",
-                total: solicitacoes.length,
-                car_id: parseInt(car_id),
+                total:   solicitacoes.length,
+                page,
+                limit,
+                car_id:  parseInt(car_id),
                 solicitacoes
             });
 
@@ -280,20 +287,27 @@ class SolicitacaoController {
                 return res.status(403).json({ error: "Sem permissão para visualizar solicitações deste usuário." });
             }
 
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
             const [solicitacoes] = await db.query(
                 `SELECT s.sol_id, s.car_id, s.sol_vaga_soli, s.sol_status,
                         c.car_desc AS carona, c.car_data AS data_carona
                  FROM SOLICITACOES_CARONA s
                  INNER JOIN CARONAS c ON s.car_id = c.car_id
                  WHERE s.usu_id_passageiro = ?
-                 ORDER BY s.sol_id DESC`,
-                [usua_id]
+                 ORDER BY s.sol_id DESC
+                 LIMIT ? OFFSET ?`,
+                [usua_id, limit, offset]
             );
 
             return res.status(200).json({
-                message: "Solicitações do usuário listadas",
-                total: solicitacoes.length,
-                usu_id: parseInt(usua_id),
+                message:     "Solicitações do usuário listadas",
+                total:       solicitacoes.length,
+                page,
+                limit,
+                usu_id:      parseInt(usua_id),
                 solicitacoes
             });
 
@@ -374,10 +388,17 @@ class SolicitacaoController {
             conn = await db.getConnection();
             await conn.beginTransaction();
 
-            await conn.query(
-                'UPDATE SOLICITACOES_CARONA SET sol_status = ? WHERE sol_id = ?',
+            const [upd] = await conn.query(
+                'UPDATE SOLICITACOES_CARONA SET sol_status = ? WHERE sol_id = ? AND sol_status = 1',
                 [statusCodigo, soli_id]
             );
+
+            if (upd.affectedRows === 0) {
+                await conn.rollback();
+                conn.release();
+                conn = null;
+                return res.status(409).json({ error: "Solicitação não encontrada ou já foi respondida." });
+            }
 
             if (statusCodigo === 2) {
                 // Bloqueia a linha e re-lê vagas dentro da transação para evitar overbooking concorrente

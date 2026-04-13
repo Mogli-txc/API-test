@@ -36,16 +36,21 @@ class CaronaPessoasController {
                 });
             }
 
+            if (isNaN(car_id) || isNaN(usu_id)) {
+                return res.status(400).json({ error: "car_id e usu_id devem ser numéricos." });
+            }
+
             // PASSO 3: Verifica se o usuário autenticado é o motorista desta carona
-            // Apenas o motorista pode confirmar passageiros em sua carona
+            // Apenas o motorista pode confirmar passageiros em sua carona.
+            // car_status IN (1, 2): carona precisa estar Aberta ou Em espera.
             const [motorista] = await db.query(
                 `SELECT cu.usu_id FROM CARONAS c
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE c.car_id = ?`,
+                 WHERE c.car_id = ? AND c.car_status IN (1, 2)`,
                 [car_id]
             );
             if (motorista.length === 0) {
-                return res.status(404).json({ error: "Carona não encontrada." });
+                return res.status(404).json({ error: "Carona não encontrada ou não está ativa." });
             }
             if (motorista[0].usu_id !== req.user.id) {
                 return res.status(403).json({ error: "Sem permissão para adicionar passageiros nesta carona." });
@@ -140,21 +145,29 @@ class CaronaPessoasController {
                 }
             }
 
-            // PASSO 4: Busca passageiros com nome do usuário via JOIN (sem expor e-mail)
+            // PASSO 4: Parâmetros de paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 5: Busca passageiros com nome do usuário via JOIN (sem expor e-mail)
             const [passageiros] = await db.query(
                 `SELECT cp.car_pes_id, cp.usu_id, cp.car_pes_data, cp.car_pes_status,
                         u.usu_nome AS passageiro
                  FROM CARONA_PESSOAS cp
                  INNER JOIN USUARIOS u ON cp.usu_id = u.usu_id
                  WHERE cp.car_id = ?
-                 ORDER BY cp.car_pes_id ASC`,
-                [car_id]
+                 ORDER BY cp.car_pes_id ASC
+                 LIMIT ? OFFSET ?`,
+                [car_id, limit, offset]
             );
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:     `Passageiros da carona ${car_id} listados.`,
                 total:       passageiros.length,
+                page,
+                limit,
                 car_id:      parseInt(car_id),
                 passageiros
             });

@@ -16,6 +16,7 @@
 
 const multer = require('multer');
 const fs     = require('fs');
+const fsp    = require('fs').promises;
 const path   = require('path');
 
 /**
@@ -53,24 +54,31 @@ const magicBytesValidos = (buffer, mimetype) => {
  * Uso nas rotas:
  *   router.put('/:id/foto', auth, uploadUsuario.single('foto'), validarImagem, controller.atualizarFoto);
  */
-const validarImagem = (req, res, next) => {
+const validarImagem = async (req, res, next) => {
     if (!req.file) return next(); // sem arquivo: deixa o controller tratar
 
-    // Lê apenas os primeiros 8 bytes para verificar a assinatura
-    const fd     = fs.openSync(req.file.path, 'r');
-    const buffer = Buffer.alloc(8);
-    fs.readSync(fd, buffer, 0, 8, 0);
-    fs.closeSync(fd);
+    // Lê apenas os primeiros 8 bytes para verificar a assinatura (não bloqueia o event loop)
+    let fh;
+    try {
+        fh = await fsp.open(req.file.path, 'r');
+        const buffer = Buffer.alloc(8);
+        await fh.read(buffer, 0, 8, 0);
+        await fh.close();
+        fh = null;
 
-    if (!magicBytesValidos(buffer, req.file.mimetype)) {
-        // Remove o arquivo suspeito antes de rejeitar
-        fs.unlinkSync(req.file.path);
-        return res.status(400).json({
-            error: 'Arquivo inválido. O conteúdo não corresponde ao formato declarado.'
-        });
+        if (!magicBytesValidos(buffer, req.file.mimetype)) {
+            // Remove o arquivo suspeito antes de rejeitar
+            await fsp.unlink(req.file.path);
+            return res.status(400).json({
+                error: 'Arquivo inválido. O conteúdo não corresponde ao formato declarado.'
+            });
+        }
+
+        next();
+    } catch (err) {
+        if (fh) await fh.close().catch(() => {});
+        next(err);
     }
-
-    next();
 };
 
 const uploadImage = (pastaDestino) => {

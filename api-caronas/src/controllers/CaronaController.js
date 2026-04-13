@@ -21,6 +21,48 @@
 const db = require('../config/database'); // Pool de conexão MySQL
 const { stripHtml } = require('../utils/sanitize');
 
+// Regex para validar formato HH:MM ou HH:MM:SS
+const HORA_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
+
+/**
+ * Valida data e hora da carona combinados em UTC.
+ * Retorna { ok: true } ou { ok: false, error: '...' }.
+ *
+ * Formatos aceitos:
+ *   car_data:      'YYYY-MM-DD' ou 'YYYY-MM-DD HH:MM:SS' (extrai só a data)
+ *   car_hor_saida: 'HH:MM' ou 'HH:MM:SS' (extrai HH:MM)
+ *
+ * Regras:
+ *   - A data extraída deve ser uma data real
+ *   - O datetime combinado não pode ser no passado (referência UTC)
+ */
+function validarDatetimeCarona(car_data, car_hor_saida) {
+    if (!car_data) {
+        return { ok: false, error: 'car_data é obrigatório.' };
+    }
+    // Aceita 'YYYY-MM-DD' ou 'YYYY-MM-DD HH:MM:SS' — extrai apenas a parte da data
+    const dataStr = String(car_data).substring(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
+        return { ok: false, error: 'car_data deve estar no formato YYYY-MM-DD.' };
+    }
+
+    if (!car_hor_saida || !HORA_REGEX.test(String(car_hor_saida))) {
+        return { ok: false, error: 'car_hor_saida deve estar no formato HH:MM ou HH:MM:SS.' };
+    }
+    // Extrai apenas HH:MM para montar o datetime UTC
+    const horaStr = String(car_hor_saida).substring(0, 5);
+
+    // Monta datetime em UTC: "YYYY-MM-DDTHH:MM:00Z"
+    const dtUTC = new Date(`${dataStr}T${horaStr}:00Z`);
+    if (isNaN(dtUTC.getTime())) {
+        return { ok: false, error: 'Data/hora inválida.' };
+    }
+    if (dtUTC <= new Date()) {
+        return { ok: false, error: 'A data e hora da carona não podem ser no passado.' };
+    }
+    return { ok: true };
+}
+
 class CaronaController {
 
     /**
@@ -30,9 +72,28 @@ class CaronaController {
      *
      * Tabelas: CARONAS + VEICULOS + CURSOS_USUARIOS + USUARIOS + CURSOS (JOINs)
      */
-    async listarTodas(_req, res) { // _req: parâmetro não utilizado neste método
+    async listarTodas(req, res) {
         try {
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+
+            // Paginação cursor-based: quando ?cursor=<car_id> é fornecido, busca registros
+            // com car_id < cursor — performance constante independente da profundidade da página.
+            // Fallback para OFFSET quando cursor não é informado (primeira página).
+            const cursor = req.query.cursor ? parseInt(req.query.cursor) : null;
+            const page   = !cursor ? Math.max(1, parseInt(req.query.page) || 1) : null;
+            const offset = page ? (page - 1) * limit : null;
+
+            if (cursor !== null && isNaN(cursor)) {
+                return res.status(400).json({ error: 'cursor deve ser um número inteiro.' });
+            }
+
             // JOIN entre várias tabelas para trazer informações completas da carona
+            const params = cursor !== null
+                ? [cursor, limit]
+                : [limit, offset];
+
+            const whereExtra = cursor !== null ? 'AND c.car_id < ?' : '';
+
             const [caronas] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
                         c.car_vagas_dispo, c.car_status,
@@ -44,12 +105,23 @@ class CaronaController {
                  INNER JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
                  INNER JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
                  INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
-                 WHERE c.car_status = 1`
+                 WHERE c.car_status = 1 ${whereExtra}
+                 ORDER BY c.car_id DESC
+                 LIMIT ? ${cursor !== null ? '' : 'OFFSET ?'}`,
+                params
             );
 
+            // next_cursor: menor car_id da página atual — cliente envia na próxima requisição
+            const next_cursor = caronas.length === limit
+                ? caronas[caronas.length - 1].car_id
+                : null;
+
             return res.status(200).json({
-                message: "Lista de caronas recuperada com sucesso",
-                total:   caronas.length,
+                message:     "Lista de caronas recuperada com sucesso",
+                total:       caronas.length,
+                limit,
+                ...(page        && { page }),
+                ...(next_cursor && { next_cursor }),
                 caronas
             });
 
@@ -130,15 +202,10 @@ class CaronaController {
                 return res.status(400).json({ error: "Vagas disponíveis devem ser maior que zero." });
             }
 
-            // Valida que a data da carona não está no passado
-            const dataCarona = new Date(car_data);
-            if (isNaN(dataCarona.getTime())) {
-                return res.status(400).json({ error: "car_data inválida." });
-            }
-            const hoje = new Date();
-            hoje.setHours(0, 0, 0, 0); // compara apenas a data, sem hora
-            if (dataCarona < hoje) {
-                return res.status(400).json({ error: "A data da carona não pode ser no passado." });
+            // Valida data e hora em UTC (formato YYYY-MM-DD e HH:MM, não pode ser no passado)
+            const dtCheck = validarDatetimeCarona(car_data, car_hor_saida);
+            if (!dtCheck.ok) {
+                return res.status(400).json({ error: dtCheck.error });
             }
 
             // REGRA DE NEGÓCIO: Para oferecer carona, o motorista precisa ter usu_verificacao = 2
@@ -268,7 +335,14 @@ class CaronaController {
                 campos.push('car_desc = ?');
                 valores.push(car_desc_limpa);
             }
-            if (car_data)              { campos.push('car_data = ?');        valores.push(car_data); }
+            if (car_data) {
+                // car_hor_saida pode vir junto ou ser buscado do banco; valida formato mínimo YYYY-MM-DD
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(car_data) || isNaN(new Date(car_data).getTime())) {
+                    return res.status(400).json({ error: "car_data deve estar no formato YYYY-MM-DD." });
+                }
+                campos.push('car_data = ?');
+                valores.push(car_data);
+            }
             if (car_vagas_dispo)       { campos.push('car_vagas_dispo = ?'); valores.push(car_vagas_dispo); }
             if (car_status !== undefined) { campos.push('car_status = ?');   valores.push(parseInt(car_status)); }
 

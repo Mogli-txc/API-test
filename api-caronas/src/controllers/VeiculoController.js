@@ -11,6 +11,7 @@
 
 const db = require('../config/database'); // Pool de conexão MySQL
 const { checkDevOrOwner } = require('../utils/authHelper');
+const { stripHtml } = require('../utils/sanitize');
 
 class VeiculoController {
 
@@ -42,18 +43,22 @@ class VeiculoController {
                 return res.status(400).json({ error: "vei_vagas deve ser entre 1 e 6." });
             }
 
+            // Sanitiza campos de texto livre para prevenir XSS armazenado
+            const marca_limpa = stripHtml(vei_marca_modelo.trim());
+            const cor_limpa   = stripHtml(vei_cor.trim());
+
             // Insere o veículo com status 1 (Ativo) e data de criação atual
             const [resultado] = await db.query(
                 `INSERT INTO VEICULOS (usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em)
                  VALUES (?, ?, ?, ?, ?, 1, CURDATE())`,
-                [usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas]
+                [usu_id, marca_limpa, vei_tipo, cor_limpa, vei_vagas]
             );
 
             return res.status(201).json({
                 message: "Veículo registrado com sucesso!",
                 veiculo: {
                     vei_id: resultado.insertId,
-                    usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status: 1
+                    usu_id, vei_marca_modelo: marca_limpa, vei_tipo, vei_cor: cor_limpa, vei_vagas, vei_status: 1
                 }
             });
 
@@ -83,17 +88,25 @@ class VeiculoController {
                 return res.status(403).json({ error: "Sem permissão para listar veículos de outro usuário." });
             }
 
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
             // Busca apenas veículos ativos (vei_status = 1) do usuário
             const [veiculos] = await db.query(
                 `SELECT vei_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em
                  FROM VEICULOS
-                 WHERE usu_id = ? AND vei_status = 1`,
-                [usu_id]
+                 WHERE usu_id = ? AND vei_status = 1
+                 ORDER BY vei_id ASC
+                 LIMIT ? OFFSET ?`,
+                [usu_id, limit, offset]
             );
 
             return res.status(200).json({
                 message: `Veículos do usuário ${usu_id} listados.`,
                 total:    veiculos.length,
+                page,
+                limit,
                 veiculos
             });
 

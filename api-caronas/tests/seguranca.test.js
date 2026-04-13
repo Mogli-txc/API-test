@@ -305,7 +305,7 @@ describe('Testes de Segurança - API de Caronas', () => {
     const res = await request(app)
       .post('/api/caronas/oferecer')
       .send({ cur_usu_id: 1, vei_id: 1, car_desc: 'Carona teste', car_data: '2026-03-25 08:00', car_vagas_dispo: 3 });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   test('Teste 2: Gerar Token JWT (Login)', async () => {

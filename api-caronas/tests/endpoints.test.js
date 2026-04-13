@@ -80,11 +80,11 @@ describe('Usuários', () => {
 
 describe('Segurança JWT', () => {
 
-    it('Rota protegida SEM token — deve retornar 403', async () => {
+    it('Rota protegida SEM token — deve retornar 401', async () => {
         const res = await request(app)
             .post('/api/caronas/oferecer')
             .send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('Rota protegida com token INVÁLIDO — deve retornar 401', async () => {
@@ -160,9 +160,9 @@ describe('Caronas', () => {
 
 describe('Veículos', () => {
 
-    it('POST /api/veiculos — sem token deve retornar 403', async () => {
+    it('POST /api/veiculos — sem token deve retornar 401', async () => {
         const res = await request(app).post('/api/veiculos/').send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('POST /api/veiculos — deve retornar 400 se faltar campo (com token)', async () => {
@@ -173,9 +173,9 @@ describe('Veículos', () => {
         expect(res.status).toBe(400);
     });
 
-    it('GET /api/veiculos/usuario/:id — sem token deve retornar 403', async () => {
+    it('GET /api/veiculos/usuario/:id — sem token deve retornar 401', async () => {
         const res = await request(app).get('/api/veiculos/usuario/1');
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('GET /api/veiculos/usuario/:id — deve retornar 200 com token', async () => {
@@ -192,9 +192,9 @@ describe('Veículos', () => {
 
 describe('Matrículas', () => {
 
-    it('POST /api/matriculas — sem token deve retornar 403', async () => {
+    it('POST /api/matriculas — sem token deve retornar 401', async () => {
         const res = await request(app).post('/api/matriculas/').send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('GET /api/matriculas/usuario/:id — deve retornar 200 com token', async () => {
@@ -211,9 +211,9 @@ describe('Matrículas', () => {
 
 describe('Solicitações', () => {
 
-    it('POST /api/solicitacoes/criar — sem token deve retornar 403', async () => {
+    it('POST /api/solicitacoes/criar — sem token deve retornar 401', async () => {
         const res = await request(app).post('/api/solicitacoes/criar').send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('GET /api/solicitacoes/carona/:id — deve retornar 403 se não for motorista', async () => {
@@ -238,9 +238,9 @@ describe('Solicitações', () => {
 
 describe('Mensagens', () => {
 
-    it('POST /api/mensagens/enviar — sem token deve retornar 403', async () => {
+    it('POST /api/mensagens/enviar — sem token deve retornar 401', async () => {
         const res = await request(app).post('/api/mensagens/enviar').send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('GET /api/mensagens/carona/:id — deve retornar 403 se não for participante', async () => {
@@ -257,9 +257,9 @@ describe('Mensagens', () => {
 
 describe('Pontos de Encontro', () => {
 
-    it('POST /api/pontos — sem token deve retornar 403', async () => {
+    it('POST /api/pontos — sem token deve retornar 401', async () => {
         const res = await request(app).post('/api/pontos/').send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('GET /api/pontos/carona/:id — deve retornar 200 com token', async () => {
@@ -276,9 +276,9 @@ describe('Pontos de Encontro', () => {
 
 describe('Sugestões e Denúncias', () => {
 
-    it('POST /api/sugestoes — sem token deve retornar 403', async () => {
+    it('POST /api/sugestoes — sem token deve retornar 401', async () => {
         const res = await request(app).post('/api/sugestoes/').send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('GET /api/sugestoes — deve retornar 200 com token', async () => {
@@ -295,9 +295,9 @@ describe('Sugestões e Denúncias', () => {
 
 describe('Passageiros Confirmados', () => {
 
-    it('POST /api/passageiros — sem token deve retornar 403', async () => {
+    it('POST /api/passageiros — sem token deve retornar 401', async () => {
         const res = await request(app).post('/api/passageiros/').send({});
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('GET /api/passageiros/carona/:id — deve retornar 403 se não for participante', async () => {

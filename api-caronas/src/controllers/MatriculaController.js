@@ -88,7 +88,12 @@ class MatriculaController {
                 return res.status(403).json({ error: "Sem permissão para ver matrículas de outro usuário." });
             }
 
-            // PASSO 4: Busca as matrículas com nome do curso e escola via JOIN
+            // PASSO 4: Parâmetros de paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 5: Busca as matrículas com nome do curso e escola via JOIN
             const [matriculas] = await db.query(
                 `SELECT cu.cur_usu_id, cu.cur_id, cu.cur_usu_dataFinal,
                         c.cur_nome AS curso, c.cur_semestre,
@@ -97,14 +102,17 @@ class MatriculaController {
                  INNER JOIN CURSOS  c ON cu.cur_id  = c.cur_id
                  INNER JOIN ESCOLAS e ON c.esc_id   = e.esc_id
                  WHERE cu.usu_id = ?
-                 ORDER BY cu.cur_usu_id ASC`,
-                [usu_id]
+                 ORDER BY cu.cur_usu_id ASC
+                 LIMIT ? OFFSET ?`,
+                [usu_id, limit, offset]
             );
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:   `Matrículas do usuário ${usu_id} listadas.`,
                 total:     matriculas.length,
+                page,
+                limit,
                 usu_id:    parseInt(usu_id),
                 matriculas
             });
@@ -144,7 +152,12 @@ class MatriculaController {
                 }
             }
 
-            // PASSO 4: Busca os alunos do curso com nome do usuário via JOIN
+            // PASSO 4: Parâmetros de paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 5: Busca os alunos do curso com nome do usuário via JOIN
             // usu_email omitido intencionalmente — evita exposição de PII em listagens
             const [matriculas] = await db.query(
                 `SELECT cu.cur_usu_id, cu.usu_id, cu.cur_usu_dataFinal,
@@ -152,14 +165,17 @@ class MatriculaController {
                  FROM CURSOS_USUARIOS cu
                  INNER JOIN USUARIOS u ON cu.usu_id = u.usu_id
                  WHERE cu.cur_id = ?
-                 ORDER BY u.usu_nome ASC`,
-                [cur_id]
+                 ORDER BY u.usu_nome ASC
+                 LIMIT ? OFFSET ?`,
+                [cur_id, limit, offset]
             );
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:   `Alunos do curso ${cur_id} listados.`,
                 total:     matriculas.length,
+                page,
+                limit,
                 cur_id:    parseInt(cur_id),
                 matriculas
             });

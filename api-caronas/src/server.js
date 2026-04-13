@@ -17,11 +17,15 @@
  */
 
 // Importação das dependências externas
+const http      = require('http');
 const express   = require('express');
 const cors      = require('cors');
 const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { Server: SocketIOServer } = require('socket.io');
 require('dotenv').config(); // Carrega variáveis de ambiente do arquivo .env
+
+const { registrarMensagensSocket } = require('./sockets/mensagensSocket');
 
 // Importação das rotas
 const usuarioRoutes      = require('./routes/usuarioRoutes');
@@ -35,6 +39,7 @@ const caronaPessoasRoutes = require('./routes/caronaPessoasRoutes'); // Passagei
 const sugestaoRoutes     = require('./routes/sugestaoRoutes');       // Sugestões e denúncias
 const matriculaRoutes    = require('./routes/matriculaRoutes');      // Matrículas em cursos
 const adminRoutes        = require('./routes/adminRoutes');           // Estatísticas admin
+const avaliacaoRoutes    = require('./routes/avaliacaoRoutes');        // Avaliações pós-carona
 
 // Instancia a aplicação Express
 const app = express();
@@ -43,25 +48,55 @@ const app = express();
 
 /**
  * Middleware 0: Helmet — Security Headers
- * Define cabeçalhos HTTP de segurança automaticamente:
- * Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, etc.
- * contentSecurityPolicy desabilitado para não bloquear respostas JSON da API.
+ * Define cabeçalhos HTTP de segurança automaticamente.
+ *
+ * CSP: política restritiva para API JSON pura — bloqueia qualquer execução de
+ * scripts/estilos/frames vindos desta origem. Não afeta respostas JSON.
+ * frame-ancestors 'none' substitui X-Frame-Options (CSP nível 2+).
+ * HSTS: força HTTPS com preload; ativo apenas fora de development para não
+ * quebrar testes locais em HTTP.
  */
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc:     ["'none'"],
+            frameAncestors: ["'none'"],
+        },
+    },
+    hsts: process.env.NODE_ENV !== 'development' && {
+        maxAge:            31536000, // 1 ano em segundos
+        includeSubDomains: true,
+        preload:           true,
+    },
+}));
 
 /**
  * Middleware 1: CORS (Cross-Origin Resource Sharing)
  * Sempre restringe às origens definidas em ALLOWED_ORIGINS.
  * Em development, fallback para localhost se a variável não estiver definida.
  * Apps mobile não são afetados por CORS — a restrição se aplica ao painel web admin.
+ *
+ * allowedHeaders: garante que o preflight autorize Content-Type e Authorization
+ * maxAge: o browser armazena o resultado do preflight por 10 min (evita round-trips)
  */
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5173')
+    .split(',')
+    .map(o => o.trim());
+
 const corsOptions = {
-    origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5173')
-        .split(',')
-        .map(o => o.trim()),
-    credentials: true
+    origin: (origin, callback) => {
+        // Permite requisições sem origin (ex: mobile, Postman, curl)
+        if (!origin || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        callback(new Error(`CORS: origem não permitida — ${origin}`));
+    },
+    methods:        ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials:    true,
+    maxAge:         600 // preflight cacheado por 10 minutos
 };
-app.use(cors(corsOptions));
+app.use(cors(corsOptions)); // app.use global já trata preflight OPTIONS automaticamente
 
 /**
  * Middleware 2: Rate Limiting global
@@ -115,11 +150,12 @@ app.use('/api/mensagens/enviar', writeLimiter);
 app.use('/api/caronas/oferecer', writeLimiter);
 
 /**
- * Middleware 2: Parsing de JSON
- * Converte o body das requisições para JSON automaticamente
- * Suporta payloads até 10MB
+ * Middleware 2: Parsing de corpo
+ * express.json()       — application/json (requisições da SPA e mobile)
+ * express.urlencoded() — application/x-www-form-urlencoded (formulários HTML)
  */
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 /**
  * Middleware 3: Pasta pública de arquivos estáticos
@@ -130,11 +166,15 @@ app.use('/public', express.static('public'));
 
 /**
  * Middleware 4: Logging de Requisições (OPCIONAL)
- * Exibe informações sobre cada requisição recebida
+ * Exibe método, path, IP e duração de cada requisição quando LOG_REQUESTS=true.
  */
 if (process.env.LOG_REQUESTS === 'true') {
     app.use((req, res, next) => {
-        console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+        const start = Date.now();
+        const ip    = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        res.on('finish', () => {
+            console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms — ${ip}`);
+        });
         next();
     });
 }
@@ -217,6 +257,12 @@ app.use('/api/matriculas', matriculaRoutes);
  */
 app.use('/api/admin', adminRoutes);
 
+/**
+ * Rotas de Avaliações: Motorista ↔ Passageiro pós-carona
+ * Base URL: /api/avaliacoes
+ */
+app.use('/api/avaliacoes', avaliacaoRoutes);
+
 // ========== TRATAMENTO DE ERROS ==========
 
 /**
@@ -246,34 +292,49 @@ app.use((err, req, res, next) => {
 // ========== INICIALIZAÇÃO DO SERVIDOR ==========
 
 // Validação de variáveis de ambiente críticas
-// Inclui vars do banco para detectar configuração incompleta antes da primeira query
-const requiredEnvVars = ['JWT_SECRET', 'PORT', 'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
+// OTP_SECRET é obrigatório e deve ser diferente de JWT_SECRET — segredos distintos
+// garantem isolamento: se JWT_SECRET vazar, os hashes OTP e de reset continuam seguros.
+// APP_URL é necessária para montar o link de redefinição de senha no e-mail
+const requiredEnvVars = ['JWT_SECRET', 'OTP_SECRET', 'PORT', 'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'APP_URL'];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
     console.error(`[ERRO] Variáveis de ambiente ausentes: ${missingEnvVars.join(', ')}`);
     process.exit(1); // Encerra o servidor
 }
 
-// OTP_SECRET recomendado mas não obrigatório — fallback para JWT_SECRET se ausente
-if (!process.env.OTP_SECRET) {
-    console.warn('[AVISO] OTP_SECRET não definido. Usando JWT_SECRET como fallback (menos seguro). Defina OTP_SECRET no .env.');
-}
-
 // Lê a porta do arquivo .env ou usa 3000 como padrão
 const PORT = process.env.PORT || 3000;
 
-// Inicia o servidor
-app.listen(PORT, () => {
-    console.log(`
-╔════════════════════════════════════════════╗
-║  🚗 API DE SISTEMA DE CARONAS INICIADA     ║
-║  🌐 URL: http://localhost:${PORT}           ║
-║  📝 Ambiente: ${process.env.NODE_ENV || 'development'}          ║
-║  ⏰ Timestamp: ${new Date().toISOString()}  ║
-╚════════════════════════════════════════════╝
-    `);
-    console.log("Aguardando requisições...\n");
-});
+// Cria servidor HTTP para compartilhar com Socket.io
+const httpServer = http.createServer(app);
 
-// Exportar o app para testes
+// Socket.io e bind de porta são desabilitados em modo teste:
+//   - Em teste, supertest cria seu próprio servidor efêmero a partir do app Express
+//   - httpServer.listen() em modo teste causaria EADDRINUSE entre suites paralelas
+//   - Socket.io manteria o event loop vivo, impedindo o Jest de encerrar limpo
+if (process.env.NODE_ENV !== 'test') {
+    const io = new SocketIOServer(httpServer, {
+        cors: {
+            origin: allowedOrigins,
+            methods: ['GET', 'POST'],
+            credentials: true
+        }
+    });
+    registrarMensagensSocket(io);
+
+    httpServer.listen(PORT, () => {
+        console.log(`
+╔════════════════════════════════════════════╗
+║  API DE SISTEMA DE CARONAS INICIADA        ║
+║  URL: http://localhost:${PORT}              ║
+║  Ambiente: ${process.env.NODE_ENV || 'development'}             ║
+║  WebSocket: ativo (Socket.io)              ║
+║  Timestamp: ${new Date().toISOString()}     ║
+╚════════════════════════════════════════════╝
+        `);
+        console.log("Aguardando requisições...\n");
+    });
+}
+
+// Exportar o app para testes (supertest usa o Express app diretamente)
 module.exports = app;

@@ -189,12 +189,12 @@ describe('Grupo 1 — Upload de Foto de Perfil', () => {
     });
 
     // PASSO 4: sem token — authMiddleware deve bloquear antes de chegar no upload
-    it('1.4 — Sem token deve retornar 403', async () => {
+    it('1.4 — Sem token deve retornar 401', async () => {
         const res = await request(app)
             .put(`/api/usuarios/${usu_id}/foto`)
             .attach('foto', JPEG_VALIDO, { filename: 'perfil.jpg', contentType: 'image/jpeg' });
 
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     // PASSO 5: usuário tenta alterar foto de outro — checkDevOrOwner deve bloquear
@@ -377,12 +377,12 @@ describe('Grupo 3 — Criação de Pontos de Encontro', () => {
         expect(ids).toContain(pon_id);
     });
 
-    it('3.4 — POST /api/pontos sem token deve retornar 403', async () => {
+    it('3.4 — POST /api/pontos sem token deve retornar 401', async () => {
         const res = await request(app)
             .post('/api/pontos')
             .send({ car_id, pon_nome: 'X', pon_endereco: 'Y', pon_endereco_geom: '0,0', pon_tipo: 0 });
 
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
     });
 
     it('3.5 — GET /api/pontos/carona/abc (ID não numérico) deve retornar 400', async () => {

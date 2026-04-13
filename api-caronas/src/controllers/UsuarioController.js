@@ -25,9 +25,11 @@ const bcrypt         = require('bcryptjs');
 const crypto         = require('crypto');
 const db             = require('../config/database');
 const { gerarUrl }   = require('../utils/gerarUrl');
-const { gerarOtp, hashOtp, enviarOtp } = require('../utils/mailer');
+const { gerarOtp, hashOtp } = require('../utils/mailer');
+const { enqueue: enqueueEmail } = require('../utils/emailQueue');
 const { checkDevOrOwner } = require('../utils/authHelper');
 const { registrarAudit } = require('../utils/auditLog');
+const { stripHtml } = require('../utils/sanitize');
 
 // Regex básico de formato de email (RFC 5322 simplificado)
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -91,6 +93,11 @@ class UsuarioController {
             conn = await db.getConnection();
             await conn.beginTransaction();
 
+            // Sanitiza campos de texto livre antes do INSERT
+            const nome_limpo      = usu_nome      ? stripHtml(usu_nome.trim())      : null;
+            const endereco_limpo  = usu_endereco  ? stripHtml(usu_endereco.trim())  : null;
+            const descricao_limpa = usu_descricao ? stripHtml(usu_descricao.trim()) : null;
+
             // PASSO 2a: Insere usuário com usu_verificacao = 0 (aguardando OTP)
             const [resultado] = await conn.query(
                 `INSERT INTO USUARIOS
@@ -98,9 +105,9 @@ class UsuarioController {
                      usu_endereco, usu_endereco_geom, usu_foto, usu_descricao,
                      usu_horario_habitual, usu_verificacao, usu_status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
-                [usu_nome || null, usu_email, senhaHash, usu_telefone || null, usu_matricula || null,
-                 usu_endereco || null, usu_endereco_geom || null,
-                 usu_foto || null, usu_descricao || null, usu_horario_habitual || null]
+                [nome_limpo, usu_email, senhaHash, usu_telefone || null, usu_matricula || null,
+                 endereco_limpo, usu_endereco_geom || null,
+                 usu_foto || null, descricao_limpa, usu_horario_habitual || null]
             );
 
             const novoId = resultado.insertId;
@@ -132,14 +139,10 @@ class UsuarioController {
                 [otpHash, novoId]
             );
 
-            // Envio de email é não-crítico: falha de SMTP não desfaz o cadastro
-            let emailEnviado = true;
-            try {
-                await enviarOtp(usu_email, otp);
-            } catch (emailError) {
-                emailEnviado = false;
-                console.warn("[AVISO] cadastrar: falha ao enviar OTP por email:", emailError.message);
-            }
+            // Envio de email é não-crítico e assíncrono — a fila processa em background
+            // sem bloquear a resposta ao cliente nem desfazer o cadastro em caso de falha SMTP
+            enqueueEmail({ type: 'otp', email: usu_email, otp });
+            const emailEnviado = true; // fila aceita sempre; falhas são logadas internamente
 
             await registrarAudit({ tabela: 'USUARIOS', registroId: novoId, acao: 'CADASTRO', ip: req.ip });
 
@@ -312,7 +315,7 @@ class UsuarioController {
                 [otpHash, rows[0].usu_id]
             );
 
-            await enviarOtp(usu_email, otp);
+            enqueueEmail({ type: 'otp', email: usu_email, otp });
 
             return res.status(200).json({
                 message: "Se o email existir e estiver pendente, um novo código será enviado."
@@ -388,15 +391,28 @@ class UsuarioController {
 
             await registrarAudit({ tabela: 'USUARIOS', registroId: usuario.usu_id, acao: 'LOGIN', usuId: usuario.usu_id, ip: req.ip });
 
+            // Access token — curta duração (24h)
             const token = jwt.sign(
                 { id: usuario.usu_id, email: usuario.usu_email },
                 process.env.JWT_SECRET,
                 { expiresIn: '24h' }
             );
 
+            // Refresh token — longa duração (30 dias), rotacionado a cada uso
+            // Apenas o hash HMAC-SHA256 é persistido; o token plaintext vai somente na resposta
+            const refreshToken       = crypto.randomBytes(40).toString('hex');
+            const refreshHash        = crypto.createHmac('sha256', process.env.JWT_SECRET).update(refreshToken).digest('hex');
+            const refreshExpira      = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // +30 dias
+
+            await db.query(
+                'UPDATE USUARIOS SET usu_refresh_hash = ?, usu_refresh_expira = ? WHERE usu_id = ?',
+                [refreshHash, refreshExpira, usuario.usu_id]
+            );
+
             return res.status(200).json({
                 auth: true,
                 token,
+                refresh_token: refreshToken,
                 user: {
                     usu_id:    usuario.usu_id,
                     usu_nome:  usuario.usu_nome,
@@ -509,7 +525,7 @@ class UsuarioController {
             const campos  = [];
             const valores = [];
 
-            if (usu_nome)  { campos.push('usu_nome = ?');  valores.push(usu_nome); }
+            if (usu_nome)  { campos.push('usu_nome = ?');  valores.push(stripHtml(usu_nome.trim())); }
             if (usu_email) { campos.push('usu_email = ?'); valores.push(usu_email); }
             if (usu_senha) {
                 // Custo 12 — mantém consistência com o cadastro
@@ -629,7 +645,7 @@ class UsuarioController {
             // PASSO 2: Token de 32 bytes em hex (URL-safe) + hash para armazenamento
             const token     = crypto.randomBytes(32).toString('hex');
             const tokenHash = crypto
-                .createHmac('sha256', process.env.OTP_SECRET || process.env.JWT_SECRET)
+                .createHmac('sha256', process.env.OTP_SECRET)
                 .update(token)
                 .digest('hex');
 
@@ -643,19 +659,10 @@ class UsuarioController {
 
             // PASSO 3: Envia email com link de redefinição
             const appUrl  = process.env.APP_URL || 'http://localhost:3000';
-            const resetUrl = `${appUrl}/redefinir-senha?token=${token}&email=${encodeURIComponent(usu_email)}`;
+            const resetUrl = `${appUrl}/redefinir-senha?token=${token}`;
 
-            let emailEnviado = true;
-            try {
-                await enviarOtp(usu_email, `Link para redefinir sua senha (válido por 15 min):\n${resetUrl}`);
-            } catch (emailError) {
-                emailEnviado = false;
-                console.warn("[AVISO] esqueceuSenha: falha ao enviar email:", emailError.message);
-            }
-
-            if (!emailEnviado) {
-                console.warn(`[AVISO] esqueceuSenha: token gerado para ${usu_email} mas email não enviado. Token: ${token}`);
-            }
+            // Enfileira o email de reset em background — falhas são logadas na fila
+            enqueueEmail({ type: 'reset', email: usu_email, resetUrl });
 
             return res.status(200).json({ message: msgPadrao });
 
@@ -707,7 +714,7 @@ class UsuarioController {
             }
 
             const tokenHash = crypto
-                .createHmac('sha256', process.env.OTP_SECRET || process.env.JWT_SECRET)
+                .createHmac('sha256', process.env.OTP_SECRET)
                 .update(token)
                 .digest('hex');
 
@@ -768,6 +775,76 @@ class UsuarioController {
         } catch (error) {
             console.error("[ERRO] deletar:", error);
             return res.status(500).json({ error: "Erro ao deletar usuário." });
+        }
+    }
+
+    /**
+     * MÉTODO: refreshToken
+     * Troca um refresh token válido por um novo access token (24h) e
+     * rotaciona o refresh token (30 dias). Proteção contra replay:
+     * cada refresh token só pode ser usado uma vez.
+     *
+     * Campo no body: refresh_token (plaintext recebido no login)
+     */
+    async refreshToken(req, res) {
+        try {
+            const { refresh_token } = req.body;
+
+            if (!refresh_token) {
+                return res.status(400).json({ error: "Campo obrigatório: refresh_token." });
+            }
+
+            // PASSO 1: Reconstrói o hash para lookup seguro (timing-safe via DB lookup)
+            const hashRecebido = crypto.createHmac('sha256', process.env.JWT_SECRET)
+                .update(refresh_token)
+                .digest('hex');
+
+            // PASSO 2: Busca usuário pelo hash — sem expor o token em plaintext na query
+            const [rows] = await db.query(
+                `SELECT usu_id, usu_email, usu_nome, usu_refresh_expira
+                 FROM USUARIOS
+                 WHERE usu_refresh_hash = ? AND usu_status = 1`,
+                [hashRecebido]
+            );
+
+            if (rows.length === 0) {
+                return res.status(401).json({ error: "Refresh token inválido ou expirado." });
+            }
+
+            const usuario = rows[0];
+
+            // PASSO 3: Verifica expiração
+            if (!usuario.usu_refresh_expira || new Date(usuario.usu_refresh_expira) < new Date()) {
+                // Invalida o token expirado
+                await db.query('UPDATE USUARIOS SET usu_refresh_hash = NULL, usu_refresh_expira = NULL WHERE usu_id = ?', [usuario.usu_id]);
+                return res.status(401).json({ error: "Refresh token expirado. Faça login novamente." });
+            }
+
+            // PASSO 4: Emite novo access token
+            const novoToken = jwt.sign(
+                { id: usuario.usu_id, email: usuario.usu_email },
+                process.env.JWT_SECRET,
+                { expiresIn: '24h' }
+            );
+
+            // PASSO 5: Rotaciona o refresh token (invalida o anterior, emite novo)
+            const novoRefresh      = crypto.randomBytes(40).toString('hex');
+            const novoRefreshHash  = crypto.createHmac('sha256', process.env.JWT_SECRET).update(novoRefresh).digest('hex');
+            const novoRefreshExpira = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+            await db.query(
+                'UPDATE USUARIOS SET usu_refresh_hash = ?, usu_refresh_expira = ? WHERE usu_id = ?',
+                [novoRefreshHash, novoRefreshExpira, usuario.usu_id]
+            );
+
+            return res.status(200).json({
+                token:         novoToken,
+                refresh_token: novoRefresh
+            });
+
+        } catch (error) {
+            console.error("[ERRO] refreshToken:", error);
+            return res.status(500).json({ error: "Erro ao renovar token." });
         }
     }
 }

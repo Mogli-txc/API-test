@@ -14,16 +14,20 @@ const jwt = require('jsonwebtoken');
 module.exports = (req, res, next) => {
     const authHeader = req.headers['authorization'];
 
-    // Sem cabeçalho de autorização → 403
+    // Ausência do cabeçalho → 401 (não autenticado)
     if (!authHeader) {
-        return res.status(403).json({ error: 'Acesso negado. Token não fornecido.' });
+        return res.status(401).json({ error: 'Token não fornecido.' });
     }
 
-    const token = authHeader.split(' ')[1];
+    // Formato obrigatório: "Bearer <token>"
+    if (!authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Formato de autorização inválido. Use: Bearer <token>.' });
+    }
 
-    // Cabeçalho presente mas sem o token após "Bearer " → 403
+    const token = authHeader.slice(7).trim(); // remove "Bearer " e espaços extras
+
     if (!token) {
-        return res.status(403).json({ error: 'Acesso negado. Token não fornecido.' });
+        return res.status(401).json({ error: 'Token não fornecido.' });
     }
 
     try {

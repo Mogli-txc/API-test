@@ -1,8 +1,16 @@
 -- =====================================================
 -- Arquivo: create.sql
--- Descrição: Criação das tabelas e relacionamentos
+-- Descrição: Criação completa das tabelas e relacionamentos
 --            do banco de dados do App de Caronas.
--- Ambiente: MySQL Workbench
+-- Ambiente: MySQL Workbench / MySQL 8.x
+--
+-- Histórico de atualizações (migrations absorvidas):
+--   v1   — Schema inicial (tabelas base)
+--   v2   — migration-otp.sql: usu_otp_hash, usu_otp_expira, usu_otp_tentativas,
+--           usu_otp_bloqueado_ate, usu_reset_hash, usu_reset_expira
+--   v3   — migration-soft-delete.sql: usu_deletado_em, car_deletado_em e índices
+--   v4   — migration-refresh-token.sql: usu_refresh_hash, usu_refresh_expira, índice
+--   v5   — migration-avaliacoes.sql: tabela AVALIACOES + FKs
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -36,30 +44,46 @@ CREATE TABLE CURSOS (
 
 -- =====================================================
 -- 3. Tabela USUARIOS (Quadro 1)
+-- Inclui colunas adicionadas pelas migrations v2, v3 e v4.
 -- =====================================================
 DROP TABLE IF EXISTS USUARIOS;
 CREATE TABLE USUARIOS (
-    usu_id              INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Usuário (PK)',
-    usu_nome            VARCHAR(80)                         COMMENT 'Nome do Usuário (NULL no cadastro temporário)',
-    usu_foto            VARCHAR(256)                        COMMENT 'Caminho/URL da Foto do Usuário (NULL)',
-    usu_telefone        VARCHAR(11)                         COMMENT 'Telefone sem máscara (ex: 11999990000) (NULL no cadastro temporário)',
-    usu_matricula       VARCHAR(100)                        COMMENT 'Foto/Comprovante da Matrícula (NULL no cadastro temporário)',
-    usu_senha           VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash)',
-    usu_verificacao      TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Não verificado (aguardando OTP), 1=Matrícula verificada, 2=Matrícula + veículo, 5=Cadastro temporário (5 dias)',
-    usu_verificacao_expira DATETIME                         COMMENT 'Expiração da verificação — semestral (nível 1/2) ou +5 dias do cadastro (nível 5)',
-    usu_otp_hash         VARCHAR(64)                        COMMENT 'Hash HMAC-SHA256 do código OTP de verificação de email (NULL após verificação)',
-    usu_otp_expira       DATETIME                           COMMENT 'Expiração do OTP — 10 minutos após geração (NULL após verificação)',
-    usu_otp_tentativas    INT          NOT NULL DEFAULT 0    COMMENT 'Contador de tentativas incorretas de OTP — resetado no reenvio',
-    usu_otp_bloqueado_ate DATETIME                          COMMENT 'Conta bloqueada até esta data após 3 tentativas OTP incorretas (NULL = desbloqueado)',
-    usu_reset_hash       VARCHAR(64)                        COMMENT 'Hash HMAC-SHA256 do token de redefinição de senha — validade 15 min (NULL = sem reset pendente)',
-    usu_reset_expira     DATETIME                           COMMENT 'Expiração do token de redefinição de senha (NULL = sem reset pendente)',
-    usu_status           TINYINT(1)   NOT NULL               COMMENT '1=Ativo, 0=Inativo',
-    usu_email           VARCHAR(180) NOT NULL UNIQUE        COMMENT 'Email Institucional para acesso (UNIQUE)',
-    usu_descricao       VARCHAR(255)                        COMMENT 'Descrição do Usuário (NULL)',
-    usu_endereco        VARCHAR(255)                        COMMENT 'Endereço Descrito (NULL no cadastro temporário)',
-    usu_endereco_geom   VARCHAR(255)                        COMMENT 'Endereço com localização geométrica (NULL no cadastro temporário)',
-    usu_horario_habitual TIME                               COMMENT 'Horário Habitual (NULL) (HH:MM:SS)',
-    PRIMARY KEY (usu_id)
+    usu_id                INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Usuário (PK)',
+    usu_nome              VARCHAR(80)                         COMMENT 'Nome do Usuário (NULL no cadastro temporário)',
+    usu_foto              VARCHAR(256)                        COMMENT 'Caminho/URL da Foto do Usuário (NULL)',
+    usu_telefone          VARCHAR(11)                         COMMENT 'Telefone sem máscara (ex: 11999990000) (NULL no cadastro temporário)',
+    usu_matricula         VARCHAR(100)                        COMMENT 'Foto/Comprovante da Matrícula (NULL no cadastro temporário)',
+    usu_senha             VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash bcrypt custo 12)',
+    usu_verificacao       TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Aguardando OTP, 1=Matrícula verificada, 2=Matrícula+veículo, 5=Cadastro temporário (+5 dias)',
+    usu_verificacao_expira DATETIME                           COMMENT 'Expiração da verificação — semestral (nível 1/2) ou +5 dias (nível 5)',
+
+    -- Verificação de email via OTP  [v2]
+    usu_otp_hash          VARCHAR(64)                         COMMENT 'Hash HMAC-SHA256 do OTP de verificação (NULL após verificação)',
+    usu_otp_expira        DATETIME                            COMMENT 'Expiração do OTP — 10 minutos após geração (NULL após verificação)',
+    usu_otp_tentativas    INT          NOT NULL DEFAULT 0     COMMENT 'Tentativas incorretas de OTP — resetado no reenvio',
+    usu_otp_bloqueado_ate DATETIME                            COMMENT 'Bloqueio até esta data após 3 tentativas incorretas (NULL = desbloqueado)',
+
+    -- Redefinição de senha via token  [v2]
+    usu_reset_hash        VARCHAR(64)                         COMMENT 'Hash HMAC-SHA256 do token de reset — validade 15 min (NULL = sem reset pendente)',
+    usu_reset_expira      DATETIME                            COMMENT 'Expiração do token de reset (NULL = sem reset pendente)',
+
+    -- Refresh token de autenticação  [v4]
+    usu_refresh_hash      VARCHAR(64)  NULL DEFAULT NULL      COMMENT 'Hash HMAC-SHA256 do refresh token — rotacionado a cada uso (NULL = sem sessão ativa)',
+    usu_refresh_expira    DATETIME     NULL DEFAULT NULL      COMMENT 'Expiração do refresh token (30 dias do último login/refresh)',
+
+    usu_status            TINYINT(1)   NOT NULL               COMMENT '1=Ativo, 0=Inativo',
+    usu_email             VARCHAR(180) NOT NULL UNIQUE        COMMENT 'Email institucional para acesso (UNIQUE)',
+    usu_descricao         VARCHAR(255)                        COMMENT 'Descrição do Usuário (NULL)',
+    usu_endereco          VARCHAR(255)                        COMMENT 'Endereço descrito (NULL no cadastro temporário)',
+    usu_endereco_geom     VARCHAR(255)                        COMMENT 'Endereço com localização geométrica (NULL no cadastro temporário)',
+    usu_horario_habitual  TIME                                COMMENT 'Horário habitual (NULL) (HH:MM:SS)',
+
+    -- Soft delete com timestamp  [v3]
+    usu_deletado_em       DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de remoção lógica (NULL = ativo); usu_status=0 mantido para compatibilidade',
+
+    PRIMARY KEY (usu_id),
+    INDEX idx_usu_refresh_hash (usu_refresh_hash),  -- lookup O(1) na rota /refresh  [v4]
+    INDEX idx_usu_deletado_em  (usu_deletado_em)    -- filtro de registros ativos     [v3]
 ) ENGINE = InnoDB;
 
 
@@ -78,23 +102,23 @@ CREATE TABLE USUARIOS_REGISTROS (
 
 
 -- =====================================================
--- 6. Tabela PERFIL (Quadro 7)
+-- 5. Tabela PERFIL (Quadro 7)
 -- =====================================================
 DROP TABLE IF EXISTS PERFIL;
 CREATE TABLE PERFIL (
-    per_id        INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Perfil (PK)',
-    usu_id        INT          NOT NULL               COMMENT 'Identificador do Usuário (FK)',
-    per_nome      VARCHAR(50)                          COMMENT 'Nome presente no Perfil (NULL no cadastro temporário)',
-    per_data      DATETIME     NOT NULL               COMMENT 'Data de Acesso ao Perfil',
-    per_tipo      TINYINT      NOT NULL               COMMENT '0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)',
-    per_habilitado TINYINT     NOT NULL               COMMENT '0=Não habilitado, 1=Habilitado',
-    per_escola_id INT                                 COMMENT 'Escola do Administrador (FK, NULL para Usuário e Desenvolvedor)',
+    per_id         INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Perfil (PK)',
+    usu_id         INT          NOT NULL               COMMENT 'Identificador do Usuário (FK)',
+    per_nome       VARCHAR(50)                          COMMENT 'Nome presente no Perfil (NULL no cadastro temporário)',
+    per_data       DATETIME     NOT NULL               COMMENT 'Data de Acesso ao Perfil',
+    per_tipo       TINYINT      NOT NULL               COMMENT '0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)',
+    per_habilitado TINYINT      NOT NULL               COMMENT '0=Não habilitado, 1=Habilitado',
+    per_escola_id  INT                                 COMMENT 'Escola do Administrador (FK, NULL para Usuário e Desenvolvedor)',
     PRIMARY KEY (per_id)
 ) ENGINE = InnoDB;
 
 
 -- =====================================================
--- 7. Tabela CURSOS_USUARIOS (Quadro 4 - Junção N:M)
+-- 6. Tabela CURSOS_USUARIOS (Quadro 4 — Junção N:M)
 -- =====================================================
 DROP TABLE IF EXISTS CURSOS_USUARIOS;
 CREATE TABLE CURSOS_USUARIOS (
@@ -108,78 +132,84 @@ CREATE TABLE CURSOS_USUARIOS (
 
 
 -- =====================================================
--- 8. Tabela SUGESTAO_DENUNCIA (Quadro 8)
+-- 7. Tabela SUGESTAO_DENUNCIA (Quadro 8)
 -- =====================================================
 DROP TABLE IF EXISTS SUGESTAO_DENUNCIA;
 CREATE TABLE SUGESTAO_DENUNCIA (
-    sug_id         INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Sugestão/Denúncia (PK)',
-    usu_id         INT          NOT NULL               COMMENT 'Usuário que enviou (FK)',
-    sug_texto      VARCHAR(255) NOT NULL               COMMENT 'Conteúdo da Sugestão ou Denúncia',
-    sug_data       DATETIME     NOT NULL               COMMENT 'Data de Envio',
-    sug_status     TINYINT      NOT NULL               COMMENT '1=Aberto, 0=Fechado, 3=Em análise',
-    sug_tipo       TINYINT      NOT NULL               COMMENT '1=Sugestão, 0=Denúncia',
-    sug_id_resposta INT                                COMMENT 'Usuário que respondeu (FK, NULL)',
-    sug_resposta   VARCHAR(255)                        COMMENT 'Resposta da sugestão (NULL)',
-    sug_deletado_em DATETIME                           COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
+    sug_id          INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Sugestão/Denúncia (PK)',
+    usu_id          INT          NOT NULL               COMMENT 'Usuário que enviou (FK)',
+    sug_texto       VARCHAR(255) NOT NULL               COMMENT 'Conteúdo da Sugestão ou Denúncia',
+    sug_data        DATETIME     NOT NULL               COMMENT 'Data de Envio',
+    sug_status      TINYINT      NOT NULL               COMMENT '1=Aberto, 0=Fechado, 3=Em análise',
+    sug_tipo        TINYINT      NOT NULL               COMMENT '1=Sugestão, 0=Denúncia',
+    sug_id_resposta INT                                 COMMENT 'Usuário que respondeu (FK, NULL)',
+    sug_resposta    VARCHAR(255)                        COMMENT 'Resposta da sugestão (NULL)',
+    sug_deletado_em DATETIME                            COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
     PRIMARY KEY (sug_id)
 ) ENGINE = InnoDB;
 
 
 -- =====================================================
--- 9. Tabela VEICULOS (Quadro 9)
+-- 8. Tabela VEICULOS (Quadro 9)
 -- =====================================================
 DROP TABLE IF EXISTS VEICULOS;
 CREATE TABLE VEICULOS (
-    vei_id           INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Veículo (PK)',
-    usu_id           INT          NOT NULL               COMMENT 'Proprietário do Veículo (FK)',
-    vei_marca_modelo VARCHAR(100) NOT NULL               COMMENT 'Descrição do veículo (marca e modelo)',
-    vei_tipo         BIT(1)       NOT NULL               COMMENT '0=Moto, 1=Carro',
-    vei_cor          VARCHAR(100) NOT NULL               COMMENT 'Cor do veículo',
-    vei_vagas        TINYINT      NOT NULL               COMMENT 'Capacidade de passageiros (1 a 6)',
-    vei_status       BIT(1)       NOT NULL               COMMENT '1=Ativo, 0=Inutilizado',
-    vei_criado_em    DATE         NOT NULL               COMMENT 'Data de Cadastro',
-    vei_atualizado_em DATETIME                           COMMENT 'Data de Atualização (NULL)',
-    vei_apagado_em   DATETIME                            COMMENT 'Data de Remoção Lógica (NULL)',
+    vei_id            INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Veículo (PK)',
+    usu_id            INT          NOT NULL               COMMENT 'Proprietário do Veículo (FK)',
+    vei_marca_modelo  VARCHAR(100) NOT NULL               COMMENT 'Descrição do veículo (marca e modelo)',
+    vei_tipo          BIT(1)       NOT NULL               COMMENT '0=Moto, 1=Carro',
+    vei_cor           VARCHAR(100) NOT NULL               COMMENT 'Cor do veículo',
+    vei_vagas         TINYINT      NOT NULL               COMMENT 'Capacidade de passageiros (1 a 6)',
+    vei_status        BIT(1)       NOT NULL               COMMENT '1=Ativo, 0=Inutilizado',
+    vei_criado_em     DATE         NOT NULL               COMMENT 'Data de Cadastro',
+    vei_atualizado_em DATETIME                            COMMENT 'Data de Atualização (NULL)',
+    vei_apagado_em    DATETIME                            COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
     PRIMARY KEY (vei_id)
 ) ENGINE = InnoDB;
 
 
 -- =====================================================
--- 10. Tabela CARONAS (Quadro 10)
+-- 9. Tabela CARONAS (Quadro 10)
+-- Inclui car_deletado_em adicionado pela migration v3.
 -- =====================================================
 DROP TABLE IF EXISTS CARONAS;
 CREATE TABLE CARONAS (
-    car_id         INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Carona (PK)',
-    vei_id         INT          NOT NULL               COMMENT 'Veículo utilizado (FK)',
-    cur_usu_id     INT          NOT NULL               COMMENT 'Inscrição do motorista (FK para CURSOS_USUARIOS)',
-    car_desc       VARCHAR(255) NOT NULL               COMMENT 'Detalhes da carona',
-    car_data       DATETIME     NOT NULL               COMMENT 'Data e hora da carona',
-    car_hor_saida  TIME         NOT NULL               COMMENT 'Horário de saída',
-    car_vagas_dispo INT         NOT NULL               COMMENT 'Vagas disponíveis (1 a 6)',
-    car_status     TINYINT      NOT NULL               COMMENT '1=Aberta, 2=Em espera, 0=Cancelada, 3=Finalizada',
-    PRIMARY KEY (car_id)
+    car_id          INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Carona (PK)',
+    vei_id          INT          NOT NULL               COMMENT 'Veículo utilizado (FK)',
+    cur_usu_id      INT          NOT NULL               COMMENT 'Inscrição do motorista (FK para CURSOS_USUARIOS)',
+    car_desc        VARCHAR(255) NOT NULL               COMMENT 'Detalhes da carona',
+    car_data        DATETIME     NOT NULL               COMMENT 'Data e hora da carona',
+    car_hor_saida   TIME         NOT NULL               COMMENT 'Horário de saída',
+    car_vagas_dispo INT          NOT NULL               COMMENT 'Vagas disponíveis (1 a 6)',
+    car_status      TINYINT      NOT NULL               COMMENT '1=Aberta, 2=Em espera, 0=Cancelada, 3=Finalizada',
+
+    -- Soft delete com timestamp  [v3]
+    car_deletado_em DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de cancelamento com timestamp (NULL = ativo); car_status=0 mantido para compatibilidade',
+
+    PRIMARY KEY (car_id),
+    INDEX idx_car_deletado_em (car_deletado_em)         -- filtro de registros ativos  [v3]
 ) ENGINE = InnoDB;
 
 
 -- =====================================================
--- 11. Tabela PONTO_ENCONTROS (Quadro 11)
+-- 10. Tabela PONTO_ENCONTROS (Quadro 11)
 -- =====================================================
 DROP TABLE IF EXISTS PONTO_ENCONTROS;
 CREATE TABLE PONTO_ENCONTROS (
-    pon_id           INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Ponto de Encontro (PK)',
-    car_id           INT          NOT NULL               COMMENT 'Carona relacionada (FK)',
-    pon_endereco     VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Descritivo)',
+    pon_id            INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Ponto de Encontro (PK)',
+    car_id            INT          NOT NULL               COMMENT 'Carona relacionada (FK)',
+    pon_endereco      VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Descritivo)',
     pon_endereco_geom VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Geométrico)',
-    pon_tipo         TINYINT      NOT NULL               COMMENT '0=Partida, 1=Destino',
-    pon_nome         VARCHAR(25)  NOT NULL               COMMENT 'Descrição do ponto de encontro',
-    pon_ordem        TINYINT                             COMMENT 'Ordem dos pontos na rota (NULL)',
-    pon_status       BIT(1)       NOT NULL               COMMENT '1=Usado, 0=Inativo',
+    pon_tipo          TINYINT      NOT NULL               COMMENT '0=Partida, 1=Destino',
+    pon_nome          VARCHAR(25)  NOT NULL               COMMENT 'Descrição do ponto de encontro',
+    pon_ordem         TINYINT                             COMMENT 'Ordem dos pontos na rota (NULL)',
+    pon_status        BIT(1)       NOT NULL               COMMENT '1=Usado, 0=Inativo',
     PRIMARY KEY (pon_id)
 ) ENGINE = InnoDB;
 
 
 -- =====================================================
--- 12. Tabela MENSAGENS (Quadro 12)
+-- 11. Tabela MENSAGENS (Quadro 12)
 -- =====================================================
 DROP TABLE IF EXISTS MENSAGENS;
 CREATE TABLE MENSAGENS (
@@ -189,29 +219,29 @@ CREATE TABLE MENSAGENS (
     usu_id_destinatario INT          NOT NULL               COMMENT 'Destinatário da Mensagem (FK)',
     men_texto           VARCHAR(255) NOT NULL               COMMENT 'Conteúdo da mensagem',
     men_status          TINYINT      NOT NULL DEFAULT 1     COMMENT '0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida',
-    men_deletado_em     DATETIME                            COMMENT 'Soft delete: data de remoção (NULL = ativo)',
+    men_deletado_em     DATETIME                            COMMENT 'Soft delete — data de remoção (NULL = ativo)',
     men_id_resposta     INT                                 COMMENT 'Mensagem respondida (auto-referência, NULL)',
     PRIMARY KEY (men_id)
 ) ENGINE = InnoDB;
 
 
 -- =====================================================
--- 13. Tabela SOLICITACOES_CARONA (Quadro 13)
+-- 12. Tabela SOLICITACOES_CARONA (Quadro 13)
 -- =====================================================
 DROP TABLE IF EXISTS SOLICITACOES_CARONA;
 CREATE TABLE SOLICITACOES_CARONA (
-    sol_id           INT     NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Solicitação (PK)',
-    usu_id_passageiro INT    NOT NULL               COMMENT 'Passageiro Solicitante (FK)',
-    car_id           INT     NOT NULL               COMMENT 'Carona Solicitada (FK)',
-    sol_status       TINYINT NOT NULL               COMMENT '1=Enviado, 2=Aceito, 3=Negado, 0=Cancelado',
-    sol_vaga_soli    INT     NOT NULL               COMMENT 'Quantidade de vagas solicitadas (1 a 4)',
+    sol_id            INT     NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Solicitação (PK)',
+    usu_id_passageiro INT     NOT NULL               COMMENT 'Passageiro Solicitante (FK)',
+    car_id            INT     NOT NULL               COMMENT 'Carona Solicitada (FK)',
+    sol_status        TINYINT NOT NULL               COMMENT '1=Enviado, 2=Aceito, 3=Negado, 0=Cancelado',
+    sol_vaga_soli     INT     NOT NULL               COMMENT 'Quantidade de vagas solicitadas (1 a 4)',
     PRIMARY KEY (sol_id),
     UNIQUE KEY UQ_Solicitacao (usu_id_passageiro, car_id) -- Uma solicitação por passageiro por carona
 ) ENGINE = InnoDB;
 
 
 -- =====================================================
--- 14. Tabela CARONA_PESSOAS (Quadro 14)
+-- 13. Tabela CARONA_PESSOAS (Quadro 14)
 -- =====================================================
 DROP TABLE IF EXISTS CARONA_PESSOAS;
 CREATE TABLE CARONA_PESSOAS (
@@ -223,6 +253,52 @@ CREATE TABLE CARONA_PESSOAS (
     PRIMARY KEY (car_pes_id),
     UNIQUE KEY UQ_CaronaPessoa (car_id, usu_id)   -- Passageiro só pode estar uma vez por carona
 ) ENGINE = InnoDB;
+
+
+-- =====================================================
+-- 14. Tabela AVALIACOES  [v5 — migration-avaliacoes.sql]
+-- Avaliações mútuas entre motorista e passageiro após carona finalizada.
+-- =====================================================
+DROP TABLE IF EXISTS AVALIACOES;
+CREATE TABLE AVALIACOES (
+    ava_id           INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Avaliação (PK)',
+    car_id           INT          NOT NULL               COMMENT 'Carona avaliada (FK)',
+    usu_id_avaliador INT          NOT NULL               COMMENT 'Quem deu a nota (FK)',
+    usu_id_avaliado  INT          NOT NULL               COMMENT 'Quem recebeu a nota (FK)',
+    ava_nota         TINYINT      NOT NULL               COMMENT 'Nota de 1 a 5',
+    ava_comentario   VARCHAR(255) NULL     DEFAULT NULL  COMMENT 'Comentário opcional',
+    ava_criado_em    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora da avaliação',
+    PRIMARY KEY (ava_id),
+    UNIQUE KEY UQ_avaliacao (car_id, usu_id_avaliador, usu_id_avaliado), -- Um avaliador → um avaliado por carona
+    INDEX idx_ava_avaliado  (usu_id_avaliado),
+    INDEX idx_ava_avaliador (usu_id_avaliador),
+    INDEX idx_ava_carona    (car_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+
+-- =====================================================
+-- 15. Tabela AUDIT_LOG — Rastreabilidade de ações
+-- Registra ações sensíveis para fins de auditoria e segurança.
+-- Gerenciada por: src/utils/auditLog.js
+-- =====================================================
+DROP TABLE IF EXISTS AUDIT_LOG;
+CREATE TABLE AUDIT_LOG (
+    audit_id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Identificador do registro de auditoria (PK)',
+    tabela           VARCHAR(50)  NOT NULL               COMMENT 'Tabela afetada (ex: USUARIOS, CARONAS)',
+    registro_id      INT          NOT NULL               COMMENT 'ID do registro afetado',
+    acao             VARCHAR(30)  NOT NULL               COMMENT 'Código da ação (LOGIN, CADASTRO, DELETAR_USU...)',
+    dados_anteriores JSON                                COMMENT 'Estado anterior do registro em JSON (opcional)',
+    dados_novos      JSON                                COMMENT 'Novo estado do registro em JSON (opcional)',
+    usu_id           INT                                 COMMENT 'Usuário que realizou a ação (NULL = sistema)',
+    ip               VARCHAR(45)                         COMMENT 'Endereço IP da requisição (suporta IPv6)',
+    criado_em        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora do evento',
+    PRIMARY KEY (audit_id),
+    INDEX idx_audit_tabela_registro (tabela, registro_id),
+    INDEX idx_audit_usu_id          (usu_id),
+    INDEX idx_audit_acao            (acao),
+    INDEX idx_audit_criado_em       (criado_em)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = 'Audit log — rastreabilidade de ações sensíveis no sistema';
 
 
 -- =====================================================
@@ -240,7 +316,6 @@ ALTER TABLE USUARIOS_REGISTROS
     ADD CONSTRAINT FK_Registros_Usuarios
         FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
         ON DELETE CASCADE ON UPDATE CASCADE;
-
 
 -- PERFIL → USUARIOS
 ALTER TABLE PERFIL
@@ -326,29 +401,16 @@ ALTER TABLE CARONA_PESSOAS
         FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
         ON DELETE RESTRICT ON UPDATE CASCADE;
 
+-- AVALIACOES → CARONAS e USUARIOS (avaliador e avaliado)  [v5]
+ALTER TABLE AVALIACOES
+    ADD CONSTRAINT FK_ava_carona
+        FOREIGN KEY (car_id) REFERENCES CARONAS (car_id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    ADD CONSTRAINT FK_ava_avaliador
+        FOREIGN KEY (usu_id_avaliador) REFERENCES USUARIOS (usu_id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    ADD CONSTRAINT FK_ava_avaliado
+        FOREIGN KEY (usu_id_avaliado) REFERENCES USUARIOS (usu_id)
+        ON DELETE RESTRICT ON UPDATE CASCADE;
+
 SET FOREIGN_KEY_CHECKS = 1;
-
-
--- =====================================================
--- 15. Tabela AUDIT_LOG — Rastreabilidade de ações
--- Registra ações sensíveis para fins de auditoria e segurança.
--- Gerenciada por: src/utils/auditLog.js
--- =====================================================
-DROP TABLE IF EXISTS AUDIT_LOG;
-CREATE TABLE AUDIT_LOG (
-    audit_id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Identificador do registro de auditoria (PK)',
-    tabela           VARCHAR(50)  NOT NULL               COMMENT 'Tabela afetada (ex: USUARIOS, CARONAS)',
-    registro_id      INT          NOT NULL               COMMENT 'ID do registro afetado',
-    acao             VARCHAR(30)  NOT NULL               COMMENT 'Código da ação (LOGIN, CADASTRO, DELETAR_USU...)',
-    dados_anteriores JSON                                COMMENT 'Estado anterior do registro em JSON (opcional)',
-    dados_novos      JSON                                COMMENT 'Novo estado do registro em JSON (opcional)',
-    usu_id           INT                                 COMMENT 'Usuário que realizou a ação (NULL = sistema)',
-    ip               VARCHAR(45)                         COMMENT 'Endereço IP da requisição (suporta IPv6)',
-    criado_em        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora do evento',
-    PRIMARY KEY (audit_id),
-    INDEX idx_audit_tabela_registro (tabela, registro_id),
-    INDEX idx_audit_usu_id (usu_id),
-    INDEX idx_audit_acao (acao),
-    INDEX idx_audit_criado_em (criado_em)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  COMMENT='Audit log — rastreabilidade de ações sensíveis no sistema';

@@ -38,7 +38,7 @@ function gerarOtp() {
  * @returns {string} Hash hexadecimal
  */
 function hashOtp(otp) {
-    const secret = process.env.OTP_SECRET || process.env.JWT_SECRET; // fallback para retrocompatibilidade
+    const secret = process.env.OTP_SECRET;
     return crypto
         .createHmac('sha256', secret)
         .update(otp)
@@ -74,4 +74,35 @@ async function enviarOtp(email, otp) {
     });
 }
 
-module.exports = { gerarOtp, hashOtp, enviarOtp };
+/**
+ * Envia o email com o link de redefinição de senha.
+ * @param {string} email    - Endereço de destino
+ * @param {string} resetUrl - URL completa com token e email já codificados
+ */
+async function enviarEmailReset(email, resetUrl) {
+    await transporter.sendMail({
+        from:    process.env.SMTP_FROM || `"Caronas" <${process.env.SMTP_USER}>`,
+        to:      email,
+        subject: 'Redefinição de senha - Sistema de Caronas',
+        text:    `Você solicitou a redefinição da sua senha.\n\nClique no link abaixo (válido por 15 minutos):\n${resetUrl}\n\nSe você não solicitou isso, ignore este email.`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px;">
+                <h2 style="color: #333;">Redefinição de Senha</h2>
+                <p style="color: #555;">Você solicitou a redefinição da sua senha. Clique no botão abaixo para continuar:</p>
+                <div style="text-align: center; margin: 28px 0;">
+                    <a href="${resetUrl}"
+                       style="background: #0066cc; color: #fff; padding: 14px 28px;
+                              border-radius: 6px; text-decoration: none; font-size: 16px;">
+                        Redefinir Senha
+                    </a>
+                </div>
+                <p style="color: #888; font-size: 13px;">
+                    Este link expira em <strong>15 minutos</strong>.<br>
+                    Se você não solicitou isso, ignore este email — sua senha permanece a mesma.
+                </p>
+            </div>
+        `
+    });
+}
+
+module.exports = { gerarOtp, hashOtp, enviarOtp, enviarEmailReset };

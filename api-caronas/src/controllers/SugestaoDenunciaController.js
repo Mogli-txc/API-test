@@ -91,20 +91,28 @@ class SugestaoDenunciaController {
         try {
             const { per_tipo, per_escola_id } = req.user;
 
+            // PASSO 1: Parâmetros de paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
             let sugestoes;
 
             if (per_tipo === 2) {
-                // PASSO 1: Desenvolvedor — acesso total, sem filtro de escola
+                // PASSO 2: Desenvolvedor — acesso total, sem filtro de escola
                 [sugestoes] = await db.query(
                     `SELECT s.sug_id, s.sug_texto, s.sug_data, s.sug_status, s.sug_tipo,
                             s.sug_resposta,
                             u.usu_nome AS autor
                      FROM SUGESTAO_DENUNCIA s
                      INNER JOIN USUARIOS u ON s.usu_id = u.usu_id
-                     ORDER BY s.sug_id DESC`
+                     WHERE s.sug_deletado_em IS NULL
+                     ORDER BY s.sug_id DESC
+                     LIMIT ? OFFSET ?`,
+                    [limit, offset]
                 );
             } else {
-                // PASSO 2: Administrador — filtra por usuários da sua escola
+                // PASSO 3: Administrador — filtra por usuários da sua escola
                 // JOIN: SUGESTAO_DENUNCIA → USUARIOS → CURSOS_USUARIOS → CURSOS (esc_id)
                 [sugestoes] = await db.query(
                     `SELECT DISTINCT s.sug_id, s.sug_texto, s.sug_data, s.sug_status,
@@ -114,16 +122,19 @@ class SugestaoDenunciaController {
                      INNER JOIN USUARIOS u          ON s.usu_id  = u.usu_id
                      INNER JOIN CURSOS_USUARIOS cu  ON u.usu_id  = cu.usu_id
                      INNER JOIN CURSOS c            ON cu.cur_id = c.cur_id
-                     WHERE c.esc_id = ?
-                     ORDER BY s.sug_id DESC`,
-                    [per_escola_id]
+                     WHERE c.esc_id = ? AND s.sug_deletado_em IS NULL
+                     ORDER BY s.sug_id DESC
+                     LIMIT ? OFFSET ?`,
+                    [per_escola_id, limit, offset]
                 );
             }
 
-            // PASSO 3: Resposta de sucesso
+            // PASSO 4: Resposta de sucesso
             return res.status(200).json({
                 message:  "Lista de sugestões/denúncias recuperada.",
                 total:    sugestoes.length,
+                page,
+                limit,
                 sugestoes
             });
 

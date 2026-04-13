@@ -133,7 +133,12 @@ class MensagemController {
                 }
             }
 
-            // PASSO 4: Busca no banco com JOIN para trazer os nomes dos usuários
+            // PASSO 4: Parâmetros de paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+            const offset = (page - 1) * limit;
+
+            // PASSO 5: Busca no banco com JOIN para trazer os nomes dos usuários
             // Filtra mensagens deletadas (soft delete: men_deletado_em IS NULL = ativas)
             const [mensagens] = await db.query(
                 `SELECT m.men_id, m.men_texto, m.men_id_resposta,
@@ -143,14 +148,17 @@ class MensagemController {
                  INNER JOIN USUARIOS u_rem  ON m.usu_id_remetente    = u_rem.usu_id
                  INNER JOIN USUARIOS u_dest ON m.usu_id_destinatario = u_dest.usu_id
                  WHERE m.car_id = ? AND m.men_deletado_em IS NULL
-                 ORDER BY m.men_id ASC`,
-                [caro_id]
+                 ORDER BY m.men_id ASC
+                 LIMIT ? OFFSET ?`,
+                [caro_id, limit, offset]
             );
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:  "Conversa recuperada com sucesso",
                 total:    mensagens.length,
+                page,
+                limit,
                 caro_id:  parseInt(caro_id),
                 mensagens
             });
