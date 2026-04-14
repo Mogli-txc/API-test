@@ -36,6 +36,7 @@ class AdminController {
                         SUM(usu_status = 0)                           AS inativos,
                         SUM(usu_verificacao = 0)                      AS aguardando_otp,
                         SUM(usu_verificacao = 5)                      AS acesso_temporario,
+                        SUM(usu_verificacao = 6)                      AS acesso_temporario_com_veiculo,
                         SUM(usu_verificacao = 1)                      AS matricula_verificada,
                         SUM(usu_verificacao = 2)                      AS completos
                      FROM USUARIOS`
@@ -49,6 +50,7 @@ class AdminController {
                         SUM(u.usu_status = 0)                                             AS inativos,
                         SUM(u.usu_verificacao = 0)                                        AS aguardando_otp,
                         SUM(u.usu_verificacao = 5)                                        AS acesso_temporario,
+                        SUM(u.usu_verificacao = 6)                                        AS acesso_temporario_com_veiculo,
                         SUM(u.usu_verificacao = 1)                                        AS matricula_verificada,
                         SUM(u.usu_verificacao = 2)                                        AS completos
                      FROM USUARIOS u

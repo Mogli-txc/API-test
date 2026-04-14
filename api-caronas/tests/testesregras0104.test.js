@@ -2,13 +2,13 @@
  * TESTES DAS REGRAS DE NEGÓCIO — 01/04
  * =====================================================
  * Valida as 3 regras de bloqueio implementadas no sistema,
- * mais o comportamento do cadastro temporário (verificacao=5).
+ * mais o comportamento do cadastro temporário (verificacao=5 e 6).
  *
  * REGRAS TESTADAS:
  *   Regra 1 — Motorista NÃO pode solicitar sua própria carona
  *   Regra 2 — Motorista NÃO pode solicitar carona com carona ativa (status 1 ou 2)
  *   Regra 3 — Usuário NÃO pode estar vinculado a mais de uma carona ao mesmo tempo
- *   Cadastro Temporário — verificacao=5 com acesso de 5 dias
+ *   Cadastro Temporário — verificacao=5 (sem veículo) e verificacao=6 (com veículo), 5 dias
  *
  * ENDPOINTS COBERTOS:
  *   POST /api/solicitacoes/criar       (CaronaController.solicitar)
@@ -22,7 +22,7 @@
  *   - motoristaC: tem carona_C — alvo dos testes da Regra 3
  *   - passageiroVinculado: sol_status=2 em carona_B → vínculo ativo
  *   - passageiroLivre: sem vínculo — usado como controle positivo
- *   - usuarioTemp: verificacao=5 — cadastro só com email+senha
+ *   - usuarioTemp: verificacao=5 — cadastro só com email+senha (promove para 6 ao cadastrar veículo)
  *
  * Executar isolado: npx jest tests/testesregras0104.test.js --verbose
  * =====================================================
@@ -225,7 +225,9 @@ beforeAll(async () => {
 
 
 // =====================================================
-// CADASTRO TEMPORÁRIO (verificacao = 5)
+// CADASTRO TEMPORÁRIO (verificacao = 5 e 6)
+// verificacao=5 → só email+senha → pode pedir caronas
+// verificacao=6 → 5 + veículo cadastrado → pode pedir e oferecer caronas
 // =====================================================
 
 describe('Cadastro Temporário — verificacao=5', () => {

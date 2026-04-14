@@ -10,7 +10,8 @@
  *   0 = Não verificado (aguardando OTP)
  *   1 = Matrícula verificada
  *   2 = Matrícula + veículo registrado
- *   5 = Cadastro temporário (acesso por 5 dias para pedir caronas)
+ *   5 = Temporário sem veículo (5 dias para pedir caronas; promovido para 6 ao cadastrar veículo)
+ *   6 = Temporário com veículo (5 dias para pedir e oferecer caronas; vira 2 ao completar validação)
  *
  * Colunas do banco usadas:
  * USUARIOS: usu_id, usu_nome, usu_email, usu_senha, usu_telefone,

@@ -14,6 +14,7 @@
  * - /api/sugestoes    → Sugestões e denúncias dos usuários
  * - /api/matriculas   → Inscrição de usuários em cursos
  * - /api/infra        → Escolas e cursos disponíveis (público)
+ * - /api/documentos   → Comprovante de matrícula e CNH (validação automática)
  */
 
 // Importação das dependências externas
@@ -40,6 +41,7 @@ const sugestaoRoutes     = require('./routes/sugestaoRoutes');       // Sugestõ
 const matriculaRoutes    = require('./routes/matriculaRoutes');      // Matrículas em cursos
 const adminRoutes        = require('./routes/adminRoutes');           // Estatísticas admin
 const avaliacaoRoutes    = require('./routes/avaliacaoRoutes');        // Avaliações pós-carona
+const documentoRoutes    = require('./routes/documentoRoutes');         // Comprovante de matrícula e CNH
 
 // Instancia a aplicação Express
 const app = express();
@@ -262,6 +264,13 @@ app.use('/api/admin', adminRoutes);
  * Base URL: /api/avaliacoes
  */
 app.use('/api/avaliacoes', avaliacaoRoutes);
+
+/**
+ * Rotas de Documentos: Comprovante de matrícula e CNH
+ * Base URL: /api/documentos
+ * Validação automática — promoção de nível após upload bem-sucedido
+ */
+app.use('/api/documentos', documentoRoutes);
 
 // ========== TRATAMENTO DE ERROS ==========
 

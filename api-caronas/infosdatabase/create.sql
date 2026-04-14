@@ -11,6 +11,7 @@
 --   v3   — migration-soft-delete.sql: usu_deletado_em, car_deletado_em e índices
 --   v4   — migration-refresh-token.sql: usu_refresh_hash, usu_refresh_expira, índice
 --   v5   — migration-avaliacoes.sql: tabela AVALIACOES + FKs
+--   v6   — migration-documentos.sql: tabela DOCUMENTOS_VERIFICACAO (comprovante + CNH)
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -54,8 +55,8 @@ CREATE TABLE USUARIOS (
     usu_telefone          VARCHAR(11)                         COMMENT 'Telefone sem máscara (ex: 11999990000) (NULL no cadastro temporário)',
     usu_matricula         VARCHAR(100)                        COMMENT 'Foto/Comprovante da Matrícula (NULL no cadastro temporário)',
     usu_senha             VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash bcrypt custo 12)',
-    usu_verificacao       TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Aguardando OTP, 1=Matrícula verificada, 2=Matrícula+veículo, 5=Cadastro temporário (+5 dias)',
-    usu_verificacao_expira DATETIME                           COMMENT 'Expiração da verificação — semestral (nível 1/2) ou +5 dias (nível 5)',
+    usu_verificacao       TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Aguardando OTP, 1=Matrícula verificada, 2=Matrícula+veículo, 5=Temporário sem veículo (+5 dias), 6=Temporário com veículo (+5 dias)',
+    usu_verificacao_expira DATETIME                           COMMENT 'Expiração da verificação — semestral (nível 1/2) ou +5 dias (nível 5/6)',
 
     -- Verificação de email via OTP  [v2]
     usu_otp_hash          VARCHAR(64)                         COMMENT 'Hash HMAC-SHA256 do OTP de verificação (NULL após verificação)',
@@ -277,7 +278,29 @@ CREATE TABLE AVALIACOES (
 
 
 -- =====================================================
--- 15. Tabela AUDIT_LOG — Rastreabilidade de ações
+-- 15. Tabela DOCUMENTOS_VERIFICACAO  [v6 — migration-documentos.sql]
+-- Armazena comprovantes de matrícula e CNH enviados pelos usuários.
+-- A validação é automática: o envio do arquivo promove usu_verificacao.
+--   doc_tipo 0 = Comprovante de matrícula (5→1 ou 6→2)
+--   doc_tipo 1 = CNH (1→2 se tiver veículo ativo)
+--   doc_status 0 = Aprovado automaticamente
+-- =====================================================
+DROP TABLE IF EXISTS DOCUMENTOS_VERIFICACAO;
+CREATE TABLE DOCUMENTOS_VERIFICACAO (
+    doc_id         INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do documento (PK)',
+    usu_id         INT          NOT NULL               COMMENT 'Usuário que enviou o documento (FK)',
+    doc_tipo       TINYINT      NOT NULL               COMMENT '0=Comprovante de matrícula, 1=CNH',
+    doc_arquivo    VARCHAR(255) NOT NULL               COMMENT 'Nome do arquivo salvo em /public/documentos/',
+    doc_status     TINYINT      NOT NULL DEFAULT 0     COMMENT '0=Aprovado automaticamente',
+    doc_enviado_em DATETIME     NOT NULL               COMMENT 'Data e hora do envio',
+    PRIMARY KEY (doc_id),
+    INDEX idx_doc_usu_tipo (usu_id, doc_tipo)          -- lookup por usuário e tipo de documento
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = 'Documentos de verificação enviados pelos usuários (comprovante e CNH)';
+
+
+-- =====================================================
+-- 16. Tabela AUDIT_LOG — Rastreabilidade de ações
 -- Registra ações sensíveis para fins de auditoria e segurança.
 -- Gerenciada por: src/utils/auditLog.js
 -- =====================================================
@@ -412,5 +435,11 @@ ALTER TABLE AVALIACOES
     ADD CONSTRAINT FK_ava_avaliado
         FOREIGN KEY (usu_id_avaliado) REFERENCES USUARIOS (usu_id)
         ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- DOCUMENTOS_VERIFICACAO → USUARIOS  [v6]
+ALTER TABLE DOCUMENTOS_VERIFICACAO
+    ADD CONSTRAINT FK_doc_usuario
+        FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
+        ON DELETE CASCADE ON UPDATE CASCADE;
 
 SET FOREIGN_KEY_CHECKS = 1;

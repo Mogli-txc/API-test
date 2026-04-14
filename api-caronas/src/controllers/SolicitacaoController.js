@@ -39,7 +39,8 @@ class SolicitacaoController {
             }
 
             // REGRA DE NEGÓCIO: Para solicitar carona, o passageiro precisa ter:
-            //   usu_verificacao = 5 (temporário) com usu_verificacao_expira ainda válida (+5 dias do cadastro), ou
+            //   usu_verificacao = 5 (temporário sem veículo) ou 6 (temporário com veículo),
+            //     com usu_verificacao_expira ainda válida (+5 dias do cadastro), ou
             //   usu_verificacao >= 1 (verificado) com usu_verificacao_expira ainda válida (semestral).
             // O usu_id vem do token JWT decodificado pelo authMiddleware (req.user.id)
             const usu_id = req.user.id;
@@ -54,18 +55,18 @@ class SolicitacaoController {
 
             const { usu_verificacao: verificacao, usu_verificacao_expira: expira } = usuario[0];
 
-            // Verifica se o nível de acesso permite solicitar caronas (1, 2 ou 5)
-            if (verificacao !== 5 && verificacao < 1) {
+            // Verifica se o nível de acesso permite solicitar caronas (1, 2, 5 ou 6)
+            if (verificacao !== 5 && verificacao !== 6 && verificacao < 1) {
                 return res.status(403).json({
                     error: "É necessário ter matrícula verificada para solicitar caronas."
                 });
             }
 
             // usu_verificacao_expira é o campo unificado de expiração para todos os níveis:
-            //   nível 5 → preenchido com NOW() + 5 dias no cadastro
+            //   nível 5/6 → preenchido com NOW() + 5 dias na verificação do email
             //   nível 1/2 → preenchido com NOW() + 6 meses na verificação semestral
             if (!expira || new Date(expira) < new Date()) {
-                const mensagem = verificacao === 5
+                const mensagem = (verificacao === 5 || verificacao === 6)
                     ? "Período de acesso temporário encerrado. Complete seu cadastro para continuar pedindo caronas."
                     : "Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo.";
                 return res.status(403).json({ error: mensagem });

@@ -353,7 +353,7 @@ Authorization: Bearer {{token_carlos}}
 GET {{baseUrl}}/caronas/1
 Authorization: Bearer {{token_carlos}}
 
-### [6.3] Oferecer carona (requer usu_verificacao=2 e matrícula própria)
+### [6.3] Oferecer carona (requer usu_verificacao=2 ou 6 e veículo próprio)
 # [A2] car_desc com HTML deve ser sanitizado
 # Esperado: 201 com carona criada (car_desc sem as tags)
 POST {{baseUrl}}/caronas/oferecer

@@ -54,6 +54,14 @@ class VeiculoController {
                 [usu_id, marca_limpa, vei_tipo, cor_limpa, vei_vagas]
             );
 
+            // PASSO: Promove usuário temporário sem veículo (5) para temporário com veículo (6)
+            // Mantém o usu_verificacao_expira original (os 5 dias contam da verificação do email)
+            await db.query(
+                `UPDATE USUARIOS SET usu_verificacao = 6
+                 WHERE usu_id = ? AND usu_verificacao = 5`,
+                [usu_id]
+            );
+
             return res.status(201).json({
                 message: "Veículo registrado com sucesso!",
                 veiculo: {

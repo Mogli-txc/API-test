@@ -10,7 +10,8 @@
 --
 -- LEGENDA DE STATUS (referência rápida):
 -- USUARIOS:         usu_verificacao (0=Não verificado (aguarda OTP), 1=Matrícula verificada,
---                                    2=Matrícula + veículo, 5=Cadastro temporário 5 dias)
+--                                    2=Matrícula + veículo, 5=Temporário sem veículo 5 dias,
+--                                    6=Temporário com veículo 5 dias)
 --                   usu_status      (0=Inativo, 1=Ativo)
 -- PERFIL:           per_tipo        (0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total))
 --                   per_escola_id   (NULL para Usuário e Desenvolvedor; esc_id para Administrador)
@@ -133,7 +134,7 @@ WHERE usu_email = 'carlos.silva@aluno.inova.br'
   AND usu_senha = 'hash_carlos_1';
 
 -- [C] TESTE: Verificar se usuário pode acessar o app (ativo + OTP confirmado)
--- verificacao != 0 cobre todos os níveis válidos: 1 (matrícula), 2 (veículo), 5 (temporário)
+-- verificacao != 0 cobre todos os níveis válidos: 1 (matrícula), 2 (veículo), 5 (temp.), 6 (temp. c/ veículo)
 SELECT usu_id, usu_nome
 FROM USUARIOS
 WHERE usu_id = 1
@@ -1081,6 +1082,7 @@ SELECT
     SUM(u.usu_status = 0)            AS inativos,
     SUM(u.usu_verificacao = 0)       AS aguardando_otp,
     SUM(u.usu_verificacao = 5)       AS acesso_temporario,
+    SUM(u.usu_verificacao = 6)       AS acesso_temporario_com_veiculo,
     SUM(u.usu_verificacao = 1)       AS matricula_verificada,
     SUM(u.usu_verificacao = 2)       AS completos
 FROM USUARIOS u

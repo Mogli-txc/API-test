@@ -11,7 +11,8 @@
  * Valores de usu_verificacao relevantes para caronas:
  *   1 = Matrícula verificada (acesso completo para pedir caronas)
  *   2 = Matrícula + veículo registrado (pode oferecer e pedir caronas)
- *   5 = Cadastro temporário (pode pedir caronas por 5 dias a partir do cadastro)
+ *   5 = Temporário sem veículo (pode pedir caronas por 5 dias)
+ *   6 = Temporário com veículo (pode pedir e oferecer caronas por 5 dias; vira 2 ao validar)
  *
  * Colunas principais da tabela CARONAS:
  *   car_id, vei_id, cur_usu_id, car_desc, car_data,
@@ -208,8 +209,9 @@ class CaronaController {
                 return res.status(400).json({ error: dtCheck.error });
             }
 
-            // REGRA DE NEGÓCIO: Para oferecer carona, o motorista precisa ter usu_verificacao = 2
+            // REGRA DE NEGÓCIO: Para oferecer carona, o motorista precisa ter usu_verificacao = 2 ou 6
             // usu_verificacao 0 = não verificado | 1 = matrícula verificada | 2 = matrícula + veículo registrado
+            // usu_verificacao 5 = temporário sem veículo | 6 = temporário com veículo (pode oferecer por 5 dias)
             // O usu_id vem do token JWT decodificado pelo authMiddleware (req.user.id)
             const usu_id = req.user.id;
             const [usuario] = await db.query(
@@ -217,20 +219,21 @@ class CaronaController {
                 [usu_id]
             );
 
-            // Nível 2 exigido: matrícula verificada e veículo cadastrado
-            if (usuario.length === 0 || usuario[0].usu_verificacao < 2) {
+            // Níveis 2 e 6 permitidos: possuem veículo cadastrado
+            const verificacao = usuario.length > 0 ? usuario[0].usu_verificacao : null;
+            if (!verificacao || ![2, 6].includes(verificacao)) {
                 return res.status(403).json({
-                    error: "É necessário ter matrícula verificada e veículo cadastrado para oferecer caronas."
+                    error: "É necessário ter veículo cadastrado para oferecer caronas."
                 });
             }
 
-            // Validade da verificação: expira a cada 6 meses (renovação semestral obrigatória)
-            // usu_verificacao_expira = NULL significa que nunca foi verificado via documento
+            // Validade do acesso: nível 2 = semestral | nível 6 = 5 dias (temporário)
             const expira = usuario[0].usu_verificacao_expira;
             if (!expira || new Date(expira) < new Date()) {
-                return res.status(403).json({
-                    error: "Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo."
-                });
+                const mensagem = verificacao === 6
+                    ? "Período de acesso temporário encerrado. Complete seu cadastro para continuar oferecendo caronas."
+                    : "Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo.";
+                return res.status(403).json({ error: mensagem });
             }
 
             // Verifica se o vei_id enviado pertence ao motorista (segurança: evita usar veículo de outro usuário)

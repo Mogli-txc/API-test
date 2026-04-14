@@ -6,19 +6,23 @@
  * solicitar carona.
  *
  * Regras testadas:
- *   - Oferecer carona exige usu_verificacao = 2 E validade ativa
- *   - Solicitar carona exige usu_verificacao >= 1 E validade ativa
+ *   - Oferecer carona exige usu_verificacao = 2 ou 6 E validade ativa
+ *   - Solicitar carona exige usu_verificacao >= 1 ou 5 ou 6 E validade ativa
  *
  * Tabela de cenários:
- * | Caso | verificacao | expira  | Endpoint  | Esperado              |
- * |------|-------------|---------|-----------|------------------------|
- * | A    | 0           | NULL    | oferecer  | 403 — nível insuf.    |
- * | B    | 1           | futuro  | oferecer  | 403 — nível insuf.    |
- * | C    | 2           | passado | oferecer  | 403 — expirada        |
- * | D    | 2           | futuro  | oferecer  | passa verificação      |
- * | E    | 0           | NULL    | solicitar | 403 — nível insuf.    |
- * | F    | 1           | passado | solicitar | 403 — expirada        |
- * | G    | 1           | futuro  | solicitar | passa verificação      |
+ * | Caso | verificacao | expira  | Endpoint  | Esperado                      |
+ * |------|-------------|---------|-----------|-------------------------------|
+ * | A    | 0           | NULL    | oferecer  | 403 — sem veículo             |
+ * | B    | 1           | futuro  | oferecer  | 403 — sem veículo             |
+ * | C    | 2           | passado | oferecer  | 403 — expirada (semestral)    |
+ * | D    | 2           | futuro  | oferecer  | passa verificação              |
+ * | E    | 0           | NULL    | solicitar | 403 — nível insuf.            |
+ * | F    | 1           | passado | solicitar | 403 — expirada                |
+ * | G    | 1           | futuro  | solicitar | passa verificação              |
+ * | H    | 6           | futuro  | oferecer  | passa verificação (temporário) |
+ * | I    | 6           | passado | oferecer  | 403 — período temporário enc. |
+ * | J    | 6           | futuro  | solicitar | passa verificação (temporário) |
+ * | K    | 5           | futuro  | oferecer  | 403 — sem veículo             |
  *
  * Executar isolado: npx jest tests/regras_verificacao.test.js --verbose
  */
@@ -91,7 +95,7 @@ beforeAll(async () => {
 });
 
 // ========== OFERECER CARONA ==========
-// Requer: usu_verificacao = 2 E usu_verificacao_expira no futuro
+// Requer: usu_verificacao = 2 ou 6 E usu_verificacao_expira no futuro
 
 describe('Oferecer carona — regras de verificação', () => {
 
@@ -115,9 +119,9 @@ describe('Oferecer carona — regras de verificação', () => {
             .set('Authorization', `Bearer ${token}`)
             .send(bodyOferecer);
 
-        // PASSO 3: verificação bloqueada — nível 0 não tem matrícula nem veículo
+        // PASSO 3: verificação bloqueada — nível 0 não tem veículo cadastrado
         expect(res.status).toBe(403);
-        expect(res.body.error).toMatch(/matrícula verificada e veículo/i);
+        expect(res.body.error).toMatch(/veículo cadastrado/i);
     });
 
     it('CASO B — usu_verificacao=1 (só matrícula): deve retornar 403 com mensagem de nível insuficiente', async () => {
@@ -130,9 +134,9 @@ describe('Oferecer carona — regras de verificação', () => {
             .set('Authorization', `Bearer ${token}`)
             .send(bodyOferecer);
 
-        // PASSO 3: bloqueado — oferecer exige nível 2
+        // PASSO 3: bloqueado — oferecer exige veículo cadastrado (nível 2 ou 6)
         expect(res.status).toBe(403);
-        expect(res.body.error).toMatch(/matrícula verificada e veículo/i);
+        expect(res.body.error).toMatch(/veículo cadastrado/i);
     });
 
     it('CASO C — usu_verificacao=2 mas verificação expirada: deve retornar 403 com mensagem de expiração', async () => {
@@ -160,9 +164,9 @@ describe('Oferecer carona — regras de verificação', () => {
             .set('Authorization', `Bearer ${token}`)
             .send(bodyOferecer);
 
-        // PASSO 3: verificação passou — o erro agora é sobre o veículo (não sobre verificação)
+        // PASSO 3: verificação passou — o erro agora é sobre dados da carona (não sobre verificação)
         // Qualquer resposta que não seja o erro de verificação confirma que a regra passou
-        expect(res.body.error).not.toMatch(/matrícula verificada e veículo/i);
+        expect(res.body.error).not.toMatch(/veículo cadastrado/i);
         expect(res.body.error).not.toMatch(/expirada/i);
     });
 
@@ -235,6 +239,84 @@ describe('Solicitar carona — regras de verificação', () => {
         // PASSO 3: verificação passou — o erro agora é sobre a carona não encontrada (não sobre verificação)
         expect(res.status).toBe(404);
         expect(res.body.error).toMatch(/carona não encontrada/i);
+    });
+
+    it('CASO J — usu_verificacao=6 com validade ativa: deve passar a verificação para solicitar', async () => {
+        // PASSO 1: define o usuário como temporário com veículo (nível 6) e validade ativa
+        await setVerificacao(usu_id, 6, EXPIRA_FUTURO);
+
+        // PASSO 2: tenta solicitar carona (car_id=99999 não existe, mas verificação deve passar)
+        const res = await request(app)
+            .post('/api/solicitacoes/criar')
+            .set('Authorization', `Bearer ${token}`)
+            .send(bodySolicitar);
+
+        // PASSO 3: verificação passou — temporário com veículo pode solicitar caronas
+        expect(res.status).toBe(404);
+        expect(res.body.error).toMatch(/carona não encontrada/i);
+    });
+
+});
+
+// ========== TIPO 6 — OFERECER CARONA ==========
+// Testa os casos específicos do usu_verificacao = 6 (temporário com veículo)
+
+describe('Oferecer carona — temporário com veículo (verificacao=6)', () => {
+
+    const bodyOferecer = {
+        cur_usu_id:      1,
+        vei_id:          1,
+        car_desc:        'Carona teste tipo 6',
+        car_data:        '2027-01-01 08:00:00',
+        car_hor_saida:   '08:00:00',
+        car_vagas_dispo: 1
+    };
+
+    it('CASO H — usu_verificacao=6 com validade ativa: deve passar a verificação para oferecer', async () => {
+        // PASSO 1: define o usuário como temporário com veículo e validade ativa (5 dias)
+        const expira5dias = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+        await setVerificacao(usu_id, 6, expira5dias);
+
+        // PASSO 2: tenta oferecer carona
+        const res = await request(app)
+            .post('/api/caronas/oferecer')
+            .set('Authorization', `Bearer ${token}`)
+            .send(bodyOferecer);
+
+        // PASSO 3: verificação passou — o erro agora é sobre dados da carona (não sobre verificação)
+        expect(res.body.error).not.toMatch(/veículo cadastrado/i);
+        expect(res.body.error).not.toMatch(/período.*temporário/i);
+        expect(res.body.error).not.toMatch(/expirada/i);
+    });
+
+    it('CASO I — usu_verificacao=6 com período expirado: deve retornar 403 com mensagem de período temporário', async () => {
+        // PASSO 1: define o usuário como tipo 6, mas os 5 dias já passaram
+        await setVerificacao(usu_id, 6, EXPIRA_PASSADO);
+
+        // PASSO 2: tenta oferecer carona
+        const res = await request(app)
+            .post('/api/caronas/oferecer')
+            .set('Authorization', `Bearer ${token}`)
+            .send(bodyOferecer);
+
+        // PASSO 3: bloqueado — período temporário encerrado
+        expect(res.status).toBe(403);
+        expect(res.body.error).toMatch(/período.*temporário.*encerrado/i);
+    });
+
+    it('CASO K — usu_verificacao=5 (temporário sem veículo): deve retornar 403 ao tentar oferecer', async () => {
+        // PASSO 1: define o usuário como temporário SEM veículo (nível 5)
+        await setVerificacao(usu_id, 5, EXPIRA_FUTURO);
+
+        // PASSO 2: tenta oferecer carona
+        const res = await request(app)
+            .post('/api/caronas/oferecer')
+            .set('Authorization', `Bearer ${token}`)
+            .send(bodyOferecer);
+
+        // PASSO 3: bloqueado — nível 5 não tem veículo cadastrado
+        expect(res.status).toBe(403);
+        expect(res.body.error).toMatch(/veículo cadastrado/i);
     });
 
 });

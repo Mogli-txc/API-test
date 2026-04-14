@@ -5,7 +5,8 @@
 --
 -- LEGENDA DE STATUS (referência rápida):
 -- USUARIOS:         usu_verificacao      (0=Não verificado (aguarda OTP), 1=Matrícula verificada,
---                                         2=Matrícula + veículo, 5=Cadastro temporário 5 dias)
+--                                         2=Matrícula + veículo, 5=Temporário sem veículo 5 dias,
+--                                         6=Temporário com veículo 5 dias)
 --                   usu_status           (0=Inativo, 1=Ativo)
 --                   usu_otp_tentativas   (INT DEFAULT 0 — contador de falhas de OTP; reset no reenvio)
 --                   usu_otp_bloqueado_ate(DATETIME NULL — bloqueio automático após 3 falhas por 30 min)
@@ -77,25 +78,29 @@ INSERT INTO CURSOS (cur_semestre, cur_nome, esc_id) VALUES
 --
 -- usu_verificacao_expira:
 --   verificacao=1/2 → DATE_ADD(NOW(), INTERVAL 6 MONTH)  (renovação semestral)
---   verificacao=5   → DATE_ADD(NOW(), INTERVAL 5 DAY)    (janela após OTP confirmado)
+--   verificacao=5/6 → DATE_ADD(NOW(), INTERVAL 5 DAY)    (janela após OTP confirmado)
 --   verificacao=0   → NULL (aguardando OTP — login bloqueado)
 --
--- Fluxo OTP: Cadastro define verificacao=0 → usuário confirma OTP → verificacao=5 + expira=+5 dias
+-- Fluxo OTP:    Cadastro define verificacao=0 → confirma OTP → verificacao=5 + expira=+5 dias
+-- Fluxo veículo: verificacao=5 → cadastra veículo → verificacao=6 (mantém mesmo expira)
+-- Fluxo validação: verificacao=6 → admin valida → verificacao=2 (expira semestral)
 --
 -- Cenários de teste cobertos:
---   - usu_id=1 (Carlos):   Motorista verificado e ativo, com horário habitual
---   - usu_id=2 (Mariana):  Passageira verificada e ativa, com horário habitual
---   - usu_id=3 (Pedro):    Motorista verificado e ativo, escola diferente (Campinas)
---   - usu_id=4 (Ana):      Conta inativa (usu_status=0) e não verificada — testa "Conta inativa" no login
---   - usu_id=5 (Lucas):    Verificado, sem foto e sem horário — testa campos NULL
---   - usu_id=6 (Admin):    Usuário desenvolvedor (per_tipo=2) com acesso total
---   - usu_id=7 (Novo):       Cadastro temporário (verificacao=5) — OTP já confirmado,
+--   - usu_id=1  (Carlos):    Motorista verificado e ativo, com horário habitual
+--   - usu_id=2  (Mariana):   Passageira verificada e ativa, com horário habitual
+--   - usu_id=3  (Pedro):     Motorista verificado e ativo, escola diferente (Campinas)
+--   - usu_id=4  (Ana):       Conta inativa (usu_status=0) e não verificada — testa "Conta inativa" no login
+--   - usu_id=5  (Lucas):     Verificado, sem foto e sem horário — testa campos NULL
+--   - usu_id=6  (Admin):     Usuário desenvolvedor (per_tipo=2) com acesso total
+--   - usu_id=7  (Novo):      Temporário sem veículo (verificacao=5) — OTP confirmado,
 --                             só email e senha preenchidos, acesso por 5 dias para pedir caronas
---   - usu_id=8 (Pendente):   Cadastro recente com OTP não confirmado — testa "Email não verificado" no login
+--   - usu_id=8  (Pendente):  Cadastro recente com OTP não confirmado — testa "Email não verificado" no login
 --                             verificacao=0 + usu_status=1 (ativo, mas aguarda OTP)
---   - usu_id=9 (Suspenso):   Conta ativa (usu_status=1), email verificado (verificacao=1),
+--   - usu_id=9  (Suspenso):  Conta ativa (usu_status=1), email verificado (verificacao=1),
 --                             mas perfil desabilitado pelo admin (per_habilitado=0)
 --                             → testa bloqueio de login via per_habilitado (C2)
+--   - usu_id=10 (TempVei):   Temporário com veículo (verificacao=6) — OTP confirmado + veículo
+--                             cadastrado, acesso por 5 dias para pedir e oferecer caronas
 -- =====================================================
 INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_verificacao_expira, usu_status, usu_email, usu_descricao, usu_endereco, usu_endereco_geom, usu_horario_habitual) VALUES
     ('Carlos Silva',  '11999991111', 'MAT2023001',  'hash_carlos_1',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',  'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP', '-23.5505,-46.6333', '07:30:00'),  -- usu_id=1
@@ -104,9 +109,10 @@ INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_veri
     ('Ana Oliveira',  '11966664444', 'MAT2024001',  'hash_ana_4',     0, NULL,                              0, 'ana.oliveira@aluno.inova.br',  NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL),         -- usu_id=4 (inativa: usu_status=0 → resposta "Conta inativa")
     ('Lucas Pereira', '11955553333', 'MAT2023050',  'hash_lucas_5',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'lucas.pereira@aluno.inova.br', NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL),         -- usu_id=5 (sem foto, sem horário)
     ('Admin Sistema', '11900000001', 'ADMIN000001', 'hash_admin_6',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin@sistema.inova.br',       'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL),         -- usu_id=6
-    (NULL,            NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',    NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=7: Temporário — OTP confirmado, per_habilitado=1 (habilitado automaticamente pelo verificarEmail)
-    (NULL,            NULL,          NULL,           'hash_pend_8',   0, NULL,                              1, 'pendente.otp@aluno.inova.br',  NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=8: Aguardando OTP — ativo mas login bloqueado (resposta "Email não verificado")
-    ('Fábio Suspenso', '11900000009', 'MAT2023099',  'hash_fabio_9',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                              'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL);          -- usu_id=9: usu_status=1 + verificacao=1 MAS per_habilitado=0 → testa bloqueio C2 no login
+    (NULL,            NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',    NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=7:  Temporário sem veículo — OTP confirmado, só pede caronas
+    (NULL,            NULL,          NULL,           'hash_pend_8',   0, NULL,                              1, 'pendente.otp@aluno.inova.br',  NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=8:  Aguardando OTP — ativo mas login bloqueado (resposta "Email não verificado")
+    ('Fábio Suspenso', '11900000009', 'MAT2023099',  'hash_fabio_9',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                              'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL),          -- usu_id=9:  usu_status=1 + verificacao=1 MAS per_habilitado=0 → testa bloqueio C2 no login
+    (NULL,            NULL,          NULL,           'hash_tempv_10', 6, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'temp.veiculo@aluno.inova.br',  NULL,                                               NULL,                                          NULL,                NULL);          -- usu_id=10: Temporário com veículo (verificacao=6) — pode pedir e oferecer caronas por 5 dias
 
 
 -- =====================================================
@@ -126,15 +132,16 @@ INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_veri
 --   - usu_id=7 (Novo): cadastro temporário — nunca logou ainda
 -- =====================================================
 INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atualizado_em) VALUES
-    (1, NOW(),                       '2023-01-15 10:00:00', NOW()),
-    (2, NOW(),                       '2023-02-20 14:30:00', NOW()),
-    (3, '2023-10-01 08:00:00',       '2022-08-10 09:00:00', '2023-10-01 08:00:00'),  -- login antigo
-    (4, NULL,                        '2024-03-10 11:00:00', NULL),                    -- nunca logou
-    (5, NOW(),                       NOW(),                 NULL),                    -- primeiro acesso
-    (6, '2024-12-01 09:00:00',       '2022-01-01 08:00:00', '2024-12-01 09:00:00'), -- admin, conta antiga
-    (7, NULL,                        NOW(),                 NULL),                    -- cadastro temporário: nunca logou ainda
-    (8, NULL,                        NOW(),                 NULL),                    -- OTP pendente: nunca logou (bloqueado até verificar)
-    (9, NULL,                        NOW(),                 NULL);                    -- Fábio: conta ativa e verificada, mas suspenso pelo admin
+    (1,  NOW(),                      '2023-01-15 10:00:00', NOW()),
+    (2,  NOW(),                      '2023-02-20 14:30:00', NOW()),
+    (3,  '2023-10-01 08:00:00',      '2022-08-10 09:00:00', '2023-10-01 08:00:00'),  -- login antigo
+    (4,  NULL,                       '2024-03-10 11:00:00', NULL),                    -- nunca logou
+    (5,  NOW(),                      NOW(),                 NULL),                    -- primeiro acesso
+    (6,  '2024-12-01 09:00:00',      '2022-01-01 08:00:00', '2024-12-01 09:00:00'), -- admin, conta antiga
+    (7,  NULL,                       NOW(),                 NULL),                    -- temporário sem veículo: nunca logou ainda
+    (8,  NULL,                       NOW(),                 NULL),                    -- OTP pendente: nunca logou (bloqueado até verificar)
+    (9,  NULL,                       NOW(),                 NULL),                    -- Fábio: conta ativa e verificada, mas suspenso pelo admin
+    (10, NULL,                       NOW(),                 NULL);                    -- temporário com veículo: nunca logou ainda
 
 
 -- =====================================================
@@ -149,21 +156,23 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
 --   - Carlos, Mariana, Pedro, Lucas: Usuários comuns (per_tipo=0)
 --   - Ana: Usuário inativo (per_habilitado=0) — testa bloqueio de acesso
 --   - Admin (usu_id=6): Desenvolvedor (per_tipo=2) — acesso total ao sistema
---   - Novo (usu_id=7): Temporário com OTP confirmado — per_habilitado=1 (habilitado pelo verificarEmail)
---   - Fábio (usu_id=9): Conta ativa e verificada, desabilitada pelo admin (per_habilitado=0) — testa C2
+--   - Novo (usu_id=7):    Temporário sem veículo (verificacao=5) — per_habilitado=1 após OTP
+--   - Fábio (usu_id=9):   Conta ativa e verificada, desabilitada pelo admin (per_habilitado=0) — testa C2
+--   - TempVei (usu_id=10): Temporário com veículo (verificacao=6) — per_habilitado=1 após OTP + veículo
 -- =====================================================
 -- per_tipo: 0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)
 -- per_escola_id: NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador
 INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_escola_id) VALUES
-    (1, 'Carlos Silva',  NOW(), 0, 1, NULL),  -- usu_id=1: Carlos   → Usuário comum
-    (2, 'Mariana Souza', NOW(), 0, 1, NULL),  -- usu_id=2: Mariana  → Usuário comum
-    (3, 'Pedro Santos',  NOW(), 0, 1, NULL),  -- usu_id=3: Pedro    → Usuário comum
-    (4, 'Ana Oliveira',  NOW(), 0, 0, NULL),  -- usu_id=4: Ana      → Usuário inativo
-    (5, 'Lucas Pereira', NOW(), 0, 1, NULL),  -- usu_id=5: Lucas    → Usuário comum
-    (6, 'Admin Sistema', NOW(), 2, 1, NULL),  -- usu_id=6: Admin    → Desenvolvedor (acesso total)
-    (7, NULL,            NOW(), 0, 1, NULL),   -- usu_id=7: Novo      → per_habilitado=1 (habilitado automaticamente após OTP)
-    (8, NULL,            NOW(), 0, 0, NULL),  -- usu_id=8: Pendente  → OTP não confirmado (per_habilitado=0 correto)
-    (9, 'Fábio Suspenso', NOW(), 0, 0, NULL); -- usu_id=9: Suspenso  → usu_status=1 + verificacao=1, mas per_habilitado=0 → testa C2
+    (1,  'Carlos Silva',   NOW(), 0, 1, NULL),  -- usu_id=1:  Carlos   → Usuário comum
+    (2,  'Mariana Souza',  NOW(), 0, 1, NULL),  -- usu_id=2:  Mariana  → Usuário comum
+    (3,  'Pedro Santos',   NOW(), 0, 1, NULL),  -- usu_id=3:  Pedro    → Usuário comum
+    (4,  'Ana Oliveira',   NOW(), 0, 0, NULL),  -- usu_id=4:  Ana      → Usuário inativo
+    (5,  'Lucas Pereira',  NOW(), 0, 1, NULL),  -- usu_id=5:  Lucas    → Usuário comum
+    (6,  'Admin Sistema',  NOW(), 2, 1, NULL),  -- usu_id=6:  Admin    → Desenvolvedor (acesso total)
+    (7,  NULL,             NOW(), 0, 1, NULL),  -- usu_id=7:  Novo     → temporário sem veículo, per_habilitado=1 após OTP
+    (8,  NULL,             NOW(), 0, 0, NULL),  -- usu_id=8:  Pendente → OTP não confirmado (per_habilitado=0 correto)
+    (9,  'Fábio Suspenso', NOW(), 0, 0, NULL),  -- usu_id=9:  Suspenso → usu_status=1 + verificacao=1, mas per_habilitado=0 → testa C2
+    (10, NULL,             NOW(), 0, 1, NULL);  -- usu_id=10: TempVei  → temporário com veículo, per_habilitado=1
 
 
 -- =====================================================
@@ -176,15 +185,17 @@ INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_es
 --   - Um usuário pode ter mais de um veículo cadastrado
 --
 -- Cenários de teste cobertos:
---   - Carlos: 1 carro ativo + 1 carro inutilizado — testa filtro por vei_status=1
---   - Pedro: 1 moto ativa com apenas 1 vaga — testa tipo moto
---   - Lucas: 1 carro ativo — segundo motorista disponível
+--   - Carlos:   1 carro ativo + 1 carro inutilizado — testa filtro por vei_status=1
+--   - Pedro:    1 moto ativa com apenas 1 vaga — testa tipo moto
+--   - Lucas:    1 carro ativo — segundo motorista disponível
+--   - TempVei:  1 carro ativo (usu_id=10, verificacao=6) — testa oferecer carona com acesso temporário
 -- =====================================================
 INSERT INTO VEICULOS (usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em, vei_atualizado_em, vei_apagado_em) VALUES
-    (1, 'Chevrolet Onix Plus', 1, 'Vermelho', 4, 1, '2023-01-20', NULL,                  NULL),                  -- vei_id=1: Carro do Carlos (ativo)
-    (1, 'Ford Ka',             1, 'Branco',   4, 0, '2021-05-10', '2023-06-01 00:00:00', '2023-06-01 00:00:00'), -- vei_id=2: Carro antigo Carlos (inutilizado)
-    (3, 'Honda CG 160',        0, 'Azul',     1, 1, '2022-08-15', NULL,                  NULL),                  -- vei_id=3: Moto do Pedro (ativa)
-    (5, 'Volkswagen Gol',      1, 'Prata',    3, 1, '2023-09-01', NULL,                  NULL);                  -- vei_id=4: Carro do Lucas (ativo)
+    (1,  'Chevrolet Onix Plus', 1, 'Vermelho', 4, 1, '2023-01-20', NULL,                  NULL),                  -- vei_id=1: Carro do Carlos (ativo)
+    (1,  'Ford Ka',             1, 'Branco',   4, 0, '2021-05-10', '2023-06-01 00:00:00', '2023-06-01 00:00:00'), -- vei_id=2: Carro antigo Carlos (inutilizado)
+    (3,  'Honda CG 160',        0, 'Azul',     1, 1, '2022-08-15', NULL,                  NULL),                  -- vei_id=3: Moto do Pedro (ativa)
+    (5,  'Volkswagen Gol',      1, 'Prata',    3, 1, '2023-09-01', NULL,                  NULL),                  -- vei_id=4: Carro do Lucas (ativo)
+    (10, 'Fiat Mobi',           1, 'Preto',    3, 1, CURDATE(),    NULL,                  NULL);                  -- vei_id=5: Carro do TempVei (ativo, temporário com veículo)
 
 
 -- =====================================================
@@ -396,3 +407,35 @@ INSERT INTO SUGESTAO_DENUNCIA (usu_id, sug_texto, sug_data, sug_status, sug_tipo
     -- Denúncia do Pedro — respondida e fechada pelo Admin
     (3, 'Encontrei um usuário com comprovante de matrícula claramente falsificado.',
         DATE_SUB(NOW(), INTERVAL 5 DAY), 0, 0, 6, 'Denúncia verificada e confirmada. O usuário foi suspenso. Obrigado pelo aviso.');
+
+
+-- =====================================================
+-- 14. DOCUMENTOS_VERIFICACAO  [v6]
+-- =====================================================
+-- Para que serve no Back-end:
+--   - Registro dos comprovantes de matrícula e CNH enviados pelos usuários
+--   - Rastreabilidade do histórico de envios por usuário
+--   - Gatilho da promoção automática de nível (5→1, 6→2, 1→2)
+--
+-- doc_tipo: 0=Comprovante de matrícula, 1=CNH
+-- doc_status: 0=Aprovado automaticamente (validação imediata no upload)
+--
+-- Cenários de teste cobertos:
+--   - Carlos (usu_id=1,  verificacao=2): tem comprovante + CNH → nível 2
+--   - Mariana (usu_id=2, verificacao=1): tem comprovante, sem veículo → nível 1
+--   - Pedro (usu_id=3,   verificacao=2): tem comprovante + CNH (moto) → nível 2
+--   - Ana (usu_id=4,     verificacao=1): tem comprovante, conta inativa → nível 1
+--   - Lucas (usu_id=5,   verificacao=2): tem comprovante + CNH (carro) → nível 2
+--   - Fábio (usu_id=9,   verificacao=1): tem comprovante, sem veículo → nível 1
+--   - TempVei (usu_id=10, verificacao=6): nenhum documento — ainda em período temporário
+-- =====================================================
+INSERT INTO DOCUMENTOS_VERIFICACAO (usu_id, doc_tipo, doc_arquivo, doc_status, doc_enviado_em) VALUES
+    (1, 0, 'comprovante_carlos_1.jpg',  0, DATE_SUB(NOW(), INTERVAL 6 MONTH)),  -- Comprovante Carlos
+    (1, 1, 'cnh_carlos_1.jpg',          0, DATE_SUB(NOW(), INTERVAL 6 MONTH)),  -- CNH Carlos
+    (2, 0, 'comprovante_mariana_2.jpg', 0, DATE_SUB(NOW(), INTERVAL 3 MONTH)),  -- Comprovante Mariana
+    (3, 0, 'comprovante_pedro_3.jpg',   0, DATE_SUB(NOW(), INTERVAL 4 MONTH)),  -- Comprovante Pedro
+    (3, 1, 'cnh_pedro_3.jpg',           0, DATE_SUB(NOW(), INTERVAL 4 MONTH)),  -- CNH Pedro
+    (4, 0, 'comprovante_ana_4.jpg',     0, DATE_SUB(NOW(), INTERVAL 5 MONTH)),  -- Comprovante Ana
+    (5, 0, 'comprovante_lucas_5.jpg',   0, DATE_SUB(NOW(), INTERVAL 2 MONTH)),  -- Comprovante Lucas
+    (5, 1, 'cnh_lucas_5.jpg',           0, DATE_SUB(NOW(), INTERVAL 2 MONTH)),  -- CNH Lucas
+    (9, 0, 'comprovante_fabio_9.jpg',   0, DATE_SUB(NOW(), INTERVAL 1 MONTH));  -- Comprovante Fábio
