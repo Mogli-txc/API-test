@@ -5,7 +5,7 @@
 ```yaml
 openapi: 3.0.3
 info:
-  title: API de Caronas USP
+  title: API de Caronas 
   description: |
     API REST para o sistema de compartilhamento de caronas universitárias.
 
