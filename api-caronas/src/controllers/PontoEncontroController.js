@@ -37,6 +37,21 @@ class PontoEncontroController {
                 });
             }
 
+            // pon_tipo: apenas 0 (Partida) ou 1 (Destino) são valores válidos
+            const tipoNum = parseInt(pon_tipo, 10);
+            if (tipoNum !== 0 && tipoNum !== 1) {
+                return res.status(400).json({ error: "pon_tipo inválido. Use 0 (Partida) ou 1 (Destino)." });
+            }
+
+            // pon_ordem: quando fornecido, deve ser inteiro positivo
+            let ordemNum = null;
+            if (pon_ordem !== undefined && pon_ordem !== null && pon_ordem !== '') {
+                ordemNum = parseInt(pon_ordem, 10);
+                if (isNaN(ordemNum) || ordemNum < 1) {
+                    return res.status(400).json({ error: "pon_ordem deve ser um inteiro positivo." });
+                }
+            }
+
             // Sanitiza campos de texto livre para prevenir XSS armazenado
             const nome_limpo     = stripHtml(pon_nome.trim());
             const endereco_limpo = stripHtml(pon_endereco.trim());
@@ -47,7 +62,7 @@ class PontoEncontroController {
                 `INSERT INTO PONTO_ENCONTROS
                     (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status)
                  VALUES (?, ?, ?, ?, ?, ?, 1)`,
-                [car_id, endereco_limpo, pon_endereco_geom, pon_tipo, nome_limpo, pon_ordem || null]
+                [car_id, endereco_limpo, pon_endereco_geom, tipoNum, nome_limpo, ordemNum]
             );
 
             // PASSO 4: Resposta de sucesso com ID gerado pelo banco

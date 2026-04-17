@@ -129,9 +129,10 @@ const uploadImage = (pastaDestino) => {
 };
 
 /**
- * Middleware pós-upload que valida magic bytes de imagem OU PDF.
+ * Middleware pós-upload que valida magic bytes de PDF.
  * Deve ser encadeado após uploadDocument().single() nas rotas de documentos.
- * Deleta o arquivo e retorna 400 caso o conteúdo não corresponda ao mimetype declarado.
+ * Deleta o arquivo e retorna 400 caso o conteúdo não seja um PDF real
+ * (%PDF = 0x25 0x50 0x44 0x46), independente da extensão declarada.
  */
 const validarDocumento = async (req, res, next) => {
     if (!req.file) return next(); // sem arquivo: deixa o controller tratar
@@ -144,10 +145,14 @@ const validarDocumento = async (req, res, next) => {
         await fh.close();
         fh = null;
 
-        if (!magicBytesValidos(buffer, req.file.mimetype)) {
+        // Verifica assinatura %PDF (magic bytes do formato PDF)
+        const ehPdf = buffer[0] === 0x25 && buffer[1] === 0x50 &&
+                      buffer[2] === 0x44 && buffer[3] === 0x46;
+
+        if (!ehPdf) {
             await fsp.unlink(req.file.path);
             return res.status(400).json({
-                error: 'Arquivo inválido. O conteúdo não corresponde ao formato declarado.'
+                error: 'Arquivo inválido. Apenas arquivos PDF são aceitos para documentos de verificação.'
             });
         }
 
@@ -159,7 +164,9 @@ const validarDocumento = async (req, res, next) => {
 };
 
 /**
- * Configura o Multer para receber documentos (JPEG, JPG, PNG, GIF ou PDF).
+ * Configura o Multer para receber documentos de verificação exclusivamente em PDF.
+ * Aceita apenas application/pdf — imagens não são permitidas nesta rota.
+ * Limite: 10 MB (PDFs com imagens embutidas podem ser maiores que 5 MB).
  * Usado nos endpoints de comprovante de matrícula e CNH.
  */
 const uploadDocument = (pastaDestino) => {
@@ -177,29 +184,24 @@ const uploadDocument = (pastaDestino) => {
         destination: (_req, _file, cb) => {
             cb(null, caminhoCompleto);
         },
-        filename: (_req, file, cb) => {
-            const sufixo   = Date.now() + '-' + Math.round(Math.random() * 1e9);
-            // Para PDF: mimetype = "application/pdf" → extensão "pdf"
-            // Para imagens: mimetype = "image/jpeg" → extensão "jpeg"
-            const extensao = file.mimetype === 'application/pdf'
-                ? 'pdf'
-                : file.mimetype.split('/')[1];
-            cb(null, `${sufixo}.${extensao}`);
+        filename: (_req, _file, cb) => {
+            // Sempre .pdf — único formato aceito nesta configuração
+            const sufixo = Date.now() + '-' + Math.round(Math.random() * 1e9);
+            cb(null, `${sufixo}.pdf`);
         }
     });
 
     const fileFilter = (_req, file, cb) => {
-        const tiposAceitos = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'application/pdf'];
-        if (tiposAceitos.includes(file.mimetype)) {
+        if (file.mimetype === 'application/pdf') {
             cb(null, true);
         } else {
-            cb(new Error('Formato não suportado. Use JPEG, JPG, PNG, GIF ou PDF.'), false);
+            cb(new Error('Formato não suportado. Apenas PDF é aceito para documentos de verificação.'), false);
         }
     };
 
     return multer({
         storage,
-        limits: { fileSize: 1024 * 1024 * 5 }, // 5 MB
+        limits: { fileSize: 1024 * 1024 * 10 }, // 10 MB
         fileFilter
     });
 };

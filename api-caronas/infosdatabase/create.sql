@@ -12,6 +12,8 @@
 --   v4   — migration-refresh-token.sql: usu_refresh_hash, usu_refresh_expira, índice
 --   v5   — migration-avaliacoes.sql: tabela AVALIACOES + FKs
 --   v6   — migration-documentos.sql: tabela DOCUMENTOS_VERIFICACAO (comprovante + CNH)
+--   v7   — migration-ocr.sql: doc_ocr_confianca em DOCUMENTOS_VERIFICACAO (Tesseract.js)
+--   v8   — migration-penalidades.sql: tabela PENALIDADES (bloqueio temporário/permanente pelo admin)
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -55,7 +57,7 @@ CREATE TABLE USUARIOS (
     usu_telefone          VARCHAR(11)                         COMMENT 'Telefone sem máscara (ex: 11999990000) (NULL no cadastro temporário)',
     usu_matricula         VARCHAR(100)                        COMMENT 'Foto/Comprovante da Matrícula (NULL no cadastro temporário)',
     usu_senha             VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash bcrypt custo 12)',
-    usu_verificacao       TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Aguardando OTP, 1=Matrícula verificada, 2=Matrícula+veículo, 5=Temporário sem veículo (+5 dias), 6=Temporário com veículo (+5 dias)',
+    usu_verificacao       TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Aguardando OTP, 1=Matrícula verificada, 2=Matrícula+veículo, 5=Temporário sem veículo (+5 dias), 6=Temporário com veículo (+5 dias), 9=Suspenso (pelo administrador da escola)',
     usu_verificacao_expira DATETIME                           COMMENT 'Expiração da verificação — semestral (nível 1/2) ou +5 dias (nível 5/6)',
 
     -- Verificação de email via OTP  [v2]
@@ -278,25 +280,29 @@ CREATE TABLE AVALIACOES (
 
 
 -- =====================================================
--- 15. Tabela DOCUMENTOS_VERIFICACAO  [v6 — migration-documentos.sql]
+-- 15. Tabela DOCUMENTOS_VERIFICACAO  [v6 + v7]
 -- Armazena comprovantes de matrícula e CNH enviados pelos usuários.
--- A validação é automática: o envio do arquivo promove usu_verificacao.
---   doc_tipo 0 = Comprovante de matrícula (5→1 ou 6→2)
---   doc_tipo 1 = CNH (1→2 se tiver veículo ativo)
---   doc_status 0 = Aprovado automaticamente
+-- Validação via OCR (Tesseract.js): texto extraído do PDF é analisado
+-- por palavras-chave antes de promover o usu_verificacao.
+--   doc_tipo   0 = Comprovante de matrícula (5→1 ou 6→2)
+--   doc_tipo   1 = CNH (1→2 se tiver veículo ativo)
+--   doc_status 0 = aprovado pelo OCR
+--   doc_status 1 = pendente (reservado)
+--   doc_status 2 = reprovado pelo OCR (critérios não atingidos)
 -- =====================================================
 DROP TABLE IF EXISTS DOCUMENTOS_VERIFICACAO;
 CREATE TABLE DOCUMENTOS_VERIFICACAO (
-    doc_id         INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do documento (PK)',
-    usu_id         INT          NOT NULL               COMMENT 'Usuário que enviou o documento (FK)',
-    doc_tipo       TINYINT      NOT NULL               COMMENT '0=Comprovante de matrícula, 1=CNH',
-    doc_arquivo    VARCHAR(255) NOT NULL               COMMENT 'Nome do arquivo salvo em /public/documentos/',
-    doc_status     TINYINT      NOT NULL DEFAULT 0     COMMENT '0=Aprovado automaticamente',
-    doc_enviado_em DATETIME     NOT NULL               COMMENT 'Data e hora do envio',
+    doc_id            INT              NOT NULL AUTO_INCREMENT COMMENT 'Identificador do documento (PK)',
+    usu_id            INT              NOT NULL               COMMENT 'Usuário que enviou o documento (FK)',
+    doc_tipo          TINYINT          NOT NULL               COMMENT '0=Comprovante de matrícula, 1=CNH',
+    doc_arquivo       VARCHAR(255)     NOT NULL               COMMENT 'Nome do arquivo PDF salvo em /public/documentos/',
+    doc_ocr_confianca TINYINT UNSIGNED NULL                   COMMENT 'Confiança média do OCR Tesseract (0-100). NULL = pré-OCR.',
+    doc_status        TINYINT          NOT NULL DEFAULT 0     COMMENT '0=aprovado_ocr, 1=pendente, 2=reprovado_ocr',
+    doc_enviado_em    DATETIME         NOT NULL               COMMENT 'Data e hora do envio',
     PRIMARY KEY (doc_id),
-    INDEX idx_doc_usu_tipo (usu_id, doc_tipo)          -- lookup por usuário e tipo de documento
+    INDEX idx_doc_usu_tipo (usu_id, doc_tipo)                 -- lookup por usuário e tipo de documento
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
-  COMMENT = 'Documentos de verificação enviados pelos usuários (comprovante e CNH)';
+  COMMENT = 'Documentos de verificação enviados pelos usuários (comprovante e CNH) com validação OCR';
 
 
 -- =====================================================
@@ -322,6 +328,35 @@ CREATE TABLE AUDIT_LOG (
     INDEX idx_audit_criado_em       (criado_em)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = 'Audit log — rastreabilidade de ações sensíveis no sistema';
+
+
+-- =====================================================
+-- 17. Tabela PENALIDADES  [v8 — migration-penalidades.sql]
+-- Registra penalidades aplicadas por administradores sobre usuários.
+-- Tipos:
+--   pen_tipo 1 = Não pode oferecer caronas (temporário)
+--   pen_tipo 2 = Não pode solicitar caronas (temporário)
+--   pen_tipo 3 = Não pode oferecer nem solicitar caronas (temporário)
+--   pen_tipo 4 = Conta suspensa — todos os recursos bloqueados, login negado (permanente)
+-- Durações para tipos 1-3: 7 dias, 14 dias, 1 mês, 3 meses ou 6 meses.
+-- pen_expira_em = NULL para tipo 4 (permanente até remoção manual pelo admin).
+-- Tipo 4 também seta usu_verificacao = 9 na tabela USUARIOS.
+-- =====================================================
+DROP TABLE IF EXISTS PENALIDADES;
+CREATE TABLE PENALIDADES (
+    pen_id           INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da penalidade (PK)',
+    usu_id           INT          NOT NULL               COMMENT 'Usuário penalizado (FK)',
+    pen_tipo         TINYINT      NOT NULL               COMMENT '1=Não pode oferecer caronas, 2=Não pode solicitar caronas, 3=Não pode oferecer nem solicitar, 4=Conta suspensa (login bloqueado)',
+    pen_motivo       VARCHAR(255) NULL                   COMMENT 'Motivo da penalidade (opcional)',
+    pen_aplicado_em  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora da aplicação',
+    pen_expira_em    DATETIME     NULL                   COMMENT 'Expiração da penalidade — NULL = permanente (tipo 4)',
+    pen_aplicado_por INT          NOT NULL               COMMENT 'Administrador que aplicou (FK para USUARIOS)',
+    pen_ativo        TINYINT      NOT NULL DEFAULT 1     COMMENT '1=Ativa, 0=Removida manualmente pelo admin',
+    PRIMARY KEY (pen_id),
+    INDEX idx_pen_usu_ativo    (usu_id, pen_ativo),
+    INDEX idx_pen_aplicado_por (pen_aplicado_por)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = 'Penalidades aplicadas por administradores — bloqueio temporário ou permanente de funcionalidades';
 
 
 -- =====================================================
@@ -441,5 +476,14 @@ ALTER TABLE DOCUMENTOS_VERIFICACAO
     ADD CONSTRAINT FK_doc_usuario
         FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
         ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- PENALIDADES → USUARIOS (penalizado e admin aplicador)  [v8]
+ALTER TABLE PENALIDADES
+    ADD CONSTRAINT FK_pen_usuario
+        FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    ADD CONSTRAINT FK_pen_aplicado_por
+        FOREIGN KEY (pen_aplicado_por) REFERENCES USUARIOS (usu_id)
+        ON DELETE RESTRICT ON UPDATE CASCADE;
 
 SET FOREIGN_KEY_CHECKS = 1;

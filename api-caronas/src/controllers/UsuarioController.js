@@ -369,6 +369,11 @@ class UsuarioController {
                 });
             }
 
+            // Bloqueia login de usuário suspenso pelo administrador
+            if (usuario.usu_verificacao === 9) {
+                return res.status(403).json({ error: "Conta suspensa. Entre em contato com o administrador da sua escola." });
+            }
+
             // Bloqueia login se o perfil estiver desabilitado pelo administrador
             // Cobre usuários comuns (per_tipo=0) que não passam pelo checkRole
             const [perfil] = await db.query(

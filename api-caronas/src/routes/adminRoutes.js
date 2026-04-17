@@ -41,4 +41,27 @@ router.get('/stats/sugestoes', ...adminGuard, AdminController.statsSugestoes);
  */
 router.get('/stats/sistema', ...adminGuard, AdminController.statsSistema);
 
+/**
+ * GET /api/admin/usuarios/:usu_id/penalidades
+ * Lista histórico de penalidades de um usuário. ?ativas=1 filtra apenas vigentes.
+ * Administrador: apenas usuários da sua escola. Desenvolvedor: qualquer usuário.
+ */
+router.get('/usuarios/:usu_id/penalidades', ...adminGuard, AdminController.listarPenalidades);
+
+/**
+ * POST /api/admin/usuarios/:usu_id/penalidades
+ * Aplica penalidade ao usuário. Body: { pen_tipo, pen_duracao, pen_motivo }.
+ * pen_tipo: 1=não oferece, 2=não solicita, 3=ambos, 4=conta suspensa.
+ * pen_duracao obrigatório para tipos 1-3: 1semana, 2semanas, 1mes, 3meses, 6meses.
+ * Tipo 4 bloqueia login imediatamente (usu_verificacao = 9).
+ */
+router.post('/usuarios/:usu_id/penalidades', ...adminGuard, AdminController.aplicarPenalidade);
+
+/**
+ * DELETE /api/admin/penalidades/:pen_id
+ * Remove/desativa uma penalidade. Tipo 4 restaura usu_verificacao = 1.
+ * Administrador: apenas penalidades de usuários da sua escola.
+ */
+router.delete('/penalidades/:pen_id', ...adminGuard, AdminController.removerPenalidade);
+
 module.exports = router;

@@ -10,6 +10,7 @@
 
 const db = require('../config/database'); // Pool de conexão MySQL
 const { getMotoristaId } = require('../utils/authHelper');
+const { checkPenalidade } = require('../utils/penaltyHelper');
 
 class SolicitacaoController {
 
@@ -70,6 +71,17 @@ class SolicitacaoController {
                     ? "Período de acesso temporário encerrado. Complete seu cadastro para continuar pedindo caronas."
                     : "Verificação de matrícula expirada. Envie um novo comprovante para continuar usando o aplicativo.";
                 return res.status(403).json({ error: mensagem });
+            }
+
+            // Penalidade tipo 2 (não pode solicitar caronas) ou tipo 3 (ambos bloqueados)
+            const penalidade = await checkPenalidade(usu_id, 2);
+            if (penalidade) {
+                const expira = penalidade.pen_expira_em
+                    ? ` até ${new Date(penalidade.pen_expira_em).toLocaleDateString('pt-BR')}`
+                    : '';
+                return res.status(403).json({
+                    error: `Você está impedido de solicitar caronas${expira}. Entre em contato com o administrador da sua escola.`
+                });
             }
 
             // REGRA DE NEGÓCIO: Motorista não pode solicitar a própria carona

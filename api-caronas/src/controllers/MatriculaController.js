@@ -37,6 +37,11 @@ class MatriculaController {
                 });
             }
 
+            // cur_usu_dataFinal: deve estar no formato YYYY-MM-DD e ser uma data futura válida
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(cur_usu_dataFinal) || isNaN(new Date(cur_usu_dataFinal).getTime())) {
+                return res.status(400).json({ error: "cur_usu_dataFinal deve estar no formato YYYY-MM-DD." });
+            }
+
             // PASSO 3: Insere a matrícula no banco
             // O banco rejeita duplicata via UNIQUE KEY UQ_CursoUsuario
             const [resultado] = await db.query(

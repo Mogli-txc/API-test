@@ -1,18 +1,19 @@
 /**
  * CONTROLLER DE DOCUMENTOS DE VERIFICAÇÃO
  *
- * Gerencia o envio de comprovante de matrícula e CNH para validação automática.
- * Após o upload e validação de formato, o usuário é promovido automaticamente
- * sem necessidade de revisão manual por administrador.
+ * Gerencia o envio de comprovante de matrícula e CNH com validação via OCR.
+ * O middleware ocrValidator (encadeado nas rotas) extrai o texto do PDF e
+ * avalia critérios de palavras-chave antes de chegar aqui.
+ * O controller lê req.ocrResultado e decide se promove ou rejeita o usuário.
  *
- * Fluxo de promoção:
+ * Fluxo de promoção (quando OCR aprovado):
  *   5  (temp sem veículo) → envia comprovante → 1  (matrícula verificada, +6 meses)
  *   6  (temp com veículo) → envia comprovante → 2  (matrícula + veículo, +6 meses)
  *   1  (verificado)       → envia CNH + tem veículo ativo → 2  (+6 meses renovados)
  *
  * Tabela: DOCUMENTOS_VERIFICACAO
  *   doc_id, usu_id, doc_tipo (0=comprovante, 1=cnh),
- *   doc_arquivo, doc_status (0=aprovado_auto), doc_enviado_em
+ *   doc_arquivo, doc_ocr_confianca, doc_status (0=aprovado, 2=reprovado), doc_enviado_em
  */
 
 const db  = require('../config/database');
@@ -22,14 +23,17 @@ class DocumentoController {
 
     /**
      * MÉTODO: enviarComprovante
-     * Recebe o upload do comprovante de matrícula e promove o nível de verificação.
+     * Recebe upload de comprovante de matrícula (PDF) e, se o OCR aprovar,
+     * promove o nível de verificação do usuário.
      *
-     * Promoção automática:
+     * Promoção automática (OCR aprovado):
      *   usu_verificacao = 5 → 1  (matrícula verificada, sem veículo, +6 meses)
      *   usu_verificacao = 6 → 2  (matrícula + veículo verificados, +6 meses)
      *
-     * Tabela: DOCUMENTOS_VERIFICACAO (INSERT) + USUARIOS (UPDATE)
-     * Campo multipart: comprovante
+     * Rejeição (OCR reprovado):
+     *   Documento salvo com doc_status=2 para auditoria. Usuário não é promovido.
+     *
+     * Campo multipart: comprovante (application/pdf, máx. 10 MB)
      */
     async enviarComprovante(req, res) {
         try {
@@ -52,7 +56,7 @@ class DocumentoController {
 
             const verificacao = usuarios[0].usu_verificacao;
 
-            // PASSO 3: Apenas usuários temporários enviam comprovante pela primeira vez
+            // PASSO 3: Apenas usuários temporários (5 ou 6) enviam comprovante
             if (verificacao !== 5 && verificacao !== 6) {
                 await fsp.unlink(req.file.path).catch(() => {});
                 if (verificacao === 1 || verificacao === 2) {
@@ -63,19 +67,49 @@ class DocumentoController {
                 });
             }
 
-            // PASSO 4: Determina novo nível — 5→1 (só matrícula) ou 6→2 (matrícula + veículo)
+            // PASSO 4: Avalia o resultado do OCR injetado pelo middleware ocrValidator
+            const ocr = req.ocrResultado;
+
+            if (!ocr || !ocr.aprovado) {
+                // OCR reprovado — salva o documento com status 2 para auditoria e retorna 422
+                const conn = await db.getConnection();
+                try {
+                    await conn.beginTransaction();
+                    await conn.query(
+                        `INSERT INTO DOCUMENTOS_VERIFICACAO
+                         (usu_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em)
+                         VALUES (?, 0, ?, ?, 2, NOW())`,
+                        [usu_id, req.file.filename, ocr ? ocr.confianca : null]
+                    );
+                    await conn.commit();
+                } catch (e) {
+                    await conn.rollback();
+                } finally {
+                    conn.release();
+                }
+
+                return res.status(422).json({
+                    error:    "Documento não reconhecido como comprovante de matrícula válido.",
+                    detalhes: ocr
+                        ? `Critérios identificados: ${ocr.criteriosAtingidos}/${ocr.criteriosTotal}. Confiança OCR: ${ocr.confianca}%.`
+                        : "Falha na leitura do documento. Tente enviar uma versão com melhor qualidade."
+                });
+            }
+
+            // PASSO 5: OCR aprovado — determina novo nível (5→1 ou 6→2)
             const novoNivel  = verificacao === 6 ? 2 : 1;
             const novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000); // +6 meses
 
-            // PASSO 5: Registra o documento e promove o usuário em transação
+            // PASSO 6: Registra o documento aprovado e promove o usuário em transação atômica
             const conn = await db.getConnection();
             try {
                 await conn.beginTransaction();
 
                 await conn.query(
-                    `INSERT INTO DOCUMENTOS_VERIFICACAO (usu_id, doc_tipo, doc_arquivo, doc_status, doc_enviado_em)
-                     VALUES (?, 0, ?, 0, NOW())`,
-                    [usu_id, req.file.filename]
+                    `INSERT INTO DOCUMENTOS_VERIFICACAO
+                     (usu_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em)
+                     VALUES (?, 0, ?, ?, 0, NOW())`,
+                    [usu_id, req.file.filename, ocr.confianca]
                 );
 
                 await conn.query(
@@ -92,11 +126,17 @@ class DocumentoController {
                 conn.release();
             }
 
-            // PASSO 6: Resposta de sucesso
+            // PASSO 7: Resposta de sucesso
             return res.status(200).json({
                 message:     "Comprovante recebido e matrícula verificada com sucesso!",
                 verificacao: novoNivel,
-                expira:      novaExpira
+                expira:      novaExpira,
+                ocr: {
+                    confianca:         ocr.confianca,
+                    criteriosAtingidos: ocr.criteriosAtingidos,
+                    criteriosTotal:    ocr.criteriosTotal,
+                    origem:            ocr.origem
+                }
             });
 
         } catch (error) {
@@ -107,15 +147,17 @@ class DocumentoController {
 
     /**
      * MÉTODO: enviarCNH
-     * Recebe o upload da CNH (Carteira Nacional de Habilitação) e promove
-     * o usuário de 1 para 2 caso já tenha um veículo ativo cadastrado.
+     * Recebe upload da CNH (PDF) e, se o OCR aprovar e o usuário tiver veículo
+     * ativo, promove de nível 1 para 2.
      *
-     * Promoção automática:
+     * Promoção automática (OCR aprovado):
      *   usu_verificacao = 1 + veículo ativo → 2  (+6 meses renovados)
-     *   usu_verificacao = 1 sem veículo     → mantém 1 (CNH salva para quando cadastrar)
+     *   usu_verificacao = 1 sem veículo     → mantém 1 (CNH salva para quando cadastrar veículo)
      *
-     * Tabela: DOCUMENTOS_VERIFICACAO (INSERT) + USUARIOS (UPDATE condicional)
-     * Campo multipart: cnh
+     * Rejeição (OCR reprovado):
+     *   Documento salvo com doc_status=2 para auditoria. Usuário não é promovido.
+     *
+     * Campo multipart: cnh (application/pdf, máx. 10 MB)
      */
     async enviarCNH(req, res) {
         try {
@@ -138,7 +180,7 @@ class DocumentoController {
 
             const verificacao = usuarios[0].usu_verificacao;
 
-            // PASSO 3: Apenas usuários com matrícula verificada (nível 1) enviam CNH por esta rota
+            // PASSO 3: Apenas usuários com matrícula verificada (nível 1) enviam CNH
             if (verificacao !== 1) {
                 await fsp.unlink(req.file.path).catch(() => {});
                 if (verificacao === 2) {
@@ -149,7 +191,36 @@ class DocumentoController {
                 });
             }
 
-            // PASSO 4: Verifica se o usuário tem veículo ativo cadastrado
+            // PASSO 4: Avalia o resultado do OCR injetado pelo middleware ocrValidator
+            const ocr = req.ocrResultado;
+
+            if (!ocr || !ocr.aprovado) {
+                // OCR reprovado — salva com status 2 para auditoria e retorna 422
+                const conn = await db.getConnection();
+                try {
+                    await conn.beginTransaction();
+                    await conn.query(
+                        `INSERT INTO DOCUMENTOS_VERIFICACAO
+                         (usu_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em)
+                         VALUES (?, 1, ?, ?, 2, NOW())`,
+                        [usu_id, req.file.filename, ocr ? ocr.confianca : null]
+                    );
+                    await conn.commit();
+                } catch (e) {
+                    await conn.rollback();
+                } finally {
+                    conn.release();
+                }
+
+                return res.status(422).json({
+                    error:    "Documento não reconhecido como CNH válida.",
+                    detalhes: ocr
+                        ? `Critérios identificados: ${ocr.criteriosAtingidos}/${ocr.criteriosTotal}. Confiança OCR: ${ocr.confianca}%.`
+                        : "Falha na leitura do documento. Tente enviar uma versão com melhor qualidade."
+                });
+            }
+
+            // PASSO 5: OCR aprovado — verifica se o usuário tem veículo ativo
             const [veiculos] = await db.query(
                 `SELECT vei_id FROM VEICULOS
                  WHERE usu_id = ? AND vei_status = 1 AND vei_apagado_em IS NULL
@@ -158,16 +229,17 @@ class DocumentoController {
             );
             const temVeiculo = veiculos.length > 0;
 
-            // PASSO 5: Registra o documento e promove se tiver veículo
+            // PASSO 6: Registra a CNH aprovada e promove se tiver veículo
             const conn = await db.getConnection();
             let novaExpira = null;
             try {
                 await conn.beginTransaction();
 
                 await conn.query(
-                    `INSERT INTO DOCUMENTOS_VERIFICACAO (usu_id, doc_tipo, doc_arquivo, doc_status, doc_enviado_em)
-                     VALUES (?, 1, ?, 0, NOW())`,
-                    [usu_id, req.file.filename]
+                    `INSERT INTO DOCUMENTOS_VERIFICACAO
+                     (usu_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em)
+                     VALUES (?, 1, ?, ?, 0, NOW())`,
+                    [usu_id, req.file.filename, ocr.confianca]
                 );
 
                 if (temVeiculo) {
@@ -187,7 +259,7 @@ class DocumentoController {
                 conn.release();
             }
 
-            // PASSO 6: Resposta de sucesso — mensagem varia conforme resultado da promoção
+            // PASSO 7: Resposta de sucesso — mensagem varia conforme o resultado da promoção
             const message = temVeiculo
                 ? "CNH recebida. Verificação completa — você já pode oferecer caronas!"
                 : "CNH recebida e armazenada. Cadastre um veículo para completar sua verificação.";
@@ -195,7 +267,13 @@ class DocumentoController {
             return res.status(200).json({
                 message,
                 verificacao: temVeiculo ? 2 : 1,
-                ...(temVeiculo && { expira: novaExpira })
+                ...(temVeiculo && { expira: novaExpira }),
+                ocr: {
+                    confianca:         ocr.confianca,
+                    criteriosAtingidos: ocr.criteriosAtingidos,
+                    criteriosTotal:    ocr.criteriosTotal,
+                    origem:            ocr.origem
+                }
             });
 
         } catch (error) {

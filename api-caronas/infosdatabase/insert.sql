@@ -6,7 +6,10 @@
 -- LEGENDA DE STATUS (referência rápida):
 -- USUARIOS:         usu_verificacao      (0=Não verificado (aguarda OTP), 1=Matrícula verificada,
 --                                         2=Matrícula + veículo, 5=Temporário sem veículo 5 dias,
---                                         6=Temporário com veículo 5 dias)
+--                                         6=Temporário com veículo 5 dias, 9=Suspenso pelo admin)
+-- PENALIDADES:      pen_tipo        (1=Não pode oferecer caronas, 2=Não pode solicitar caronas,
+--                                    3=Não pode oferecer nem solicitar, 4=Conta suspensa/login bloqueado)
+--                   pen_ativo       (1=Ativa, 0=Removida manualmente)
 --                   usu_status           (0=Inativo, 1=Ativo)
 --                   usu_otp_tentativas   (INT DEFAULT 0 — contador de falhas de OTP; reset no reenvio)
 --                   usu_otp_bloqueado_ate(DATETIME NULL — bloqueio automático após 3 falhas por 30 min)
@@ -410,15 +413,16 @@ INSERT INTO SUGESTAO_DENUNCIA (usu_id, sug_texto, sug_data, sug_status, sug_tipo
 
 
 -- =====================================================
--- 14. DOCUMENTOS_VERIFICACAO  [v6]
+-- 14. DOCUMENTOS_VERIFICACAO  [v6 + v7]
 -- =====================================================
 -- Para que serve no Back-end:
 --   - Registro dos comprovantes de matrícula e CNH enviados pelos usuários
 --   - Rastreabilidade do histórico de envios por usuário
---   - Gatilho da promoção automática de nível (5→1, 6→2, 1→2)
+--   - Gatilho da promoção automática de nível via OCR (5→1, 6→2, 1→2)
 --
--- doc_tipo: 0=Comprovante de matrícula, 1=CNH
--- doc_status: 0=Aprovado automaticamente (validação imediata no upload)
+-- doc_tipo:          0=Comprovante de matrícula, 1=CNH
+-- doc_ocr_confianca: score de confiança do Tesseract (0-100). NULL = pré-OCR (seed)
+-- doc_status:        0=aprovado_ocr, 1=pendente, 2=reprovado_ocr
 --
 -- Cenários de teste cobertos:
 --   - Carlos (usu_id=1,  verificacao=2): tem comprovante + CNH → nível 2
@@ -428,14 +432,42 @@ INSERT INTO SUGESTAO_DENUNCIA (usu_id, sug_texto, sug_data, sug_status, sug_tipo
 --   - Lucas (usu_id=5,   verificacao=2): tem comprovante + CNH (carro) → nível 2
 --   - Fábio (usu_id=9,   verificacao=1): tem comprovante, sem veículo → nível 1
 --   - TempVei (usu_id=10, verificacao=6): nenhum documento — ainda em período temporário
+--
+-- doc_ocr_confianca = NULL nos registros seed: documentos inseridos antes do OCR (v7).
+-- Registros criados pela API terão o score preenchido pelo Tesseract.js.
 -- =====================================================
-INSERT INTO DOCUMENTOS_VERIFICACAO (usu_id, doc_tipo, doc_arquivo, doc_status, doc_enviado_em) VALUES
-    (1, 0, 'comprovante_carlos_1.jpg',  0, DATE_SUB(NOW(), INTERVAL 6 MONTH)),  -- Comprovante Carlos
-    (1, 1, 'cnh_carlos_1.jpg',          0, DATE_SUB(NOW(), INTERVAL 6 MONTH)),  -- CNH Carlos
-    (2, 0, 'comprovante_mariana_2.jpg', 0, DATE_SUB(NOW(), INTERVAL 3 MONTH)),  -- Comprovante Mariana
-    (3, 0, 'comprovante_pedro_3.jpg',   0, DATE_SUB(NOW(), INTERVAL 4 MONTH)),  -- Comprovante Pedro
-    (3, 1, 'cnh_pedro_3.jpg',           0, DATE_SUB(NOW(), INTERVAL 4 MONTH)),  -- CNH Pedro
-    (4, 0, 'comprovante_ana_4.jpg',     0, DATE_SUB(NOW(), INTERVAL 5 MONTH)),  -- Comprovante Ana
-    (5, 0, 'comprovante_lucas_5.jpg',   0, DATE_SUB(NOW(), INTERVAL 2 MONTH)),  -- Comprovante Lucas
-    (5, 1, 'cnh_lucas_5.jpg',           0, DATE_SUB(NOW(), INTERVAL 2 MONTH)),  -- CNH Lucas
-    (9, 0, 'comprovante_fabio_9.jpg',   0, DATE_SUB(NOW(), INTERVAL 1 MONTH));  -- Comprovante Fábio
+INSERT INTO DOCUMENTOS_VERIFICACAO (usu_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em) VALUES
+    (1, 0, 'comprovante_carlos_1.pdf',  NULL, 0, DATE_SUB(NOW(), INTERVAL 6 MONTH)),  -- Comprovante Carlos
+    (1, 1, 'cnh_carlos_1.pdf',          NULL, 0, DATE_SUB(NOW(), INTERVAL 6 MONTH)),  -- CNH Carlos
+    (2, 0, 'comprovante_mariana_2.pdf', NULL, 0, DATE_SUB(NOW(), INTERVAL 3 MONTH)),  -- Comprovante Mariana
+    (3, 0, 'comprovante_pedro_3.pdf',   NULL, 0, DATE_SUB(NOW(), INTERVAL 4 MONTH)),  -- Comprovante Pedro
+    (3, 1, 'cnh_pedro_3.pdf',           NULL, 0, DATE_SUB(NOW(), INTERVAL 4 MONTH)),  -- CNH Pedro
+    (4, 0, 'comprovante_ana_4.pdf',     NULL, 0, DATE_SUB(NOW(), INTERVAL 5 MONTH)),  -- Comprovante Ana
+    (5, 0, 'comprovante_lucas_5.pdf',   NULL, 0, DATE_SUB(NOW(), INTERVAL 2 MONTH)),  -- Comprovante Lucas
+    (5, 1, 'cnh_lucas_5.pdf',           NULL, 0, DATE_SUB(NOW(), INTERVAL 2 MONTH)),  -- CNH Lucas
+    (9, 0, 'comprovante_fabio_9.pdf',   NULL, 0, DATE_SUB(NOW(), INTERVAL 1 MONTH));  -- Comprovante Fábio
+
+
+-- =====================================================
+-- 15. PENALIDADES  [v8]
+-- =====================================================
+-- Para que serve no Back-end:
+--   - Controle granular de punições por parte do administrador
+--   - Histórico de penalidades aplicadas e removidas
+--   - Bloqueio automático de oferta/solicitação de caronas
+--   - Penalidade tipo 4 bloqueia login (usu_verificacao = 9 em USUARIOS)
+--
+-- pen_tipo: 1=Não oferece, 2=Não solicita, 3=Ambos, 4=Conta suspensa
+-- pen_ativo: 1=Ativa, 0=Removida pelo admin
+--
+-- Cenários de teste cobertos:
+--   - Fábio (usu_id=9): penalidade tipo 1 já expirada (pen_ativo=1, pen_expira_em=ontem)
+--       → testa que penalidade expirada não bloqueia o usuário
+--   - Lucas (usu_id=5): penalidade tipo 2 ativa por 1 mês
+--       → testa bloqueio de solicitação de carona
+-- =====================================================
+INSERT INTO PENALIDADES (usu_id, pen_tipo, pen_motivo, pen_expira_em, pen_aplicado_por, pen_ativo) VALUES
+    (9, 1, 'Cancelamento de última hora recorrente.',
+        DATE_SUB(NOW(), INTERVAL 1 DAY),  6, 1),  -- Fábio: pen_tipo=1 expirada ontem (não bloqueia mais)
+    (5, 2, 'Comportamento inadequado com motorista.',
+        DATE_ADD(NOW(), INTERVAL 29 DAY), 6, 1);  -- Lucas: pen_tipo=2 ativa, expira em ~29 dias

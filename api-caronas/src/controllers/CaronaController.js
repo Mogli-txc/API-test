@@ -21,6 +21,7 @@
 
 const db = require('../config/database'); // Pool de conexão MySQL
 const { stripHtml } = require('../utils/sanitize');
+const { checkPenalidade } = require('../utils/penaltyHelper');
 
 // Regex para validar formato HH:MM ou HH:MM:SS
 const HORA_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
@@ -224,6 +225,17 @@ class CaronaController {
             if (!verificacao || ![2, 6].includes(verificacao)) {
                 return res.status(403).json({
                     error: "É necessário ter veículo cadastrado para oferecer caronas."
+                });
+            }
+
+            // Penalidade tipo 1 (não pode oferecer caronas) ou tipo 3 (ambos bloqueados)
+            const penalidade = await checkPenalidade(usu_id, 1);
+            if (penalidade) {
+                const expira = penalidade.pen_expira_em
+                    ? ` até ${new Date(penalidade.pen_expira_em).toLocaleDateString('pt-BR')}`
+                    : '';
+                return res.status(403).json({
+                    error: `Você está impedido de oferecer caronas${expira}. Entre em contato com o administrador da sua escola.`
                 });
             }
 

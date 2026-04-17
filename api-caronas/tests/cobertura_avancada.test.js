@@ -631,3 +631,188 @@ describe('Grupo 6 — Validação de Magic Bytes no Upload', () => {
     });
 
 });
+
+
+// =========================================================
+// GRUPO 7: RACE CONDITION — VERIFICAÇÃO SIMULTÂNEA DE OTP
+// =========================================================
+//
+// Cenário: dois clientes enviam o mesmo código OTP ao mesmo tempo
+// (ex.: duplo clique no botão "Verificar", ou retry automático do app).
+//
+// Comportamento esperado:
+//   - Nenhuma requisição retorna 500 (sem crash, sem deadlock)
+//   - O estado final no banco é consistente: usu_verificacao = 5, OTP limpo
+//   - Pelo menos uma requisição retorna 200; a segunda pode retornar 200
+//     (idempotente, pois o UPDATE é seguro) ou 409 ("Email já verificado")
+//
+// Por que é seguro: o controller executa apenas UPDATEs (sem INSERTs na verificação),
+// portanto duas execuções concorrentes produzem o mesmo estado final sem conflito.
+// O teste garante que esse invariante se mantém e que o servidor não quebra.
+
+describe('Grupo 7 — Race Condition: Verificação Simultânea de OTP', () => {
+
+    const crypto = require('crypto');
+
+    /**
+     * Injeta um OTP conhecido diretamente no banco para o usuário informado.
+     * Contorna o envio de email — usa o mesmo algoritmo de hashOtp do controller.
+     */
+    async function injetarOtp(usu_id, otp) {
+        const db = await getDb();
+        const hash = crypto
+            .createHmac('sha256', process.env.OTP_SECRET)
+            .update(otp)
+            .digest('hex');
+        await db.execute(
+            `UPDATE USUARIOS
+             SET usu_otp_hash       = ?,
+                 usu_otp_expira     = DATE_ADD(NOW(), INTERVAL 10 MINUTE),
+                 usu_otp_tentativas = 0,
+                 usu_otp_bloqueado_ate = NULL,
+                 usu_verificacao    = 0
+             WHERE usu_id = ?`,
+            [hash, usu_id]
+        );
+        // Garante per_habilitado=0 (estado pré-verificação) para não interferir em outros testes
+        await db.execute('UPDATE PERFIL SET per_habilitado = 0 WHERE usu_id = ?', [usu_id]);
+        await db.end();
+    }
+
+    /**
+     * Lê o estado de verificação atual do usuário diretamente do banco.
+     */
+    async function lerVerificacao(usu_id) {
+        const db = await getDb();
+        const [rows] = await db.execute(
+            'SELECT usu_verificacao, usu_otp_hash FROM USUARIOS WHERE usu_id = ?',
+            [usu_id]
+        );
+        await db.end();
+        return rows[0];
+    }
+
+    // ---- estado compartilhado do grupo ----
+    let usu_id, usu_email;
+    const OTP_FIXO = '472819'; // código conhecido — injetado no banco antes de cada caso
+
+    beforeAll(async () => {
+        // PASSO 1: cadastra usuário — recebe usu_verificacao = 0 por padrão
+        usu_email = `race_otp_${Date.now()}@teste.com`;
+
+        const cadRes = await request(app)
+            .post('/api/usuarios/cadastro')
+            .send({ usu_email, usu_senha: 'senha123' });
+
+        usu_id = cadRes.body?.usuario?.usu_id;
+        if (!usu_id) throw new Error(`[setup grupo 7] Falha ao cadastrar: ${JSON.stringify(cadRes.body)}`);
+    });
+
+    it('7.1 — Duas verificações simultâneas não causam 500 e o estado final é consistente', async () => {
+        // PASSO 1: injeta OTP conhecido no banco (simula envio de email)
+        await injetarOtp(usu_id, OTP_FIXO);
+
+        // PASSO 2: dispara as duas requisições em paralelo com o mesmo OTP
+        const [res1, res2] = await Promise.all([
+            request(app)
+                .post('/api/usuarios/verificar-email')
+                .send({ usu_email, otp: OTP_FIXO }),
+            request(app)
+                .post('/api/usuarios/verificar-email')
+                .send({ usu_email, otp: OTP_FIXO })
+        ]);
+
+        // PASSO 3: nenhuma das duas deve ter retornado 500 (sem crash no servidor)
+        expect(res1.status).not.toBe(500);
+        expect(res2.status).not.toBe(500);
+
+        // PASSO 4: pelo menos uma deve ter verificado com sucesso (200)
+        const statuses = [res1.status, res2.status];
+        expect(statuses).toContain(200);
+
+        // PASSO 5: a segunda pode ser 200 (idempotente) ou 409 ("Email já verificado")
+        // — ambos são comportamentos corretos; o que não é aceitável é 401/410/500
+        const statusSegunda = statuses.find(s => s !== 200) ?? 200;
+        expect([200, 409]).toContain(statusSegunda);
+    });
+
+    it('7.2 — Após race condition, estado final no banco é usu_verificacao=5 e OTP limpo', async () => {
+        // PASSO 1: lê o estado atual do banco para confirmar consistência
+        const estado = await lerVerificacao(usu_id);
+
+        // PASSO 2: verificação deve ter sido promovida para nível 5 (acesso temporário)
+        expect(estado.usu_verificacao).toBe(5);
+
+        // PASSO 3: OTP deve ter sido limpo — null indica que não pode ser reutilizado
+        expect(estado.usu_otp_hash).toBeNull();
+    });
+
+    it('7.3 — OTP já consumido não pode ser reutilizado por terceira requisição', async () => {
+        // PASSO 1: estado atual já tem usu_verificacao = 5 (pós race condition acima)
+        // Não reinjetamos OTP — tentamos usar o mesmo código numa conta já verificada
+
+        const res = await request(app)
+            .post('/api/usuarios/verificar-email')
+            .send({ usu_email, otp: OTP_FIXO });
+
+        // PASSO 2: deve receber 409 (email já verificado), nunca 200 ou 500
+        expect(res.status).toBe(409);
+        expect(res.body.error).toMatch(/já verificado/i);
+    });
+
+    it('7.4 — Dois usuários distintos verificando OTP ao mesmo tempo: ambos devem ter sucesso', async () => {
+        // Cenário: usuário A e usuário B clicam em "Verificar" no mesmo instante.
+        // Cada um tem seu próprio OTP — não há conflito de dados entre eles.
+        // Ambos devem receber 200 e terminar com usu_verificacao = 5.
+
+        // PASSO 1: cria dois usuários separados (cadastro já deixa usu_verificacao = 0)
+        const ts      = Date.now();
+        const emailA  = `race_otp_a_${ts}@teste.com`;
+        const emailB  = `race_otp_b_${ts}@teste.com`;
+
+        const [cadA, cadB] = await Promise.all([
+            request(app).post('/api/usuarios/cadastro').send({ usu_email: emailA, usu_senha: 'senha123' }),
+            request(app).post('/api/usuarios/cadastro').send({ usu_email: emailB, usu_senha: 'senha123' })
+        ]);
+
+        const idA = cadA.body?.usuario?.usu_id;
+        const idB = cadB.body?.usuario?.usu_id;
+        expect(idA).toBeDefined();
+        expect(idB).toBeDefined();
+
+        // PASSO 2: injeta OTPs distintos para cada usuário
+        const OTP_A = '391047';
+        const OTP_B = '826513';
+        await Promise.all([
+            injetarOtp(idA, OTP_A),
+            injetarOtp(idB, OTP_B)
+        ]);
+
+        // PASSO 3: ambos verificam ao mesmo tempo
+        const [resA, resB] = await Promise.all([
+            request(app).post('/api/usuarios/verificar-email').send({ usu_email: emailA, otp: OTP_A }),
+            request(app).post('/api/usuarios/verificar-email').send({ usu_email: emailB, otp: OTP_B })
+        ]);
+
+        // PASSO 4: nenhum deve ter causado 500
+        expect(resA.status).not.toBe(500);
+        expect(resB.status).not.toBe(500);
+
+        // PASSO 5: ambos devem ter retornado 200 (sem interferência entre contas)
+        expect(resA.status).toBe(200);
+        expect(resB.status).toBe(200);
+
+        // PASSO 6: confirma estado final consistente para os dois no banco
+        const [estadoA, estadoB] = await Promise.all([
+            lerVerificacao(idA),
+            lerVerificacao(idB)
+        ]);
+
+        expect(estadoA.usu_verificacao).toBe(5);
+        expect(estadoA.usu_otp_hash).toBeNull();
+
+        expect(estadoB.usu_verificacao).toBe(5);
+        expect(estadoB.usu_otp_hash).toBeNull();
+    });
+
+});

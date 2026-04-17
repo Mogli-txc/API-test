@@ -226,12 +226,26 @@ Rota **pública** (sem autenticação). Expõe escolas e cursos disponíveis no 
 
 Exige JWT + papel Admin (1) ou Desenvolvedor (2).
 
-| Método | Rota               | Descrição                                           |
-|--------|--------------------|-----------------------------------------------------|
-| GET    | `/stats/usuarios`  | Totais de usuários por status e verificação         |
-| GET    | `/stats/caronas`   | Totais de caronas por status                        |
-| GET    | `/stats/sugestoes` | Totais de sugestões/denúncias por tipo e status     |
-| GET    | `/stats/sistema`   | Resumo consolidado de todos os módulos (Dev apenas) |
+| Método   | Rota                                    | Descrição                                                        |
+|----------|-----------------------------------------|------------------------------------------------------------------|
+| GET      | `/stats/usuarios`                       | Totais de usuários por status e verificação (inclui suspensos)   |
+| GET      | `/stats/caronas`                        | Totais de caronas por status                                     |
+| GET      | `/stats/sugestoes`                      | Totais de sugestões/denúncias por tipo e status                  |
+| GET      | `/stats/sistema`                        | Resumo consolidado de todos os módulos (Dev apenas)              |
+| GET      | `/usuarios/:usu_id/penalidades`         | Histórico de penalidades de um usuário (`?ativas=1` = vigentes)  |
+| POST     | `/usuarios/:usu_id/penalidades`         | Aplica penalidade a um usuário                                   |
+| DELETE   | `/penalidades/:pen_id`                  | Remove/desativa uma penalidade                                   |
+
+**Tipos de penalidade (`pen_tipo`):**
+
+| `pen_tipo` | Efeito | Duração |
+|---|---|---|
+| 1 | Não pode oferecer caronas | Temporário |
+| 2 | Não pode solicitar caronas | Temporário |
+| 3 | Não pode oferecer nem solicitar caronas | Temporário |
+| 4 | Conta suspensa — login bloqueado (`usu_verificacao = 9`) | Permanente |
+
+**Durações válidas para tipos 1–3** (`pen_duracao`): `1semana`, `2semanas`, `1mes`, `3meses`, `6meses`.
 
 ---
 
@@ -263,7 +277,8 @@ api-caronas/
 │   │   └── mensagensSocket.js   # Handler Socket.io com autenticação JWT
 │   └── utils/
 │       ├── mailer.js            # Nodemailer — OTP e reset de senha
-│       └── emailQueue.js        # Fila assíncrona com retry exponencial (3x backoff)
+│       ├── emailQueue.js        # Fila assíncrona com retry exponencial (3x backoff)
+│       └── penaltyHelper.js     # checkPenalidade + DURACAO_SQL — verificação de bloqueios
 ├── infosdatabase/
 │   └── create.sql               # Schema completo (fonte única de verdade)
 ├── public/
@@ -378,6 +393,7 @@ Níveis de `usu_verificacao`:
 | 2 | Verificação completa (matrícula + veículo + CNH) |
 | 5 | Temporário sem veículo — pode pedir caronas por 5 dias |
 | 6 | Temporário com veículo — pode pedir e oferecer caronas por 5 dias |
+| 9 | Suspenso pelo administrador (login bloqueado — penalidade tipo 4) |
 
 #### `DocumentoController.js`
 
@@ -462,12 +478,15 @@ Endpoint REST complementar ao WebSocket (para clientes que não suportam Socket.
 
 #### `AdminController.js`
 
-Agregações de estatísticas para o painel administrativo. Todos os métodos respeitam o escopo: Desenvolvedor recebe dados globais, Administrador recebe apenas dados da sua escola (JOIN com `CURSOS` e `esc_id`).
+Estatísticas para o painel administrativo e gestão de penalidades. Todos os métodos respeitam o escopo: Desenvolvedor recebe dados globais, Administrador recebe apenas dados da sua escola (JOIN com `CURSOS` e `esc_id`). Administrador nunca pode penalizar outro Admin ou Desenvolvedor.
 
-- **`statsUsuarios`** — totais por `usu_status` e por cada nível de `usu_verificacao` (incluindo `acesso_temporario_com_veiculo` = nível 6).
+- **`statsUsuarios`** — totais por `usu_status` e por cada nível de `usu_verificacao`, incluindo o campo `suspensos` (nível 9).
 - **`statsCaronas`** — totais por `car_status`.
 - **`statsSugestoes`** — totais por `sug_status` e `sug_tipo`.
 - **`statsSistema`** — resumo global consolidado com `Promise.allSettled` (resposta parcial mesmo se uma query falhar). Disponível apenas para Desenvolvedor.
+- **`listarPenalidades`** — histórico de penalidades de um usuário. Query `?ativas=1` retorna apenas as vigentes (não expiradas e `pen_ativo = 1`).
+- **`aplicarPenalidade`** — insere registro em `PENALIDADES`. Tipos 1–3 são temporários e exigem `pen_duracao` (`1semana`, `2semanas`, `1mes`, `3meses`, `6meses`); a data de expiração é calculada pelo MySQL via `DATE_ADD`. Tipo 4 é permanente (`pen_expira_em = NULL`) e também seta `usu_verificacao = 9` em `USUARIOS`, bloqueando o login imediatamente. Rejeita com 409 se já houver penalidade ativa do mesmo tipo.
+- **`removerPenalidade`** — seta `pen_ativo = 0`. Se o tipo for 4, restaura `usu_verificacao = 1`, reabilitando o login.
 
 ---
 
@@ -537,6 +556,15 @@ Centraliza duas verificações de autorização reutilizadas em múltiplos contr
 - **`checkDevOrOwner(requesterId, targetId)`** — retorna `true` se o requester é o dono do recurso (IDs iguais) OU se é Desenvolvedor (`per_tipo = 2`). Evita a verificação duplicada em cada controller.
 - **`getMotoristaId(caronaId)`** — retorna o `usu_id` do motorista de uma carona via JOIN `CARONAS → CURSOS_USUARIOS`. Retorna `null` se a carona não existir.
 
+#### `penaltyHelper.js`
+
+Utilitários compartilhados para o sistema de penalidades:
+
+- **`checkPenalidade(usu_id, acao)`** — consulta `PENALIDADES` e retorna a penalidade ativa que bloqueie a ação informada (`1` = oferecer carona, `2` = solicitar carona), ou `null` se não houver bloqueio. Penalidade tipo 3 bloqueia ambas as ações. Penalidade expirada (`pen_expira_em < NOW()`) é ignorada automaticamente pela query.
+- **`DURACAO_SQL`** — mapa de whitelist de duração (`'1semana'`, `'2semanas'`, `'1mes'`, `'3meses'`, `'6meses'`) para expressões `DATE_ADD` do MySQL. Valores constantes — nunca interpolam entrada do usuário.
+
+Importado por `CaronaController` (verifica bloqueio de oferta) e `SolicitacaoController` (verifica bloqueio de solicitação).
+
 #### `sanitize.js`
 
 Função `stripHtml(str)` que remove tags HTML (`<[^>]*>`) e decodifica entidades HTML comuns (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#x27;`, `&#x2F;`) antes de persistir texto no banco. Previne XSS armazenado (*stored XSS*). Aplicada em todos os campos de texto livre: descrições de caronas, textos de sugestão, nomes de usuário, mensagens e pontos de encontro.
@@ -571,8 +599,8 @@ Arquivos de suporte ao banco de dados MySQL:
 
 | Arquivo | Conteúdo |
 |---|---|
-| `create.sql` | Schema completo: 16 tabelas, índices, constraints e foreign keys. Fonte única de verdade do banco. Cada tabela tem comentário explicativo nas colunas. |
-| `insert.sql` | Dados de seed para desenvolvimento e testes: 10 usuários com diferentes níveis de verificação, escolas, cursos, caronas, solicitações, mensagens, avaliações e documentos. |
+| `create.sql` | Schema completo: 17 tabelas, índices, constraints e foreign keys. Fonte única de verdade do banco. Cada tabela tem comentário explicativo nas colunas. |
+| `insert.sql` | Dados de seed para desenvolvimento e testes: 10 usuários com diferentes níveis de verificação, escolas, cursos, caronas, solicitações, mensagens, avaliações, documentos e penalidades de exemplo. |
 | `select.sql` | Consultas de diagnóstico e verificação: auditar estados do banco, listar documentos, verificar usuários por nível, etc. |
 | `delete.sql` | Scripts de limpeza seletiva por tabela (sem apagar o schema). |
 | `apagar-banco.sql` | Drop de todas as tabelas (reset total). |
@@ -600,6 +628,7 @@ Arquivos de suporte ao banco de dados MySQL:
 | `AVALIACOES` | Notas mútuas pós-carona com UNIQUE KEY por par avaliador/avaliado |
 | `DOCUMENTOS_VERIFICACAO` | Comprovantes de matrícula e CNHs enviados para validação automática |
 | `AUDIT_LOG` | Rastreabilidade de ações sensíveis (login, cadastro, aprovações, etc.) |
+| `PENALIDADES` | Penalidades aplicadas por administradores — bloqueio temporário (tipos 1–3) ou permanente (tipo 4) |
 
 ---
 

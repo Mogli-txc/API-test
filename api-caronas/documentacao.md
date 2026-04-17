@@ -17,6 +17,7 @@ info:
     | 2 | Matrícula verificada + veículo registrado |
     | 5 | Temporário sem veículo (5 dias) |
     | 6 | Temporário com veículo (5 dias) |
+    | 9 | Suspenso pelo administrador (login bloqueado) |
 
     **Fluxo de promoção:**
     - Cadastro → nível 0 → verifica OTP → nível 5
@@ -24,6 +25,14 @@ info:
     - Nível 5 → cadastra veículo → nível 6
     - Nível 6 → envia comprovante → nível 2
     - Nível 1 → envia CNH (com veículo ativo) → nível 2
+
+    **Penalidades (tabela `PENALIDADES`):**
+    | `pen_tipo` | Efeito | Duração |
+    |---|---|---|
+    | 1 | Não pode oferecer caronas | Temporário (1semana a 6meses) |
+    | 2 | Não pode solicitar caronas | Temporário (1semana a 6meses) |
+    | 3 | Não pode oferecer nem solicitar | Temporário (1semana a 6meses) |
+    | 4 | Conta suspensa — login bloqueado | Permanente (até remoção manual) |
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
@@ -65,7 +74,8 @@ components:
           example: "12345678"
         usu_verificacao:
           type: integer
-          enum: [0, 1, 2, 5, 6]
+          enum: [0, 1, 2, 5, 6, 9]
+          description: "0=Aguardando OTP, 1=Matrícula verificada, 2=Matrícula+veículo, 5=Temp.sem veículo, 6=Temp.com veículo, 9=Suspenso"
           example: 1
         usu_verificacao_expira:
           type: string
@@ -406,6 +416,60 @@ components:
         cur_id:
           type: integer
           example: 3
+
+    # ─── Penalidade ─────────────────────────────────────────────────────────────
+    PenalidadeAplicarRequest:
+      type: object
+      required: [pen_tipo]
+      properties:
+        pen_tipo:
+          type: integer
+          enum: [1, 2, 3, 4]
+          description: "1=Não oferece, 2=Não solicita, 3=Ambos, 4=Conta suspensa"
+          example: 1
+        pen_duracao:
+          type: string
+          enum: [1semana, 2semanas, 1mes, 3meses, 6meses]
+          description: "Obrigatório para pen_tipo 1–3. Proibido para pen_tipo 4."
+          example: 1mes
+        pen_motivo:
+          type: string
+          maxLength: 255
+          example: Cancelamentos recorrentes sem aviso prévio.
+
+    Penalidade:
+      type: object
+      properties:
+        pen_id:
+          type: integer
+          example: 1
+        usu_id:
+          type: integer
+          example: 5
+        pen_tipo:
+          type: integer
+          enum: [1, 2, 3, 4]
+          example: 2
+        pen_motivo:
+          type: string
+          nullable: true
+          example: Comportamento inadequado com motorista.
+        pen_aplicado_em:
+          type: string
+          format: date-time
+        pen_expira_em:
+          type: string
+          format: date-time
+          nullable: true
+          description: "NULL = permanente (pen_tipo 4)"
+        pen_aplicado_por:
+          type: integer
+          description: usu_id do administrador que aplicou
+          example: 6
+        pen_ativo:
+          type: integer
+          enum: [0, 1]
+          example: 1
 
     # ─── Respostas genéricas ─────────────────────────────────────────────────────
     ErroResponse:
@@ -2006,6 +2070,138 @@ paths:
         '403':
           description: Apenas Dev
 
+  /api/admin/usuarios/{usu_id}/penalidades:
+    get:
+      tags: [Admin]
+      summary: Listar penalidades de um usuário
+      description: |
+        Retorna histórico completo de penalidades do usuário.
+        Use `?ativas=1` para filtrar apenas as vigentes.
+        Admin vê apenas usuários da sua escola; Dev vê qualquer usuário.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: usu_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 5
+        - name: ativas
+          in: query
+          schema:
+            type: integer
+            enum: [0, 1]
+          description: "1 = retorna apenas penalidades ativas e não expiradas"
+          example: 1
+      responses:
+        '200':
+          description: Lista de penalidades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  total:
+                    type: integer
+                  penalidades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Penalidade'
+        '403':
+          description: Sem permissão ou usuário de outra escola
+        '404':
+          description: Usuário não encontrado
+
+    post:
+      tags: [Admin]
+      summary: Aplicar penalidade a um usuário
+      description: |
+        Aplica uma penalidade ao usuário especificado.
+
+        **Tipos:**
+        - `1` — Não pode oferecer caronas (temporário)
+        - `2` — Não pode solicitar caronas (temporário)
+        - `3` — Não pode oferecer nem solicitar (temporário)
+        - `4` — Conta suspensa — login bloqueado (permanente)
+
+        `pen_duracao` é **obrigatório** para tipos 1–3 e **proibido** para tipo 4.
+        Tipo 4 também atualiza `usu_verificacao = 9` em `USUARIOS`.
+        Admin só pode penalizar usuários da sua escola; não pode penalizar outros Admins ou Devs.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: usu_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PenalidadeAplicarRequest'
+      responses:
+        '201':
+          description: Penalidade aplicada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Penalidade tipo 2 aplicada ao usuário 5.
+                  penalidade:
+                    $ref: '#/components/schemas/Penalidade'
+        '400':
+          description: pen_tipo inválido ou pen_duracao ausente/inválido
+        '403':
+          description: Sem permissão ou usuário de outra escola
+        '404':
+          description: Usuário não encontrado ou inativo
+        '409':
+          description: Usuário já possui penalidade ativa do mesmo tipo
+
+  /api/admin/penalidades/{pen_id}:
+    delete:
+      tags: [Admin]
+      summary: Remover penalidade
+      description: |
+        Desativa a penalidade (`pen_ativo = 0`).
+        Se `pen_tipo = 4`, restaura `usu_verificacao = 1`, reabilitando o login.
+        Admin só pode remover penalidades de usuários da sua escola.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: pen_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Penalidade removida e acesso restaurado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Penalidade 1 removida. Acesso do usuário 5 restaurado.
+        '403':
+          description: Sem permissão ou penalidade de outra escola
+        '404':
+          description: Penalidade não encontrada
+        '409':
+          description: Penalidade já foi removida
+
 tags:
   - name: Usuários
     description: Cadastro, autenticação e gerenciamento de perfil
@@ -2032,5 +2228,5 @@ tags:
   - name: Infraestrutura
     description: Dados estáticos de escolas e cursos (rotas públicas)
   - name: Admin
-    description: Estatísticas do sistema — acesso restrito a Admin e Dev
+    description: Estatísticas do sistema e gestão de penalidades — acesso restrito a Admin e Dev
 ```
