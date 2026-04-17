@@ -840,12 +840,19 @@ paths:
       summary: Enviar comprovante de matrícula
       description: |
         Aceita usuários nos níveis **5** (sem veículo) ou **6** (com veículo).
-        O upload promove automaticamente:
+
+        **Pipeline de validação:**
+        1. Magic bytes verificados (`%PDF`) — rejeita arquivos falsificados.
+        2. OCR automático: tenta extração de texto nativo (`pdfjs-dist`); se insuficiente,
+           converte a 1ª página para PNG e executa Tesseract.js.
+        3. Avalia ≥ 2 de 3 grupos de critérios (`instituicao`, `matricula`, `periodo`)
+           com confiança mínima de 55%.
+
+        **Promoção automática (OCR aprovado):**
         - Nível 5 → **1** (matrícula verificada, +6 meses)
         - Nível 6 → **2** (matrícula + veículo, +6 meses)
 
-        Validação por magic bytes: o conteúdo real do arquivo é verificado,
-        independente da extensão declarada.
+        **OCR reprovado:** documento salvo com `doc_status=2` para auditoria — retorna 422.
       security:
         - bearerAuth: []
       requestBody:
@@ -859,7 +866,7 @@ paths:
                 comprovante:
                   type: string
                   format: binary
-                  description: JPEG, JPG, PNG, GIF ou PDF — máximo 5 MB
+                  description: PDF apenas — máximo 10 MB
       responses:
         '200':
           description: Comprovante aceito — usuário promovido
@@ -870,17 +877,48 @@ paths:
                 properties:
                   message:
                     type: string
-                    example: Comprovante recebido. Nível de acesso atualizado para 1.
-                  usu_verificacao:
+                    example: Comprovante recebido e matrícula verificada com sucesso!
+                  verificacao:
                     type: integer
                     example: 1
-                  usu_verificacao_expira:
+                  expira:
                     type: string
                     format: date-time
+                  ocr:
+                    type: object
+                    properties:
+                      confianca:
+                        type: integer
+                        example: 87
+                      criteriosAtingidos:
+                        type: integer
+                        example: 3
+                      criteriosTotal:
+                        type: integer
+                        example: 3
+                      origem:
+                        type: string
+                        enum: [texto-nativo, ocr-tesseract]
+                        example: texto-nativo
         '400':
-          description: Nenhum arquivo enviado ou tipo inválido
+          description: Nenhum arquivo enviado ou arquivo não é um PDF válido
         '403':
           description: Usuário não está no nível 5 ou 6
+        '409':
+          description: Matrícula já verificada (nível 1 ou 2)
+        '422':
+          description: OCR reprovado — documento não reconhecido como comprovante válido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Documento não reconhecido como comprovante de matrícula válido.
+                  detalhes:
+                    type: string
+                    example: "Critérios identificados: 1/3. Confiança OCR: 42%."
         '401':
           description: Não autenticado
 
@@ -890,8 +928,18 @@ paths:
       summary: Enviar CNH
       description: |
         Aceita apenas usuários no nível **1** (matrícula verificada).
-        Se o usuário possuir veículo ativo (`vei_status = 1`), é promovido para
-        **nível 2** com validade renovada por +6 meses.
+
+        **Pipeline de validação:**
+        1. Magic bytes verificados (`%PDF`) — rejeita arquivos falsificados.
+        2. OCR automático com Tesseract.js (português + inglês, OEM LSTM).
+        3. Avalia ≥ 2 de 3 grupos de critérios (`cabecalho`, `categoria`, `identificacao`)
+           com confiança mínima de 60%.
+
+        **Promoção automática (OCR aprovado):**
+        - Com veículo ativo (`vei_status = 1`) → **nível 2** (+6 meses)
+        - Sem veículo → mantém nível 1 (CNH armazenada; promoção ocorre ao cadastrar veículo)
+
+        **OCR reprovado:** documento salvo com `doc_status=2` para auditoria — retorna 422.
       security:
         - bearerAuth: []
       requestBody:
@@ -905,7 +953,7 @@ paths:
                 cnh:
                   type: string
                   format: binary
-                  description: JPEG, JPG, PNG, GIF ou PDF — máximo 5 MB
+                  description: PDF apenas — máximo 10 MB
       responses:
         '200':
           description: CNH aceita
@@ -916,16 +964,50 @@ paths:
                 properties:
                   message:
                     type: string
-                    example: "CNH recebida. Nível de acesso atualizado para 2."
-                  usu_verificacao:
+                    example: "CNH recebida. Verificação completa — você já pode oferecer caronas!"
+                  verificacao:
                     type: integer
                     example: 2
-                  usu_verificacao_expira:
+                  expira:
                     type: string
                     format: date-time
                     nullable: true
+                    description: "Presente apenas se promovido para nível 2"
+                  ocr:
+                    type: object
+                    properties:
+                      confianca:
+                        type: integer
+                        example: 91
+                      criteriosAtingidos:
+                        type: integer
+                        example: 3
+                      criteriosTotal:
+                        type: integer
+                        example: 3
+                      origem:
+                        type: string
+                        enum: [texto-nativo, ocr-tesseract]
+                        example: ocr-tesseract
+        '400':
+          description: Nenhum arquivo enviado ou arquivo não é um PDF válido
         '403':
           description: Usuário não está no nível 1
+        '409':
+          description: Verificação já completa (nível 2)
+        '422':
+          description: OCR reprovado — documento não reconhecido como CNH válida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Documento não reconhecido como CNH válida.
+                  detalhes:
+                    type: string
+                    example: "Critérios identificados: 1/3. Confiança OCR: 38%."
         '401':
           description: Não autenticado
 
