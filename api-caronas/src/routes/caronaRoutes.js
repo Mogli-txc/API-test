@@ -18,6 +18,13 @@ const authMiddleware = require('../middlewares/authMiddleware');
 router.get('/', authMiddleware, CaronaController.listarTodas);
 
 /**
+ * ROTA: GET /api/caronas/minhas
+ * Descrição: Lista todas as caronas oferecidas pelo motorista autenticado (qualquer status)
+ * Acesso: PROTEGIDO - Requer Token JWT
+ */
+router.get('/minhas', authMiddleware, CaronaController.listarMinhasCaronas);
+
+/**
  * ROTA: POST /api/caronas/oferecer
  * Descrição: Cria uma nova carona (oferecida por um condutor)
  * Acesso: PROTEGIDO - Requer Token JWT válido no header Authorization
@@ -41,6 +48,13 @@ router.get('/:car_id', authMiddleware, CaronaController.obterPorId);
  * Acesso: PROTEGIDO - Requer Token JWT
  */
 router.put('/:car_id', authMiddleware, CaronaController.atualizar);
+
+/**
+ * ROTA: POST /api/caronas/:car_id/finalizar
+ * Descrição: Finaliza uma carona (car_status = 3) — exclusivo para o motorista dono
+ * Acesso: PROTEGIDO - Requer Token JWT
+ */
+router.post('/:car_id/finalizar', authMiddleware, CaronaController.finalizar);
 
 /**
  * ROTA: DELETE /api/caronas/:car_id

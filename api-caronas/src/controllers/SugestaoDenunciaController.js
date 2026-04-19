@@ -97,6 +97,7 @@ class SugestaoDenunciaController {
             const offset = (page - 1) * limit;
 
             let sugestoes;
+            let totalGeral;
 
             if (per_tipo === 2) {
                 // PASSO 2: Desenvolvedor — acesso total, sem filtro de escola
@@ -110,6 +111,9 @@ class SugestaoDenunciaController {
                      ORDER BY s.sug_id DESC
                      LIMIT ? OFFSET ?`,
                     [limit, offset]
+                );
+                [[{ totalGeral }]] = await db.query(
+                    'SELECT COUNT(*) AS totalGeral FROM SUGESTAO_DENUNCIA WHERE sug_deletado_em IS NULL'
                 );
             } else {
                 // PASSO 3: Administrador — filtra por usuários da sua escola
@@ -127,12 +131,22 @@ class SugestaoDenunciaController {
                      LIMIT ? OFFSET ?`,
                     [per_escola_id, limit, offset]
                 );
+                [[{ totalGeral }]] = await db.query(
+                    `SELECT COUNT(DISTINCT s.sug_id) AS totalGeral
+                     FROM SUGESTAO_DENUNCIA s
+                     INNER JOIN USUARIOS u         ON s.usu_id  = u.usu_id
+                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                     INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                     WHERE c.esc_id = ? AND s.sug_deletado_em IS NULL`,
+                    [per_escola_id]
+                );
             }
 
             // PASSO 4: Resposta de sucesso
             return res.status(200).json({
-                message:  "Lista de sugestões/denúncias recuperada.",
-                total:    sugestoes.length,
+                message:    "Lista de sugestões/denúncias recuperada.",
+                totalGeral,
+                total:      sugestoes.length,
                 page,
                 limit,
                 sugestoes
@@ -247,7 +261,19 @@ class SugestaoDenunciaController {
                 }
             }
 
-            // PASSO 5: Atualiza com a resposta e fecha (sug_status = 0)
+            // PASSO 5: Verifica existência e rejeita se já estiver fechado
+            const [sugAtual] = await db.query(
+                'SELECT sug_status FROM SUGESTAO_DENUNCIA WHERE sug_id = ? AND sug_deletado_em IS NULL',
+                [sug_id]
+            );
+            if (sugAtual.length === 0) {
+                return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
+            }
+            if (sugAtual[0].sug_status === 0) {
+                return res.status(409).json({ error: "Esta sugestão/denúncia já está fechada." });
+            }
+
+            // PASSO 6: Atualiza com a resposta e fecha (sug_status = 0)
             // sug_id_resposta registra o ID do usuário autenticado que respondeu
             const [resultado] = await db.query(
                 `UPDATE SUGESTAO_DENUNCIA
@@ -256,11 +282,7 @@ class SugestaoDenunciaController {
                 [sug_resposta_limpa, req.user.id, sug_id]
             );
 
-            if (resultado.affectedRows === 0) {
-                return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
-            }
-
-            // PASSO 6: Resposta de sucesso
+            // PASSO 7: Resposta de sucesso
             return res.status(200).json({
                 message:  "Resposta registrada e sugestão/denúncia fechada.",
                 sugestao: { sug_id: parseInt(sug_id), sug_status: 0, sug_resposta: sug_resposta_limpa }

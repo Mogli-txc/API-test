@@ -42,6 +42,13 @@ router.get('/stats/sugestoes', ...adminGuard, AdminController.statsSugestoes);
 router.get('/stats/sistema', ...adminGuard, AdminController.statsSistema);
 
 /**
+ * GET /api/admin/usuarios
+ * Lista usuários da escola do Admin, ou todos (Dev, com ?esc_id= opcional).
+ * Suporta paginação: ?page=, ?limit=
+ */
+router.get('/usuarios', ...adminGuard, AdminController.listarUsuarios);
+
+/**
  * GET /api/admin/usuarios/:usu_id/penalidades
  * Lista histórico de penalidades de um usuário. ?ativas=1 filtra apenas vigentes.
  * Administrador: apenas usuários da sua escola. Desenvolvedor: qualquer usuário.

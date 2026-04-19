@@ -17,7 +17,10 @@
 --                   usu_reset_expira     (DATETIME NULL — expiração do token de recuperação; validade 15 min)
 -- PERFIL:           per_tipo        (0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total))
 --                   per_escola_id   (NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador)
--- VEICULOS:         vei_tipo        (0=Moto, 1=Carro)
+-- ESCOLAS:          esc_dominio     (NULL=sem restrição de domínio | 'usp.br'=apenas @usp.br)
+--                   esc_max_usuarios(NULL=sem limite | N=máximo de usuários ativos por escola)
+-- VEICULOS:         vei_tipo        (0=Moto (máx 1 vaga), 1=Carro (máx 4 vagas))
+--                   vei_placa       (UNIQUE — mesma placa não pode ser cadastrada duas vezes)
 --                   vei_status      (0=Inutilizado, 1=Ativo)
 -- CARONAS:          car_status      (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
 -- PONTO_ENCONTROS:  pon_tipo        (0=Partida, 1=Destino)
@@ -44,10 +47,10 @@
 --   - Escola 2: Universidade em Campinas (usuários de outra cidade)
 --   - Escola 3: Escola sem nenhum usuário cadastrado (testa listagem vazia)
 -- =====================================================
-INSERT INTO ESCOLAS (esc_nome, esc_endereco) VALUES
-    ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP'),     -- esc_id = 1
-    ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP'),    -- esc_id = 2
-    ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP');    -- esc_id = 3 (sem usuários)
+INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios) VALUES
+    ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',    'inova.edu.br', 100),  -- esc_id=1: domínio restrito, cota de 100 usuários
+    ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP',   'saber.edu.br', 50),   -- esc_id=2: domínio restrito, cota de 50 usuários
+    ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',   NULL,           NULL); -- esc_id=3: sem restrição de domínio, sem cota (sem usuários)
 
 
 -- =====================================================
@@ -193,12 +196,12 @@ INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_es
 --   - Lucas:    1 carro ativo — segundo motorista disponível
 --   - TempVei:  1 carro ativo (usu_id=10, verificacao=6) — testa oferecer carona com acesso temporário
 -- =====================================================
-INSERT INTO VEICULOS (usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em, vei_atualizado_em, vei_apagado_em) VALUES
-    (1,  'Chevrolet Onix Plus', 1, 'Vermelho', 4, 1, '2023-01-20', NULL,                  NULL),                  -- vei_id=1: Carro do Carlos (ativo)
-    (1,  'Ford Ka',             1, 'Branco',   4, 0, '2021-05-10', '2023-06-01 00:00:00', '2023-06-01 00:00:00'), -- vei_id=2: Carro antigo Carlos (inutilizado)
-    (3,  'Honda CG 160',        0, 'Azul',     1, 1, '2022-08-15', NULL,                  NULL),                  -- vei_id=3: Moto do Pedro (ativa)
-    (5,  'Volkswagen Gol',      1, 'Prata',    3, 1, '2023-09-01', NULL,                  NULL),                  -- vei_id=4: Carro do Lucas (ativo)
-    (10, 'Fiat Mobi',           1, 'Preto',    3, 1, CURDATE(),    NULL,                  NULL);                  -- vei_id=5: Carro do TempVei (ativo, temporário com veículo)
+INSERT INTO VEICULOS (usu_id, vei_placa, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em, vei_atualizado_em, vei_apagado_em) VALUES
+    (1,  'ABC-1234', 'Chevrolet Onix Plus', 1, 'Vermelho', 4, 1, '2023-01-20', NULL,                  NULL),                  -- vei_id=1: Carro do Carlos (ativo)
+    (1,  'DEF-5678', 'Ford Ka',             1, 'Branco',   4, 0, '2021-05-10', '2023-06-01 00:00:00', '2023-06-01 00:00:00'), -- vei_id=2: Carro antigo Carlos (inutilizado)
+    (3,  'GHI-9012', 'Honda CG 160',        0, 'Azul',     1, 1, '2022-08-15', NULL,                  NULL),                  -- vei_id=3: Moto do Pedro (ativa, 1 vaga)
+    (5,  'JKL-3456', 'Volkswagen Gol',      1, 'Prata',    3, 1, '2023-09-01', NULL,                  NULL),                  -- vei_id=4: Carro do Lucas (ativo)
+    (10, 'MNO-7890', 'Fiat Mobi',           1, 'Preto',    3, 1, CURDATE(),    NULL,                  NULL);                  -- vei_id=5: Carro do TempVei (ativo, temporário com veículo)
 
 
 -- =====================================================

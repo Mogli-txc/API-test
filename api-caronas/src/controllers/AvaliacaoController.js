@@ -65,7 +65,9 @@ class AvaliacaoController {
                 return res.status(403).json({ error: "Avaliações só são permitidas após a carona ser finalizada." });
             }
 
-            // PASSO 6: Verifica se o avaliador é motorista ou passageiro confirmado desta carona
+            // PASSO 6: Verifica se o avaliador é motorista ou passageiro confirmado desta carona.
+            // Usa UNION entre CARONA_PESSOAS (adicionado diretamente) e SOLICITACOES_CARONA (aceito via solicitação)
+            // para cobrir ambos os caminhos de participação.
             const [motorista] = await db.query(
                 `SELECT cu.usu_id FROM CARONAS c
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
@@ -76,20 +78,28 @@ class AvaliacaoController {
 
             if (!ehMotorista) {
                 const [passageiro] = await db.query(
-                    'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1',
-                    [car_id, usu_id_avaliador]
+                    `SELECT 1 FROM CARONA_PESSOAS
+                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                     UNION
+                     SELECT 1 FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+                    [car_id, usu_id_avaliador, car_id, usu_id_avaliador]
                 );
                 if (passageiro.length === 0) {
                     return res.status(403).json({ error: "Apenas participantes confirmados da carona podem avaliar." });
                 }
             }
 
-            // PASSO 7: Verifica se o avaliado também era participante
+            // PASSO 7: Verifica se o avaliado também era participante (mesmo padrão UNION)
             const ehMotoristaAvaliado = motorista.length > 0 && motorista[0].usu_id === parseInt(usu_id_avaliado);
             if (!ehMotoristaAvaliado) {
                 const [passageiroAvaliado] = await db.query(
-                    'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1',
-                    [car_id, usu_id_avaliado]
+                    `SELECT 1 FROM CARONA_PESSOAS
+                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                     UNION
+                     SELECT 1 FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+                    [car_id, usu_id_avaliado, car_id, usu_id_avaliado]
                 );
                 if (passageiroAvaliado.length === 0) {
                     return res.status(403).json({ error: "O usuário avaliado não participou desta carona." });
@@ -161,7 +171,7 @@ class AvaliacaoController {
                 [usu_id, limit, offset]
             );
 
-            // PASSO 4: Calcula média geral do usuário
+            // PASSO 4: Calcula média e total geral do usuário (totalGeral = todas as páginas, para paginação)
             const [[{ media, total_avaliacoes }]] = await db.query(
                 `SELECT ROUND(AVG(ava_nota), 2) AS media, COUNT(*) AS total_avaliacoes
                  FROM AVALIACOES WHERE usu_id_avaliado = ?`,
@@ -170,6 +180,7 @@ class AvaliacaoController {
 
             return res.status(200).json({
                 message:           `Avaliações do usuário ${usu_id} listadas.`,
+                totalGeral:        parseInt(total_avaliacoes),
                 total:             avaliacoes.length,
                 page,
                 limit,
@@ -200,6 +211,10 @@ class AvaliacaoController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
             const [avaliacoes] = await db.query(
                 `SELECT a.ava_id, a.usu_id_avaliador, a.usu_id_avaliado,
                         a.ava_nota, a.ava_comentario, a.ava_criado_em,
@@ -209,13 +224,22 @@ class AvaliacaoController {
                  INNER JOIN USUARIOS u_av ON a.usu_id_avaliador = u_av.usu_id
                  INNER JOIN USUARIOS u_ad ON a.usu_id_avaliado  = u_ad.usu_id
                  WHERE a.car_id = ?
-                 ORDER BY a.ava_id ASC`,
+                 ORDER BY a.ava_id ASC
+                 LIMIT ? OFFSET ?`,
+                [car_id, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                'SELECT COUNT(*) AS totalGeral FROM AVALIACOES WHERE car_id = ?',
                 [car_id]
             );
 
             return res.status(200).json({
                 message:    `Avaliações da carona ${car_id} listadas.`,
+                totalGeral,
                 total:      avaliacoes.length,
+                page,
+                limit,
                 car_id:     parseInt(car_id),
                 avaliacoes
             });

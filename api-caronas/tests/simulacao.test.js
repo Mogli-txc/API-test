@@ -88,7 +88,7 @@ let car_pes_id;
 beforeAll(async () => {
     // Busca escolas disponíveis e pega o primeiro curso existente
     const escRes = await request(app).get('/api/infra/escolas');
-    const esc_id = escRes.body.escolas[0].esc_id;
+    const esc_id = (escRes.body.escolas.find(e => !e.esc_dominio) || escRes.body.escolas[0]).esc_id;
 
     const curRes = await request(app).get(`/api/infra/escolas/${esc_id}/cursos`);
     cur_id = curRes.body.cursos[0].cur_id; // ID do curso para ambas as matrículas
@@ -156,7 +156,7 @@ describe('Usuário 1 — Motorista', () => {
             .post('/api/veiculos')
             .set('Authorization', `Bearer ${token1}`)
             .send({
-                usu_id:            usu_id1,
+                vei_placa:         'SIM' + String(Math.floor(Math.random() * 9000) + 1000),
                 vei_marca_modelo:  'Honda Civic',
                 vei_tipo:          1,       // 1 = Carro
                 vei_cor:           'Prata',
@@ -499,9 +499,8 @@ describe('Usuário 1 — Motorista finaliza a carona', () => {
     it('1.9 — Finaliza a carona (car_status = 3)', async () => {
         // PASSO 1: motorista atualiza o status da carona para Finalizada
         const res = await request(app)
-            .put(`/api/caronas/${car_id1}`)
-            .set('Authorization', `Bearer ${token1}`)
-            .send({ car_status: 3 }); // 3 = Finalizada
+            .post(`/api/caronas/${car_id1}/finalizar`)
+            .set('Authorization', `Bearer ${token1}`);
 
         // PASSO 2: confirma que a atualização foi aceita
         expect(res.status).toBe(200);

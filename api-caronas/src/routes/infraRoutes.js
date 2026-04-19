@@ -20,7 +20,7 @@ router.get('/escolas', async (_req, res) => { // _req: parâmetro não utilizado
     try {
         // PASSO 1: Busca todas as escolas no banco
         // SELECT * FROM ESCOLAS
-        const [escolas] = await db.query('SELECT esc_id, esc_nome, esc_endereco FROM ESCOLAS');
+        const [escolas] = await db.query('SELECT esc_id, esc_nome, esc_endereco, esc_dominio FROM ESCOLAS');
 
         // PASSO 2: Resposta de sucesso
         return res.status(200).json({

@@ -91,11 +91,24 @@ module.exports = async function () {
     );
     if (veiculos.length === 0) {
         await db.execute(
-            `INSERT INTO VEICULOS (usu_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em)
-             VALUES (?, 'Carro Admin Teste', 1, 'Branco', 4, 1, CURDATE())`,
+            `INSERT INTO VEICULOS (usu_id, vei_placa, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em)
+             VALUES (?, 'ADM0001', 'Carro Admin Teste', 1, 'Branco', 4, 1, CURDATE())
+             ON DUPLICATE KEY UPDATE vei_status = 1`,
             [usu_id]
         );
         console.log('[setup] Veículo de teste criado para admin.');
+    }
+
+    // Garante que a escola sem restrição de domínio (esc_id=3) tenha ao menos um curso,
+    // necessário para que os helpers de teste possam matricular usuários com @test.com
+    const [esc3cursos] = await db.query(
+        'SELECT cur_id FROM CURSOS WHERE esc_id = 3 LIMIT 1'
+    );
+    if (esc3cursos.length === 0) {
+        await db.execute(
+            `INSERT INTO CURSOS (esc_id, cur_semestre, cur_nome) VALUES (3, 1, 'Curso Teste Geral')`
+        );
+        console.log('[setup] Curso de teste criado para escola 3 (sem domínio).');
     }
 
     await db.end();

@@ -35,8 +35,8 @@ class SolicitacaoController {
                 });
             }
 
-            if (isNaN(sol_vaga_soli) || sol_vaga_soli <= 0) {
-                return res.status(400).json({ error: "Número de vagas deve ser positivo." });
+            if (isNaN(sol_vaga_soli) || sol_vaga_soli <= 0 || sol_vaga_soli > 4) {
+                return res.status(400).json({ error: "Número de vagas deve ser entre 1 e 4." });
             }
 
             // REGRA DE NEGÓCIO: Para solicitar carona, o passageiro precisa ter:
@@ -57,7 +57,8 @@ class SolicitacaoController {
             const { usu_verificacao: verificacao, usu_verificacao_expira: expira } = usuario[0];
 
             // Verifica se o nível de acesso permite solicitar caronas (1, 2, 5 ou 6)
-            if (verificacao !== 5 && verificacao !== 6 && verificacao < 1) {
+            // Níveis 0 (não verificado) e 9 (conta suspensa) são bloqueados
+            if (![1, 2, 5, 6].includes(verificacao)) {
                 return res.status(403).json({
                     error: "É necessário ter matrícula verificada para solicitar caronas."
                 });
@@ -120,9 +121,12 @@ class SolicitacaoController {
                 return res.status(403).json({ error: "Você já está vinculado a uma carona ativa. Cancele ou aguarde a finalização antes de solicitar outra." });
             }
 
-            // Verifica as vagas disponíveis da carona
+            // Verifica as vagas disponíveis da carona e o tipo do veículo
             const [carona] = await db.query(
-                'SELECT car_vagas_dispo FROM CARONAS WHERE car_id = ? AND car_status = 1',
+                `SELECT c.car_vagas_dispo, v.vei_tipo
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 WHERE c.car_id = ? AND c.car_status = 1`,
                 [car_id]
             );
 
@@ -130,9 +134,15 @@ class SolicitacaoController {
                 return res.status(404).json({ error: "Carona não encontrada ou não está aberta." });
             }
 
+            // Moto (vei_tipo=0): aceita no máximo 1 passageiro por corrida
+            if (Number(carona[0].vei_tipo) === 0 && sol_vaga_soli > 1) {
+                return res.status(400).json({ error: "Corridas de moto permitem no máximo 1 passageiro." });
+            }
+
+            // Número de vagas solicitadas não pode ultrapassar as vagas remanescentes (máx 4 para carro)
             if (sol_vaga_soli > carona[0].car_vagas_dispo) {
                 return res.status(409).json({
-                    error: `Apenas ${carona[0].car_vagas_dispo} vagas disponíveis na carona.`
+                    error: `Apenas ${carona[0].car_vagas_dispo} vaga(s) disponível(is) nesta carona.`
                 });
             }
 
@@ -254,23 +264,42 @@ class SolicitacaoController {
             const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
+            // Filtro opcional por status (0=Cancelado, 1=Enviado, 2=Aceito, 3=Negado)
+            let filtroStatus = '';
+            const params = [car_id];
+            if (req.query.status !== undefined) {
+                const statusFiltro = parseInt(req.query.status);
+                if (isNaN(statusFiltro) || ![0, 1, 2, 3].includes(statusFiltro)) {
+                    return res.status(400).json({ error: "status inválido. Use 0, 1, 2 ou 3." });
+                }
+                filtroStatus = ' AND s.sol_status = ?';
+                params.push(statusFiltro);
+            }
+
             const [solicitacoes] = await db.query(
                 `SELECT s.sol_id, s.usu_id_passageiro, s.sol_vaga_soli, s.sol_status,
                         u.usu_nome AS passageiro
                  FROM SOLICITACOES_CARONA s
                  INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
-                 WHERE s.car_id = ?
+                 WHERE s.car_id = ?${filtroStatus}
                  ORDER BY s.sol_id DESC
                  LIMIT ? OFFSET ?`,
-                [car_id, limit, offset]
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral FROM SOLICITACOES_CARONA s WHERE s.car_id = ?${filtroStatus}`,
+                params
             );
 
             return res.status(200).json({
                 message: "Solicitações da carona listadas",
+                totalGeral,
                 total:   solicitacoes.length,
                 page,
                 limit,
                 car_id:  parseInt(car_id),
+                ...(req.query.status !== undefined && { status: parseInt(req.query.status) }),
                 solicitacoes
             });
 
@@ -315,8 +344,14 @@ class SolicitacaoController {
                 [usua_id, limit, offset]
             );
 
+            const [[{ totalGeral }]] = await db.query(
+                'SELECT COUNT(*) AS totalGeral FROM SOLICITACOES_CARONA WHERE usu_id_passageiro = ?',
+                [usua_id]
+            );
+
             return res.status(200).json({
                 message:     "Solicitações do usuário listadas",
+                totalGeral,
                 total:       solicitacoes.length,
                 page,
                 limit,
@@ -378,26 +413,12 @@ class SolicitacaoController {
                 return res.status(403).json({ error: "Sem permissão para responder esta solicitação." });
             }
 
-            // PASSO 2: Ao aceitar, verifica se o passageiro já está vinculado a outra carona ativa
-            // Checagem feita antes da transação para evitar criar vínculo duplo pelo lado do motorista
-            if (statusCodigo === 2) {
-                const [jaVinculado] = await db.query(
-                    `SELECT s.sol_id FROM SOLICITACOES_CARONA s
-                     INNER JOIN CARONAS c ON s.car_id = c.car_id
-                     WHERE s.usu_id_passageiro = ? AND s.sol_status = 2 AND c.car_status IN (1, 2)`,
-                    [sol[0].usu_id_passageiro]
-                );
-                if (jaVinculado.length > 0) {
-                    return res.status(403).json({
-                        error: "Passageiro já está vinculado a outra carona ativa. Aceite bloqueado."
-                    });
-                }
-            }
-
-            // PASSO 3: Atualiza status e vagas em transação atômica.
+            // PASSO 2: Atualiza status e vagas em transação atômica.
             // Garante que sol_status e car_vagas_dispo nunca fiquem inconsistentes em caso de falha parcial.
             // Para o caso "Aceito", usa SELECT ... FOR UPDATE para bloquear a linha da carona e
             // re-verificar vagas dentro da transação — previne race condition de overbooking.
+            // A verificação de vínculo do passageiro também é feita DENTRO da transação para
+            // eliminar a race condition onde dois motoristas aceitam o mesmo passageiro simultaneamente.
             conn = await db.getConnection();
             await conn.beginTransaction();
 
@@ -414,6 +435,23 @@ class SolicitacaoController {
             }
 
             if (statusCodigo === 2) {
+                // Verifica vínculo ativo do passageiro dentro da transação — elimina race condition
+                const [jaVinculado] = await conn.query(
+                    `SELECT s.sol_id FROM SOLICITACOES_CARONA s
+                     INNER JOIN CARONAS c ON s.car_id = c.car_id
+                     WHERE s.usu_id_passageiro = ? AND s.sol_status = 2
+                       AND c.car_status IN (1, 2) AND s.sol_id != ?`,
+                    [sol[0].usu_id_passageiro, soli_id]
+                );
+                if (jaVinculado.length > 0) {
+                    await conn.rollback();
+                    conn.release();
+                    conn = null;
+                    return res.status(403).json({
+                        error: "Passageiro já está vinculado a outra carona ativa. Aceite bloqueado."
+                    });
+                }
+
                 // Bloqueia a linha e re-lê vagas dentro da transação para evitar overbooking concorrente
                 const [carona] = await conn.query(
                     'SELECT car_vagas_dispo FROM CARONAS WHERE car_id = ? FOR UPDATE',
@@ -479,6 +517,10 @@ class SolicitacaoController {
                 return res.status(403).json({ error: "Sem permissão para cancelar esta solicitação." });
             }
 
+            if (sol[0].sol_status === 0) {
+                return res.status(409).json({ error: "Solicitação já foi cancelada." });
+            }
+
             // PASSO 2: Cancela a solicitação e devolve vagas em transação atômica.
             // Garante que o cancelamento e a devolução de vagas nunca fiquem inconsistentes.
             conn = await db.getConnection();
@@ -523,16 +565,17 @@ class SolicitacaoController {
      * Parâmetro: soli_id (via URL)
      */
     async deletarSolicitacao(req, res) {
+        const { soli_id } = req.params;
+
+        if (!soli_id || isNaN(soli_id)) {
+            return res.status(400).json({ error: "ID de solicitação inválido." });
+        }
+
+        let conn;
         try {
-            const { soli_id } = req.params;
-
-            if (!soli_id || isNaN(soli_id)) {
-                return res.status(400).json({ error: "ID de solicitação inválido." });
-            }
-
             // PASSO 1: Verifica se o usuário autenticado é o motorista desta carona
             const [sol] = await db.query(
-                `SELECT s.car_id, cu.usu_id AS usu_id_motorista
+                `SELECT s.car_id, s.sol_status, s.sol_vaga_soli, cu.usu_id AS usu_id_motorista
                  FROM SOLICITACOES_CARONA s
                  INNER JOIN CARONAS c         ON s.car_id       = c.car_id
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
@@ -546,17 +589,36 @@ class SolicitacaoController {
                 return res.status(403).json({ error: "Sem permissão para deletar esta solicitação." });
             }
 
-            // PASSO 2: Soft delete — muda status para 0 (Cancelado)
-            await db.query(
+            if (sol[0].sol_status === 0) {
+                return res.status(409).json({ error: "Solicitação já foi cancelada." });
+            }
+
+            // PASSO 2: Soft delete em transação — se estava aceita (sol_status=2), devolve a vaga
+            conn = await db.getConnection();
+            await conn.beginTransaction();
+
+            await conn.query(
                 'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE sol_id = ?',
                 [soli_id]
             );
 
+            if (sol[0].sol_status === 2) {
+                await conn.query(
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + ? WHERE car_id = ?',
+                    [sol[0].sol_vaga_soli, sol[0].car_id]
+                );
+            }
+
+            await conn.commit();
+
             return res.status(204).send();
 
         } catch (error) {
+            if (conn) await conn.rollback();
             console.error("[ERRO] deletarSolicitacao:", error);
             return res.status(500).json({ error: "Erro ao deletar solicitação." });
+        } finally {
+            if (conn) conn.release();
         }
     }
 }

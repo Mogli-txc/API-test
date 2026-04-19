@@ -406,8 +406,9 @@ class UsuarioController {
 
             // Refresh token — longa duração (30 dias), rotacionado a cada uso
             // Apenas o hash HMAC-SHA256 é persistido; o token plaintext vai somente na resposta
+            const REFRESH_SECRET     = process.env.REFRESH_SECRET || process.env.JWT_SECRET;
             const refreshToken       = crypto.randomBytes(40).toString('hex');
-            const refreshHash        = crypto.createHmac('sha256', process.env.JWT_SECRET).update(refreshToken).digest('hex');
+            const refreshHash        = crypto.createHmac('sha256', REFRESH_SECRET).update(refreshToken).digest('hex');
             const refreshExpira      = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // +30 dias
 
             await db.query(
@@ -528,6 +529,17 @@ class UsuarioController {
                 return res.status(400).json({ error: "Formato de email inválido." });
             }
 
+            // Verifica se o email já está em uso por outro usuário
+            if (usu_email) {
+                const [emailExistente] = await db.query(
+                    'SELECT usu_id FROM USUARIOS WHERE usu_email = ? AND usu_id != ?',
+                    [usu_email, id]
+                );
+                if (emailExistente.length > 0) {
+                    return res.status(409).json({ error: "E-mail já está em uso por outro usuário." });
+                }
+            }
+
             const campos  = [];
             const valores = [];
 
@@ -540,10 +552,31 @@ class UsuarioController {
                 valores.push(senhaHash);
             }
 
+            // Troca de email: zera verificação e exige novo OTP para confirmar o novo endereço
+            if (usu_email) {
+                const otp     = gerarOtp();
+                const otpHash = hashOtp(otp);
+                campos.push('usu_verificacao = ?');        valores.push(0);
+                campos.push('usu_otp_hash = ?');           valores.push(otpHash);
+                campos.push('usu_otp_expira = DATE_ADD(NOW(), INTERVAL 10 MINUTE)');
+                campos.push('usu_otp_tentativas = ?');     valores.push(0);
+                campos.push('usu_otp_bloqueado_ate = ?');  valores.push(null);
+                // Invalida sessão ativa — forçará novo login após re-verificação
+                campos.push('usu_refresh_hash = ?');       valores.push(null);
+                campos.push('usu_refresh_expira = ?');     valores.push(null);
+                enqueueEmail({ type: 'otp', email: usu_email, otp });
+            }
+
             valores.push(id);
 
             // Whitelist: apenas colunas conhecidas podem entrar na query
-            const COLUNAS_PERMITIDAS = ['usu_nome = ?', 'usu_email = ?', 'usu_senha = ?'];
+            const COLUNAS_PERMITIDAS = [
+                'usu_nome = ?', 'usu_email = ?', 'usu_senha = ?',
+                'usu_verificacao = ?', 'usu_otp_hash = ?',
+                'usu_otp_expira = DATE_ADD(NOW(), INTERVAL 10 MINUTE)',
+                'usu_otp_tentativas = ?', 'usu_otp_bloqueado_ate = ?',
+                'usu_refresh_hash = ?', 'usu_refresh_expira = ?'
+            ];
             if (!campos.every(c => COLUNAS_PERMITIDAS.includes(c))) {
                 return res.status(400).json({ error: "Campo inválido detectado." });
             }
@@ -558,7 +591,11 @@ class UsuarioController {
                 [id]
             );
 
-            return res.status(200).json({ message: "Usuário atualizado com sucesso!" });
+            return res.status(200).json({
+                message: usu_email
+                    ? "E-mail atualizado. Verifique seu novo endereço com o código enviado para reativar o acesso."
+                    : "Usuário atualizado com sucesso!"
+            });
 
         } catch (error) {
             console.error("[ERRO] atualizar:", error);
@@ -769,8 +806,33 @@ class UsuarioController {
                 return res.status(403).json({ error: "Sem permissão para deletar este usuário." });
             }
 
+            // Cancela solicitações ativas nas caronas onde o usuário é motorista
             await db.query(
-                'UPDATE USUARIOS SET usu_status = 0 WHERE usu_id = ?',
+                `UPDATE SOLICITACOES_CARONA sc
+                 INNER JOIN CARONAS c          ON sc.car_id    = c.car_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 SET sc.sol_status = 0
+                 WHERE cu.usu_id = ? AND c.car_status IN (1, 2) AND sc.sol_status IN (1, 2)`,
+                [id]
+            );
+            // Cancela caronas abertas onde o usuário é motorista
+            await db.query(
+                `UPDATE CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 SET c.car_status = 0
+                 WHERE cu.usu_id = ? AND c.car_status IN (1, 2)`,
+                [id]
+            );
+            // Cancela solicitações ativas do usuário como passageiro
+            await db.query(
+                'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE usu_id_passageiro = ? AND sol_status IN (1, 2)',
+                [id]
+            );
+
+            await db.query(
+                `UPDATE USUARIOS
+                 SET usu_status = 0, usu_refresh_hash = NULL, usu_refresh_expira = NULL
+                 WHERE usu_id = ?`,
                 [id]
             );
 
@@ -801,7 +863,8 @@ class UsuarioController {
             }
 
             // PASSO 1: Reconstrói o hash para lookup seguro (timing-safe via DB lookup)
-            const hashRecebido = crypto.createHmac('sha256', process.env.JWT_SECRET)
+            const REFRESH_SECRET = process.env.REFRESH_SECRET || process.env.JWT_SECRET;
+            const hashRecebido = crypto.createHmac('sha256', REFRESH_SECRET)
                 .update(refresh_token)
                 .digest('hex');
 
@@ -835,7 +898,7 @@ class UsuarioController {
 
             // PASSO 5: Rotaciona o refresh token (invalida o anterior, emite novo)
             const novoRefresh      = crypto.randomBytes(40).toString('hex');
-            const novoRefreshHash  = crypto.createHmac('sha256', process.env.JWT_SECRET).update(novoRefresh).digest('hex');
+            const novoRefreshHash  = crypto.createHmac('sha256', REFRESH_SECRET).update(novoRefresh).digest('hex');
             const novoRefreshExpira = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
             await db.query(

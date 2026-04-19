@@ -144,23 +144,29 @@ components:
     # ─── Veículo ────────────────────────────────────────────────────────────────
     VeiculoCadastroRequest:
       type: object
-      required: [usu_id, vei_placa, vei_modelo, vei_cor, vei_ano]
+      required: [vei_placa, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas]
       properties:
-        usu_id:
-          type: integer
-          example: 1
         vei_placa:
           type: string
           example: ABC-1234
-        vei_modelo:
+          description: "Formato antigo ABC-1234 ou Mercosul ABC1D23. Único no sistema."
+        vei_marca_modelo:
           type: string
           example: Fiat Uno
+        vei_tipo:
+          type: integer
+          enum: [0, 1]
+          description: "0 = Moto | 1 = Carro"
+          example: 1
         vei_cor:
           type: string
           example: Branco
-        vei_ano:
+        vei_vagas:
           type: integer
-          example: 2018
+          minimum: 1
+          maximum: 4
+          description: "Moto: exatamente 1. Carro: 1–4."
+          example: 3
 
     Veiculo:
       type: object
@@ -174,15 +180,20 @@ components:
         vei_placa:
           type: string
           example: ABC-1234
-        vei_modelo:
+        vei_marca_modelo:
           type: string
           example: Fiat Uno
+        vei_tipo:
+          type: integer
+          enum: [0, 1]
+          description: "0 = Moto | 1 = Carro"
+          example: 1
         vei_cor:
           type: string
           example: Branco
-        vei_ano:
+        vei_vagas:
           type: integer
-          example: 2018
+          example: 3
         vei_status:
           type: integer
           example: 1
@@ -248,6 +259,8 @@ components:
         sol_vaga_soli:
           type: integer
           minimum: 1
+          maximum: 4
+          description: "Moto: máximo 1. Carro: não pode exceder car_vagas_dispo (máx. 4)."
           example: 1
 
     Solicitacao:
@@ -408,14 +421,16 @@ components:
     # ─── Matrícula ──────────────────────────────────────────────────────────────
     MatriculaCriarRequest:
       type: object
-      required: [usu_id, cur_id]
+      required: [cur_id, cur_usu_dataFinal]
       properties:
-        usu_id:
-          type: integer
-          example: 2
         cur_id:
           type: integer
           example: 3
+        cur_usu_dataFinal:
+          type: string
+          format: date
+          example: "2026-12-31"
+          description: "Data de validade da matrícula (YYYY-MM-DD)"
 
     # ─── Penalidade ─────────────────────────────────────────────────────────────
     PenalidadeAplicarRequest:
@@ -1020,6 +1035,12 @@ paths:
       summary: Cadastrar veículo
       description: |
         Registra um novo veículo para o usuário autenticado.
+
+        **Regras de validação:**
+        - `vei_placa`: formato antigo `ABC-1234` ou Mercosul `ABC1D23`. Única globalmente — retorna 409 se já cadastrada.
+        - `vei_tipo`: `0` = Moto | `1` = Carro.
+        - `vei_vagas`: Moto aceita exatamente 1; Carro aceita 1–4.
+
         Efeito colateral: se o usuário estava no nível **5**, é promovido para **6**.
       security:
         - bearerAuth: []
@@ -1042,9 +1063,11 @@ paths:
                   veiculo:
                     $ref: '#/components/schemas/Veiculo'
         '400':
-          description: Dados inválidos
+          description: Dados inválidos (placa mal formatada, vagas fora do limite por tipo)
         '401':
           description: Não autenticado
+        '409':
+          description: Placa já cadastrada no sistema
 
   /api/veiculos/usuario/{usu_id}:
     get:
@@ -1106,6 +1129,70 @@ paths:
         '401':
           description: Não autenticado
 
+  /api/caronas/minhas:
+    get:
+      tags: [Caronas]
+      summary: Listar caronas do motorista autenticado
+      description: |
+        Retorna todas as caronas oferecidas pelo motorista autenticado, em qualquer status.
+
+        **Filtro opcional por status:** `?status=1` retorna apenas caronas abertas.
+        Valores: `0`=Cancelada, `1`=Aberta, `2`=Em espera, `3`=Finalizada.
+        Sem o parâmetro, retorna todos os status.
+
+        Suporta paginação convencional: `?page=<n>&limit=<n>`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1, 2, 3]
+          description: "Filtra por car_status. Omitir = todos os status."
+          example: 1
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista de caronas do motorista
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Suas caronas listadas com sucesso.
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  status:
+                    type: integer
+                    description: "Presente apenas quando ?status= foi informado"
+                  caronas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Carona'
+        '400':
+          description: "status inválido (valor fora de 0–3)"
+        '401':
+          description: Não autenticado
+
   /api/caronas/oferecer:
     post:
       tags: [Caronas]
@@ -1161,6 +1248,15 @@ paths:
     put:
       tags: [Caronas]
       summary: Atualizar carona
+      description: |
+        Atualiza campos de uma carona. Apenas o motorista dono pode editar.
+
+        **Restrições:**
+        - Bloqueado se `car_status = 0` (cancelada) ou `car_status = 3` (finalizada).
+        - `car_status = 3` não pode ser setado aqui — use `POST /api/caronas/{car_id}/finalizar`.
+        - `car_vagas_dispo` não pode ser inferior ao número de passageiros já aceitos (`sol_status = 2`).
+        - `car_vagas_dispo` não pode exceder a capacidade do veículo (`vei_vagas`).
+        - `car_data` e `car_hor_saida` são revalidados para garantir data/hora futura.
       security:
         - bearerAuth: []
       parameters:
@@ -1181,23 +1277,40 @@ paths:
                   type: string
                 car_data:
                   type: string
-                  format: date-time
+                  format: date
+                  example: "2026-05-10"
+                car_hor_saida:
+                  type: string
+                  example: "08:30"
                 car_vagas_dispo:
                   type: integer
+                  description: "Não pode ser menor que passageiros aceitos nem maior que vei_vagas"
                 car_status:
-                  type: string
-                  enum: [Aberta, Em espera, Finalizada, Cancelada]
+                  type: integer
+                  enum: [0, 1, 2]
+                  description: "0=Cancelada, 1=Aberta, 2=Em espera. Status 3 usa /finalizar."
       responses:
         '200':
           description: Carona atualizada
+        '400':
+          description: Campo inválido, data passada ou vagas fora do limite
         '403':
-          description: Sem permissão
+          description: Sem permissão para editar esta carona
         '404':
           description: Carona não encontrada
+        '409':
+          description: Carona já cancelada/finalizada, ou vagas abaixo dos passageiros aceitos
 
     delete:
       tags: [Caronas]
       summary: Cancelar carona
+      description: |
+        Cancela a carona (`car_status = 0`) em transação atômica.
+        Também cancela automaticamente todas as solicitações pendentes (`sol_status = 1`)
+        e aceitas (`sol_status = 2`) da carona, liberando os passageiros para solicitar
+        outras caronas. Registra audit log.
+
+        Bloqueado se a carona já estiver cancelada (`409`) ou finalizada (`409`).
       security:
         - bearerAuth: []
       parameters:
@@ -1209,9 +1322,52 @@ paths:
           example: 1
       responses:
         '204':
-          description: Carona cancelada
+          description: Carona cancelada e solicitações ativas encerradas
         '403':
           description: Sem permissão
+        '404':
+          description: Carona não encontrada
+        '409':
+          description: Carona já cancelada ou já finalizada
+
+  /api/caronas/{car_id}/finalizar:
+    post:
+      tags: [Caronas]
+      summary: Finalizar uma carona
+      description: |
+        Marca a carona como finalizada (`car_status = 3`). Exclusivo para o motorista dono.
+
+        **Regras:**
+        - A carona deve estar Aberta (`1`) ou Em espera (`2`).
+        - Retorna `409` se já estiver finalizada ou cancelada.
+        - Após finalizada, as avaliações entre participantes podem ser registradas.
+        - Registra audit log (`CARONA_FINALIZAR`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: car_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Carona finalizada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Carona finalizada com sucesso!
+        '403':
+          description: Sem permissão (não é o motorista dono)
+        '404':
+          description: Carona não encontrada
+        '409':
+          description: Carona já finalizada ou já cancelada
 
   # ────────────────────────────────────────────────────────────────────────────
   # SOLICITAÇÕES — /api/solicitacoes
@@ -1224,6 +1380,11 @@ paths:
         Passageiro solicita vaga em uma carona.
         `usu_id_passageiro` é extraído automaticamente do JWT.
         Status inicial: **Pendente**.
+
+        **Regras de vagas por tipo de veículo:**
+        - **Moto** (`vei_tipo = 0`): `sol_vaga_soli` deve ser exatamente **1**.
+        - **Carro** (`vei_tipo = 1`): `sol_vaga_soli` não pode exceder `car_vagas_dispo` (máx. 4).
+        - `sol_vaga_soli` global: mínimo 1, máximo 4.
       security:
         - bearerAuth: []
       requestBody:
@@ -1375,7 +1536,10 @@ paths:
     put:
       tags: [Solicitações]
       summary: Passageiro cancela solicitação
-      description: Se o status era **Aceito**, devolve a vaga para a carona.
+      description: |
+        Passageiro cancela sua própria solicitação (`sol_status → 0`).
+        Se o status era **Aceito** (`sol_status = 2`), a vaga é devolvida à carona em
+        transação atômica. Retorna `409` se a solicitação já estiver cancelada.
       security:
         - bearerAuth: []
       parameters:
@@ -1390,6 +1554,8 @@ paths:
           description: Solicitação cancelada
         '403':
           description: Apenas o passageiro pode cancelar sua própria solicitação
+        '409':
+          description: Solicitação já foi cancelada
 
   # ────────────────────────────────────────────────────────────────────────────
   # AVALIAÇÕES — /api/avaliacoes
@@ -1502,8 +1668,15 @@ paths:
       tags: [Mensagens]
       summary: Enviar mensagem na carona
       description: |
-        `remetente_id` é extraído do JWT. As mensagens também são emitidas
-        em tempo real via Socket.io para a sala `carona-{car_id}`.
+        `remetente_id` é extraído do JWT — não aceito no body (evita spoofing).
+
+        **Validações de participação:**
+        - O remetente deve ser motorista ou passageiro aceito da carona (`car_pes_status = 1`
+          ou `sol_status = 2`). Retorna `403` se não for participante.
+        - O destinatário também deve ser participante da mesma carona. Retorna `403` se
+          o destinatário não pertencer à carona.
+
+        As mensagens também são emitidas em tempo real via Socket.io para a sala `carona-{car_id}`.
       security:
         - bearerAuth: []
       requestBody:
@@ -1511,7 +1684,22 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MensagemEnviarRequest'
+              type: object
+              required: [car_id, usu_id_destinatario, men_texto]
+              properties:
+                car_id:
+                  type: integer
+                  example: 1
+                usu_id_destinatario:
+                  type: integer
+                  example: 3
+                men_texto:
+                  type: string
+                  example: Já estou a caminho!
+                men_id_resposta:
+                  type: integer
+                  nullable: true
+                  description: ID da mensagem sendo respondida (opcional)
       responses:
         '201':
           description: Mensagem enviada
@@ -1524,6 +1712,12 @@ paths:
                     type: string
                   mensagem:
                     $ref: '#/components/schemas/Mensagem'
+        '400':
+          description: Dados inválidos ou usuário tentou enviar para si mesmo
+        '403':
+          description: Remetente ou destinatário não é participante desta carona
+        '404':
+          description: Carona não encontrada
         '401':
           description: Não autenticado
 
@@ -1686,6 +1880,15 @@ paths:
     post:
       tags: [Passageiros]
       summary: Adicionar passageiro a uma carona
+      description: |
+        Apenas o motorista pode confirmar passageiros. A carona deve estar Aberta (`1`)
+        ou Em espera (`2`).
+
+        **Atomicidade:** verifica vagas com `SELECT ... FOR UPDATE` e decrementa
+        `car_vagas_dispo` no mesmo commit — previne overbooking concorrente.
+
+        Retorna `409` se não houver vagas ou o passageiro já estiver vinculado a outra
+        carona ativa. Retorna `403` se o passageiro já estiver em outra carona ativa.
       security:
         - bearerAuth: []
       requestBody:
@@ -1696,11 +1899,17 @@ paths:
               $ref: '#/components/schemas/PassageiroCriarRequest'
       responses:
         '201':
-          description: Passageiro adicionado
+          description: Passageiro adicionado e vaga decrementada
         '400':
           description: Dados inválidos
         '401':
           description: Não autenticado
+        '403':
+          description: Sem permissão ou passageiro já vinculado a outra carona ativa
+        '404':
+          description: Carona não encontrada ou não está ativa
+        '409':
+          description: Passageiro já está nesta carona ou não há vagas disponíveis
 
   /api/passageiros/carona/{car_id}:
     get:
@@ -1715,6 +1924,16 @@ paths:
           schema:
             type: integer
           example: 1
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
           description: Lista de passageiros
@@ -1723,6 +1942,20 @@ paths:
               schema:
                 type: object
                 properties:
+                  message:
+                    type: string
+                  totalGeral:
+                    type: integer
+                    description: Total de registros em todas as páginas
+                  total:
+                    type: integer
+                    description: Total na página atual
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  car_id:
+                    type: integer
                   passageiros:
                     type: array
                     items:
@@ -1733,12 +1966,26 @@ paths:
                         usu_id:
                           type: integer
                         car_pes_status:
+                          type: integer
+                          enum: [0, 1, 2]
+                          description: "0=Cancelado, 1=Aceito, 2=Negado"
+                        passageiro:
                           type: string
+                          description: usu_nome do passageiro
 
   /api/passageiros/{car_pes_id}:
     put:
       tags: [Passageiros]
       summary: Atualizar status do passageiro
+      description: |
+        Motorista altera o status de um passageiro (`0`=Cancelado, `1`=Aceito, `2`=Negado`).
+
+        **Ajuste automático de vagas:**
+        - `1 → 0` ou `1 → 2`: passageiro removido/negado — devolve 1 vaga.
+        - `0 → 1` ou `2 → 1`: passageiro re-aceito — consome 1 vaga (verificação via `FOR UPDATE`).
+        - Retorna `409` se tentar re-aceitar sem vagas disponíveis.
+
+        Executa em transação atômica.
       security:
         - bearerAuth: []
       parameters:
@@ -1757,18 +2004,27 @@ paths:
               required: [car_pes_status]
               properties:
                 car_pes_status:
-                  type: string
-                  example: Confirmado
+                  type: integer
+                  enum: [0, 1, 2]
+                  description: "0=Cancelado, 1=Aceito, 2=Negado"
+                  example: 0
       responses:
         '200':
-          description: Status atualizado
+          description: Status atualizado e vagas ajustadas
         '403':
-          description: Sem permissão
+          description: Sem permissão (não é o motorista)
+        '404':
+          description: Registro não encontrado
+        '409':
+          description: Sem vagas disponíveis para re-aceitar o passageiro
 
     delete:
       tags: [Passageiros]
       summary: Remover passageiro da carona
-      description: Requer papel Admin (1) ou Dev (2).
+      description: |
+        Requer papel Admin (1) ou Dev (2). Soft delete (`car_pes_status = 0`).
+        Se o passageiro estava Aceito (`car_pes_status = 1`), devolve a vaga à carona
+        em transação atômica.
       security:
         - bearerAuth: []
       parameters:
@@ -1780,9 +2036,11 @@ paths:
           example: 1
       responses:
         '204':
-          description: Passageiro removido
+          description: Passageiro removido e vaga devolvida (se estava aceito)
         '403':
           description: Apenas Admin ou Dev podem remover
+        '404':
+          description: Registro não encontrado
 
   # ────────────────────────────────────────────────────────────────────────────
   # SUGESTÕES E DENÚNCIAS — /api/sugestoes
@@ -1892,6 +2150,11 @@ paths:
       summary: Inscrever usuário em um curso
       description: |
         O `cur_usu_id` retornado é usado como identificador ao criar uma carona.
+        O usuário matriculado é sempre o autenticado (JWT) — `usu_id` não é aceito no body.
+
+        **Validações da escola:**
+        - **Domínio de e-mail** (`esc_dominio`): se configurado, o e-mail do usuário deve terminar com `@<dominio>` — retorna 403 se divergir.
+        - **Cota de usuários** (`esc_max_usuarios`): se configurado, impede matrícula quando o número de usuários ativos da escola atingir o limite — retorna 409.
       security:
         - bearerAuth: []
       requestBody:
@@ -1914,9 +2177,15 @@ paths:
                     type: integer
                     example: 5
         '400':
-          description: Já matriculado neste curso
+          description: Dados inválidos (cur_id ou cur_usu_dataFinal ausentes/inválidos)
         '401':
           description: Não autenticado
+        '403':
+          description: E-mail do usuário não pertence ao domínio institucional da escola
+        '404':
+          description: Curso não encontrado
+        '409':
+          description: Usuário já matriculado neste curso, ou escola atingiu cota máxima de usuários
 
   /api/matriculas/usuario/{usu_id}:
     get:
@@ -2157,8 +2426,8 @@ paths:
       tags: [Admin]
       summary: Listar penalidades de um usuário
       description: |
-        Retorna histórico completo de penalidades do usuário.
-        Use `?ativas=1` para filtrar apenas as vigentes.
+        Retorna histórico paginado de penalidades do usuário.
+        Use `?ativas=1` para filtrar apenas as vigentes (não expiradas e `pen_ativo = 1`).
         Admin vê apenas usuários da sua escola; Dev vê qualquer usuário.
       security:
         - bearerAuth: []
@@ -2176,9 +2445,19 @@ paths:
             enum: [0, 1]
           description: "1 = retorna apenas penalidades ativas e não expiradas"
           example: 1
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
-          description: Lista de penalidades
+          description: Lista paginada de penalidades
           content:
             application/json:
               schema:
@@ -2186,7 +2465,15 @@ paths:
                 properties:
                   message:
                     type: string
+                  totalGeral:
+                    type: integer
+                    description: Total de registros em todas as páginas
                   total:
+                    type: integer
+                    description: Total na página atual
+                  page:
+                    type: integer
+                  limit:
                     type: integer
                   penalidades:
                     type: array
@@ -2255,7 +2542,8 @@ paths:
       summary: Remover penalidade
       description: |
         Desativa a penalidade (`pen_ativo = 0`).
-        Se `pen_tipo = 4`, restaura `usu_verificacao = 1`, reabilitando o login.
+        Se `pen_tipo = 4`, consulta os veículos ativos do usuário e restaura
+        `usu_verificacao` para o nível correto: `2` (com veículo ativo) ou `1` (sem veículo).
         Admin só pode remover penalidades de usuários da sua escola.
       security:
         - bearerAuth: []

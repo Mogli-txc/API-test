@@ -62,8 +62,50 @@ class MensagemController {
                 return res.status(400).json({ error: "Não é possível enviar mensagem para si mesmo." });
             }
 
-            // PASSO 6: Inserção da mensagem no banco (usa o texto já trimado)
-            // INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta)
+            // PASSO 6: Verifica se o remetente é participante da carona (motorista ou passageiro aceito)
+            const [infoCarona] = await db.query(
+                `SELECT cu.usu_id AS motorista_id FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [car_id]
+            );
+            if (infoCarona.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            const motoristaId = infoCarona[0].motorista_id;
+            const ehRemMetorista = motoristaId === usu_id_remetente;
+            const ehDestMotorista = motoristaId === parseInt(usu_id_destinatario);
+
+            if (!ehRemMetorista) {
+                const [remPassageiro] = await db.query(
+                    `SELECT 1 FROM CARONA_PESSOAS
+                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                     UNION
+                     SELECT 1 FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+                    [car_id, usu_id_remetente, car_id, usu_id_remetente]
+                );
+                if (remPassageiro.length === 0) {
+                    return res.status(403).json({ error: "Você não é participante desta carona." });
+                }
+            }
+
+            // PASSO 7: Verifica se o destinatário também é participante da mesma carona
+            if (!ehDestMotorista) {
+                const [destPassageiro] = await db.query(
+                    `SELECT 1 FROM CARONA_PESSOAS
+                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                     UNION
+                     SELECT 1 FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+                    [car_id, usu_id_destinatario, car_id, usu_id_destinatario]
+                );
+                if (destPassageiro.length === 0) {
+                    return res.status(403).json({ error: "O destinatário não é participante desta carona." });
+                }
+            }
+
+            // PASSO 8: Inserção da mensagem no banco (usa o texto já trimado)
             const [resultado] = await db.query(
                 `INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta)
                  VALUES (?, ?, ?, ?, ?)`,
@@ -71,7 +113,7 @@ class MensagemController {
                  men_id_resposta ? parseInt(men_id_resposta) : null]
             );
 
-            // PASSO 7: Resposta de sucesso com o ID gerado pelo banco
+            // PASSO 9: Resposta de sucesso com o ID gerado pelo banco
             return res.status(201).json({
                 message: "Mensagem enviada com sucesso!",
                 mensagem: {
@@ -138,8 +180,9 @@ class MensagemController {
             const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
             const offset = (page - 1) * limit;
 
-            // PASSO 5: Busca no banco com JOIN para trazer os nomes dos usuários
-            // Filtra mensagens deletadas (soft delete: men_deletado_em IS NULL = ativas)
+            // PASSO 5: Busca no banco com JOIN para trazer os nomes dos usuários.
+            // Filtra mensagens deletadas (soft delete: men_deletado_em IS NULL = ativas).
+            // Restringe ao par do usuário autenticado — evita exposição de mensagens privadas entre outros participantes.
             const [mensagens] = await db.query(
                 `SELECT m.men_id, m.men_texto, m.men_id_resposta,
                         u_rem.usu_nome  AS remetente,
@@ -148,18 +191,29 @@ class MensagemController {
                  INNER JOIN USUARIOS u_rem  ON m.usu_id_remetente    = u_rem.usu_id
                  INNER JOIN USUARIOS u_dest ON m.usu_id_destinatario = u_dest.usu_id
                  WHERE m.car_id = ? AND m.men_deletado_em IS NULL
+                   AND (m.usu_id_remetente = ? OR m.usu_id_destinatario = ?)
                  ORDER BY m.men_id ASC
                  LIMIT ? OFFSET ?`,
-                [caro_id, limit, offset]
+                [caro_id, req.user.id, req.user.id, limit, offset]
             );
 
-            // PASSO 6: Resposta de sucesso
+            // PASSO 6: Conta total de mensagens visíveis ao usuário (mesmo filtro do PASSO 5)
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral
+                 FROM MENSAGENS
+                 WHERE car_id = ? AND men_deletado_em IS NULL
+                   AND (usu_id_remetente = ? OR usu_id_destinatario = ?)`,
+                [caro_id, req.user.id, req.user.id]
+            );
+
+            // PASSO 7: Resposta de sucesso
             return res.status(200).json({
-                message:  "Conversa recuperada com sucesso",
-                total:    mensagens.length,
+                message:    "Conversa recuperada com sucesso",
+                totalGeral,
+                total:      mensagens.length,
                 page,
                 limit,
-                caro_id:  parseInt(caro_id),
+                caro_id:    parseInt(caro_id),
                 mensagens
             });
 

@@ -17,14 +17,16 @@ class CaronaPessoasController {
      * MÉTODO: adicionar
      * Adiciona um passageiro confirmado a uma carona.
      *
-     * Tabela: CARONA_PESSOAS (INSERT)
+     * Tabela: CARONA_PESSOAS (INSERT) + CARONAS (UPDATE car_vagas_dispo)
      * Campos obrigatórios no body: car_id, usu_id
      *
      * O que faz:
      * - Verifica se o passageiro já está na carona
+     * - Bloqueia a linha de vagas (FOR UPDATE) e decrementa atomicamente
      * - Insere com car_pes_status = 1 (Aceito) e data atual
      */
     async adicionar(req, res) {
+        let conn;
         try {
             // PASSO 1: Extrai os dados da requisição
             const { car_id, usu_id } = req.body;
@@ -61,16 +63,13 @@ class CaronaPessoasController {
                 'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ?',
                 [car_id, usu_id]
             );
-
             if (existente.length > 0) {
-                return res.status(409).json({
-                    error: "Passageiro já está nesta carona."
-                });
+                return res.status(409).json({ error: "Passageiro já está nesta carona." });
             }
 
-            // PASSO 4: Verifica se o passageiro já está vinculado a OUTRA carona ativa
+            // PASSO 5: Verifica se o passageiro já está vinculado a OUTRA carona ativa
             // Vínculo = sol_status = 2 (Aceito) em carona com car_status IN (1, 2)
-            // E excluir a carona atual (car_id) para permitir adicionar a mesma carona que já foi aceita
+            // Exclui a carona atual para permitir adicionar passageiro já aceito via solicitação
             const [jaVinculado] = await db.query(
                 `SELECT s.sol_id FROM SOLICITACOES_CARONA s
                  INNER JOIN CARONAS c ON s.car_id = c.car_id
@@ -83,14 +82,35 @@ class CaronaPessoasController {
                 });
             }
 
-            // PASSO 5: Insere o passageiro com status 1 (Aceito) e data atual
-            const [resultado] = await db.query(
+            // PASSO 6: Insere passageiro e decrementa vagas em transação atômica.
+            // SELECT ... FOR UPDATE bloqueia a linha da carona e re-lê vagas — previne race condition de overbooking.
+            conn = await db.getConnection();
+            await conn.beginTransaction();
+
+            const [carona] = await conn.query(
+                'SELECT car_vagas_dispo FROM CARONAS WHERE car_id = ? FOR UPDATE',
+                [car_id]
+            );
+            if (carona[0].car_vagas_dispo <= 0) {
+                await conn.rollback();
+                conn.release();
+                conn = null;
+                return res.status(409).json({ error: "Não há vagas disponíveis nesta carona." });
+            }
+
+            const [resultado] = await conn.query(
                 `INSERT INTO CARONA_PESSOAS (car_id, usu_id, car_pes_data, car_pes_status)
                  VALUES (?, ?, NOW(), 1)`,
                 [car_id, usu_id]
             );
+            await conn.query(
+                'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo - 1 WHERE car_id = ?',
+                [car_id]
+            );
 
-            // PASSO 6: Resposta de sucesso
+            await conn.commit();
+
+            // PASSO 7: Resposta de sucesso
             return res.status(201).json({
                 message: "Passageiro adicionado à carona com sucesso!",
                 passageiro: {
@@ -102,8 +122,11 @@ class CaronaPessoasController {
             });
 
         } catch (error) {
+            if (conn) await conn.rollback();
             console.error("[ERRO] adicionar passageiro:", error);
             return res.status(500).json({ error: "Erro ao adicionar passageiro à carona." });
+        } finally {
+            if (conn) conn.release();
         }
     }
 
@@ -162,9 +185,15 @@ class CaronaPessoasController {
                 [car_id, limit, offset]
             );
 
+            const [[{ totalGeral }]] = await db.query(
+                'SELECT COUNT(*) AS totalGeral FROM CARONA_PESSOAS WHERE car_id = ?',
+                [car_id]
+            );
+
             // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:     `Passageiros da carona ${car_id} listados.`,
+                totalGeral,
                 total:       passageiros.length,
                 page,
                 limit,
@@ -181,12 +210,16 @@ class CaronaPessoasController {
     /**
      * MÉTODO: atualizarStatus
      * Atualiza o status de um passageiro na carona (Aceito, Negado ou Cancelado).
+     * Ajusta car_vagas_dispo quando o status muda de/para Aceito (1):
+     *   1 → 0 ou 1 → 2: passageiro removido/negado — devolve 1 vaga
+     *   0 → 1 ou 2 → 1: passageiro re-aceito — consome 1 vaga (verificando disponibilidade)
      *
-     * Tabela: CARONA_PESSOAS (UPDATE)
+     * Tabela: CARONA_PESSOAS (UPDATE) + CARONAS (UPDATE car_vagas_dispo)
      * Parâmetro: car_pes_id (via URL)
      * Campo no body: car_pes_status (0, 1 ou 2)
      */
     async atualizarStatus(req, res) {
+        let conn;
         try {
             // PASSO 1: Extrai o ID e o novo status
             const { car_pes_id } = req.params;
@@ -198,15 +231,16 @@ class CaronaPessoasController {
             }
 
             // PASSO 3: Valida o status (0=Cancelado, 1=Aceito, 2=Negado)
+            const novoStatus = parseInt(car_pes_status);
             const statusValidos = [0, 1, 2];
-            if (car_pes_status === undefined || !statusValidos.includes(parseInt(car_pes_status))) {
+            if (car_pes_status === undefined || !statusValidos.includes(novoStatus)) {
                 return res.status(400).json({ error: "Status inválido. Use 0 (Cancelado), 1 (Aceito) ou 2 (Negado)." });
             }
 
             // PASSO 4: Verifica se o usuário autenticado é o motorista da carona
-            // Apenas o motorista pode alterar o status dos passageiros confirmados
+            // Lê também o status atual para calcular o ajuste de vagas
             const [registro] = await db.query(
-                `SELECT cp.car_id, cu.usu_id AS motorista_id
+                `SELECT cp.car_id, cp.car_pes_status AS status_atual, cu.usu_id AS motorista_id
                  FROM CARONA_PESSOAS cp
                  INNER JOIN CARONAS c         ON cp.car_id      = c.car_id
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
@@ -220,25 +254,57 @@ class CaronaPessoasController {
                 return res.status(403).json({ error: "Sem permissão para alterar o status deste passageiro." });
             }
 
-            // PASSO 5: Atualiza o status no banco
-            const [resultado] = await db.query(
+            const statusAtual = registro[0].car_pes_status;
+            const { car_id } = registro[0];
+
+            // PASSO 5: Atualiza status e ajusta vagas em transação
+            conn = await db.getConnection();
+            await conn.beginTransaction();
+
+            await conn.query(
                 'UPDATE CARONA_PESSOAS SET car_pes_status = ? WHERE car_pes_id = ?',
-                [car_pes_status, car_pes_id]
+                [novoStatus, car_pes_id]
             );
 
-            if (resultado.affectedRows === 0) {
-                return res.status(404).json({ error: "Registro não encontrado." });
+            // Aceito(1) removido → devolve vaga
+            if (statusAtual === 1 && novoStatus !== 1) {
+                await conn.query(
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + 1 WHERE car_id = ?',
+                    [car_id]
+                );
             }
+            // Não aceito → re-aceito: verifica disponibilidade e consome vaga
+            if (statusAtual !== 1 && novoStatus === 1) {
+                const [carona] = await conn.query(
+                    'SELECT car_vagas_dispo FROM CARONAS WHERE car_id = ? FOR UPDATE',
+                    [car_id]
+                );
+                if (carona[0].car_vagas_dispo <= 0) {
+                    await conn.rollback();
+                    conn.release();
+                    conn = null;
+                    return res.status(409).json({ error: "Não há vagas disponíveis para re-aceitar este passageiro." });
+                }
+                await conn.query(
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo - 1 WHERE car_id = ?',
+                    [car_id]
+                );
+            }
+
+            await conn.commit();
 
             // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:    "Status atualizado com sucesso!",
-                passageiro: { car_pes_id: parseInt(car_pes_id), car_pes_status: parseInt(car_pes_status) }
+                passageiro: { car_pes_id: parseInt(car_pes_id), car_pes_status: novoStatus }
             });
 
         } catch (error) {
+            if (conn) await conn.rollback();
             console.error("[ERRO] atualizarStatus (pessoas):", error);
             return res.status(500).json({ error: "Erro ao atualizar status." });
+        } finally {
+            if (conn) conn.release();
         }
     }
 
@@ -246,12 +312,13 @@ class CaronaPessoasController {
      * MÉTODO: remover
      * Remove um passageiro da carona (soft delete: car_pes_status = 0).
      * Preserva o histórico — o registro permanece no banco com status Cancelado.
-     * Apenas o motorista pode remover passageiros.
+     * Acesso restrito a Admin (per_tipo=1) e Desenvolvedor (per_tipo=2) — garantido pela rota.
      *
      * Tabela: CARONA_PESSOAS (UPDATE car_pes_status)
      * Parâmetro: car_pes_id (via URL)
      */
     async remover(req, res) {
+        let conn;
         try {
             // PASSO 1: Extrai o ID
             const { car_pes_id } = req.params;
@@ -261,34 +328,45 @@ class CaronaPessoasController {
                 return res.status(400).json({ error: "ID inválido." });
             }
 
-            // PASSO 3: Verifica se o usuário autenticado é o motorista da carona
+            // PASSO 3: Verifica se o registro existe e lê status e car_id
             const [registro] = await db.query(
-                `SELECT cp.car_id, cu.usu_id AS motorista_id
-                 FROM CARONA_PESSOAS cp
-                 INNER JOIN CARONAS c         ON cp.car_id     = c.car_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE cp.car_pes_id = ?`,
+                'SELECT car_id, car_pes_status FROM CARONA_PESSOAS WHERE car_pes_id = ?',
                 [car_pes_id]
             );
             if (registro.length === 0) {
                 return res.status(404).json({ error: "Registro não encontrado." });
             }
-            if (registro[0].motorista_id !== req.user.id) {
-                return res.status(403).json({ error: "Sem permissão para remover este passageiro." });
+            if (registro[0].car_pes_status === 0) {
+                return res.status(409).json({ error: "Passageiro já foi removido desta carona." });
             }
 
-            // PASSO 4: Soft delete — muda status para 0 (Cancelado) sem apagar o registro
-            await db.query(
+            // PASSO 4: Soft delete em transação — se passageiro estava Aceito (1), devolve a vaga
+            conn = await db.getConnection();
+            await conn.beginTransaction();
+
+            await conn.query(
                 'UPDATE CARONA_PESSOAS SET car_pes_status = 0 WHERE car_pes_id = ?',
                 [car_pes_id]
             );
+
+            if (registro[0].car_pes_status === 1) {
+                await conn.query(
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + 1 WHERE car_id = ?',
+                    [registro[0].car_id]
+                );
+            }
+
+            await conn.commit();
 
             // PASSO 5: Resposta sem conteúdo (sucesso)
             return res.status(204).send();
 
         } catch (error) {
+            if (conn) await conn.rollback();
             console.error("[ERRO] remover passageiro:", error);
             return res.status(500).json({ error: "Erro ao remover passageiro da carona." });
+        } finally {
+            if (conn) conn.release();
         }
     }
 }

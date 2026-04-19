@@ -43,6 +43,24 @@ class PontoEncontroController {
                 return res.status(400).json({ error: "pon_tipo inválido. Use 0 (Partida) ou 1 (Destino)." });
             }
 
+            // PASSO 2b: Verifica existência da carona e se o usuário autenticado é o motorista
+            const [caronaInfo] = await db.query(
+                `SELECT cu.usu_id AS motorista_id, c.car_status
+                 FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [car_id]
+            );
+            if (caronaInfo.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            if (caronaInfo[0].motorista_id !== req.user.id) {
+                return res.status(403).json({ error: "Apenas o motorista pode adicionar pontos de encontro." });
+            }
+            if (![1, 2].includes(caronaInfo[0].car_status)) {
+                return res.status(409).json({ error: "Pontos só podem ser adicionados em caronas abertas ou em espera." });
+            }
+
             // pon_ordem: quando fornecido, deve ser inteiro positivo
             let ordemNum = null;
             if (pon_ordem !== undefined && pon_ordem !== null && pon_ordem !== '') {
@@ -107,23 +125,30 @@ class PontoEncontroController {
             const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
-            // PASSO 4: Busca no banco ordenado pela ordem dos pontos
+            // PASSO 4: Busca no banco ordenado pela ordem dos pontos (NULLs ao final)
             const [pontos] = await db.query(
                 `SELECT pon_id, pon_nome, pon_endereco, pon_endereco_geom,
                         pon_tipo, pon_ordem, pon_status
                  FROM PONTO_ENCONTROS
                  WHERE car_id = ? AND pon_status = 1
-                 ORDER BY pon_ordem ASC
+                 ORDER BY pon_ordem IS NULL, pon_ordem ASC
                  LIMIT ? OFFSET ?`,
                 [car_id, limit, offset]
             );
 
+            const [[{ totalGeral }]] = await db.query(
+                'SELECT COUNT(*) AS totalGeral FROM PONTO_ENCONTROS WHERE car_id = ? AND pon_status = 1',
+                [car_id]
+            );
+
             // PASSO 5: Resposta de sucesso
             return res.status(200).json({
-                message: `Rota da carona ${car_id} recuperada.`,
-                total:   pontos.length,
+                message:    `Rota da carona ${car_id} recuperada.`,
+                totalGeral,
+                total:      pontos.length,
                 page,
                 limit,
+                car_id:     parseInt(car_id),
                 pontos
             });
 

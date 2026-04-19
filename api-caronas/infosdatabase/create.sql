@@ -14,6 +14,7 @@
 --   v6   — migration-documentos.sql: tabela DOCUMENTOS_VERIFICACAO (comprovante + CNH)
 --   v7   — migration-ocr.sql: doc_ocr_confianca em DOCUMENTOS_VERIFICACAO (Tesseract.js)
 --   v8   — migration-penalidades.sql: tabela PENALIDADES (bloqueio temporário/permanente pelo admin)
+--   v9   — migration-escola-quota.sql: esc_dominio + esc_max_usuarios em ESCOLAS; vei_placa UNIQUE em VEICULOS
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -25,9 +26,11 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- =====================================================
 DROP TABLE IF EXISTS ESCOLAS;
 CREATE TABLE ESCOLAS (
-    esc_id       INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Escola (PK)',
-    esc_nome     VARCHAR(255) NOT NULL               COMMENT 'Nome da Escola',
-    esc_endereco VARCHAR(255) NOT NULL               COMMENT 'Endereço escolar',
+    esc_id           INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Escola (PK)',
+    esc_nome         VARCHAR(255) NOT NULL               COMMENT 'Nome da Escola',
+    esc_endereco     VARCHAR(255) NOT NULL               COMMENT 'Endereço escolar',
+    esc_dominio      VARCHAR(100) NULL DEFAULT NULL      COMMENT 'Domínio de e-mail institucional (ex: usp.br). NULL = sem restrição de domínio  [v9]',
+    esc_max_usuarios INT          NULL DEFAULT NULL      COMMENT 'Limite máximo de usuários ativos por escola. NULL = sem limite  [v9]',
     PRIMARY KEY (esc_id)
 ) ENGINE = InnoDB;
 
@@ -159,15 +162,17 @@ DROP TABLE IF EXISTS VEICULOS;
 CREATE TABLE VEICULOS (
     vei_id            INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Veículo (PK)',
     usu_id            INT          NOT NULL               COMMENT 'Proprietário do Veículo (FK)',
+    vei_placa         VARCHAR(10)  NOT NULL               COMMENT 'Placa do veículo (UNIQUE — impede duplicata global)  [v9]',
     vei_marca_modelo  VARCHAR(100) NOT NULL               COMMENT 'Descrição do veículo (marca e modelo)',
-    vei_tipo          BIT(1)       NOT NULL               COMMENT '0=Moto, 1=Carro',
+    vei_tipo          BIT(1)       NOT NULL               COMMENT '0=Moto (máx 1 vaga), 1=Carro (máx 4 vagas)',
     vei_cor           VARCHAR(100) NOT NULL               COMMENT 'Cor do veículo',
-    vei_vagas         TINYINT      NOT NULL               COMMENT 'Capacidade de passageiros (1 a 6)',
+    vei_vagas         TINYINT      NOT NULL               COMMENT 'Capacidade de passageiros: Moto=1, Carro=1-4  [v9]',
     vei_status        BIT(1)       NOT NULL               COMMENT '1=Ativo, 0=Inutilizado',
     vei_criado_em     DATE         NOT NULL               COMMENT 'Data de Cadastro',
     vei_atualizado_em DATETIME                            COMMENT 'Data de Atualização (NULL)',
     vei_apagado_em    DATETIME                            COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
-    PRIMARY KEY (vei_id)
+    PRIMARY KEY (vei_id),
+    UNIQUE KEY UQ_vei_placa (vei_placa)                  -- Impede cadastro de placa duplicada  [v9]
 ) ENGINE = InnoDB;
 
 

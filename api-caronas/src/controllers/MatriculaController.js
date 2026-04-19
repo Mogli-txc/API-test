@@ -10,6 +10,7 @@
 
 const db = require('../config/database'); // Pool de conexão MySQL
 const { checkDevOrOwner } = require('../utils/authHelper');
+const { registrarAudit } = require('../utils/auditLog');
 
 class MatriculaController {
 
@@ -42,7 +43,49 @@ class MatriculaController {
                 return res.status(400).json({ error: "cur_usu_dataFinal deve estar no formato YYYY-MM-DD." });
             }
 
-            // PASSO 3: Insere a matrícula no banco
+            // PASSO 3: Busca dados da escola (domínio e cota) via curso informado
+            const [escola] = await db.query(
+                `SELECT e.esc_id, e.esc_dominio, e.esc_max_usuarios
+                 FROM CURSOS c
+                 INNER JOIN ESCOLAS e ON c.esc_id = e.esc_id
+                 WHERE c.cur_id = ?`,
+                [cur_id]
+            );
+
+            if (escola.length === 0) {
+                return res.status(404).json({ error: "Curso não encontrado." });
+            }
+
+            const { esc_id, esc_dominio, esc_max_usuarios } = escola[0];
+
+            // PASSO 4: Verifica domínio de e-mail institucional (quando configurado)
+            if (esc_dominio) {
+                const emailUsuario = req.user.email.toLowerCase();
+                if (!emailUsuario.endsWith('@' + esc_dominio.toLowerCase())) {
+                    return res.status(403).json({
+                        error: `Apenas e-mails do domínio @${esc_dominio} podem se matricular nesta instituição.`
+                    });
+                }
+            }
+
+            // PASSO 5: Verifica cota de usuários por escola (quando configurado)
+            if (esc_max_usuarios !== null) {
+                const [[{ total }]] = await db.query(
+                    `SELECT COUNT(DISTINCT cu.usu_id) AS total
+                     FROM CURSOS_USUARIOS cu
+                     INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
+                     INNER JOIN USUARIOS u ON cu.usu_id = u.usu_id
+                     WHERE c.esc_id = ? AND u.usu_status = 1 AND u.usu_deletado_em IS NULL`,
+                    [esc_id]
+                );
+                if (total >= esc_max_usuarios) {
+                    return res.status(409).json({
+                        error: `Esta instituição atingiu o limite máximo de ${esc_max_usuarios} usuários ativos.`
+                    });
+                }
+            }
+
+            // PASSO 6: Insere a matrícula no banco
             // O banco rejeita duplicata via UNIQUE KEY UQ_CursoUsuario
             const [resultado] = await db.query(
                 `INSERT INTO CURSOS_USUARIOS (usu_id, cur_id, cur_usu_dataFinal)
@@ -50,7 +93,7 @@ class MatriculaController {
                 [usu_id, cur_id, cur_usu_dataFinal]
             );
 
-            // PASSO 4: Resposta de sucesso com o ID gerado
+            // PASSO 7: Resposta de sucesso com o ID gerado
             return res.status(201).json({
                 message:   "Matrícula realizada com sucesso!",
                 matricula: {
@@ -112,13 +155,19 @@ class MatriculaController {
                 [usu_id, limit, offset]
             );
 
+            const [[{ totalGeral }]] = await db.query(
+                'SELECT COUNT(*) AS totalGeral FROM CURSOS_USUARIOS WHERE usu_id = ?',
+                [usu_id]
+            );
+
             // PASSO 6: Resposta de sucesso
             return res.status(200).json({
-                message:   `Matrículas do usuário ${usu_id} listadas.`,
-                total:     matriculas.length,
+                message:    `Matrículas do usuário ${usu_id} listadas.`,
+                totalGeral,
+                total:      matriculas.length,
                 page,
                 limit,
-                usu_id:    parseInt(usu_id),
+                usu_id:     parseInt(usu_id),
                 matriculas
             });
 
@@ -175,13 +224,19 @@ class MatriculaController {
                 [cur_id, limit, offset]
             );
 
+            const [[{ totalGeral }]] = await db.query(
+                'SELECT COUNT(*) AS totalGeral FROM CURSOS_USUARIOS WHERE cur_id = ?',
+                [cur_id]
+            );
+
             // PASSO 6: Resposta de sucesso
             return res.status(200).json({
-                message:   `Alunos do curso ${cur_id} listados.`,
-                total:     matriculas.length,
+                message:    `Alunos do curso ${cur_id} listados.`,
+                totalGeral,
+                total:      matriculas.length,
                 page,
                 limit,
-                cur_id:    parseInt(cur_id),
+                cur_id:     parseInt(cur_id),
                 matriculas
             });
 
@@ -220,13 +275,39 @@ class MatriculaController {
                 return res.status(403).json({ error: "Sem permissão para cancelar a matrícula de outro usuário." });
             }
 
-            // PASSO 4: Remove a matrícula do banco
+            // PASSO 4: Bloqueia se houver carona ativa vinculada a esta matrícula (como motorista)
+            const [caronaAtiva] = await db.query(
+                'SELECT car_id FROM CARONAS WHERE cur_usu_id = ? AND car_status IN (1, 2)',
+                [cur_usu_id]
+            );
+            if (caronaAtiva.length > 0) {
+                return res.status(409).json({
+                    error: "Não é possível cancelar a matrícula com carona em andamento vinculada a ela."
+                });
+            }
+
+            // PASSO 4b: Bloqueia se o usuário estiver vinculado a uma carona ativa como passageiro
+            const [passageiroAtivo] = await db.query(
+                `SELECT s.sol_id FROM SOLICITACOES_CARONA s
+                 INNER JOIN CARONAS c ON s.car_id = c.car_id
+                 WHERE s.usu_id_passageiro = ? AND s.sol_status = 2 AND c.car_status IN (1, 2)`,
+                [matricula[0].usu_id]
+            );
+            if (passageiroAtivo.length > 0) {
+                return res.status(409).json({
+                    error: "Não é possível cancelar a matrícula enquanto estiver vinculado a uma carona como passageiro."
+                });
+            }
+
+            // PASSO 5: Remove a matrícula do banco
             await db.query(
                 'DELETE FROM CURSOS_USUARIOS WHERE cur_usu_id = ?',
                 [cur_usu_id]
             );
 
-            // PASSO 5: Resposta sem conteúdo (sucesso)
+            await registrarAudit({ tabela: 'CURSOS_USUARIOS', registroId: parseInt(cur_usu_id), acao: 'MATRICULA_CANCELAR', usuId: req.user.id, ip: req.ip });
+
+            // PASSO 6: Resposta sem conteúdo (sucesso)
             return res.status(204).send();
 
         } catch (error) {

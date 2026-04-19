@@ -111,7 +111,7 @@ beforeAll(async () => {
 
     // ---- 0. Busca cur_id válido ----
     const escRes = await request(app).get('/api/infra/escolas');
-    const esc_id = escRes.body.escolas[0].esc_id;
+    const esc_id = (escRes.body.escolas.find(e => !e.esc_dominio) || escRes.body.escolas[0]).esc_id;
     const curRes = await request(app).get(`/api/infra/escolas/${esc_id}/cursos`);
     cur_id = curRes.body.cursos[0].cur_id;
 
@@ -146,7 +146,7 @@ beforeAll(async () => {
         const veiRes = await request(app)
             .post('/api/veiculos')
             .set('Authorization', `Bearer ${token}`)
-            .send({ usu_id, vei_marca_modelo: 'Fiat Uno', vei_tipo: 1, vei_cor: 'Branco', vei_vagas: 3 });
+            .send({ vei_placa: 'TST' + String(Math.floor(Math.random() * 9000) + 1000), vei_marca_modelo: 'Fiat Uno', vei_tipo: 1, vei_cor: 'Branco', vei_vagas: 3 });
         const vei_id = veiRes.body.veiculo.vei_id;
 
         // Carona
@@ -379,9 +379,8 @@ describe('Regra 2 — Motorista com carona ativa não pode solicitar carona', ()
     it('R2.4 — carona_A finalizada (status=3): motoristaA LIBERADO para solicitar carona_C → 201', async () => {
         // PASSO 1: finaliza carona_A (status=3 não é "em andamento")
         await request(app)
-            .put(`/api/caronas/${car_id_A}`)
-            .set('Authorization', `Bearer ${token_A}`)
-            .send({ car_status: 3 });
+            .post(`/api/caronas/${car_id_A}/finalizar`)
+            .set('Authorization', `Bearer ${token_A}`);
 
         // PASSO 2: motoristaA (sem carona ativa agora) solicita carona_C
         const res = await request(app)

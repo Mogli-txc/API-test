@@ -94,7 +94,7 @@ async function tornarPassageiro(usu_id) {
 async function criarCarona(motorista, vagas = 2, descricao = 'Carona de teste') {
     // Pega o primeiro curso disponível
     const escRes = await request(app).get('/api/infra/escolas');
-    const esc_id  = escRes.body.escolas[0].esc_id;
+    const esc_id  = (escRes.body.escolas.find(e => !e.esc_dominio) || escRes.body.escolas[0]).esc_id;
     const curRes  = await request(app).get(`/api/infra/escolas/${esc_id}/cursos`);
     const cur_id  = curRes.body.cursos[0].cur_id;
 
@@ -107,7 +107,7 @@ async function criarCarona(motorista, vagas = 2, descricao = 'Carona de teste') 
     const veiRes = await request(app)
         .post('/api/veiculos')
         .set('Authorization', `Bearer ${motorista.token}`)
-        .send({ usu_id: motorista.usu_id, vei_marca_modelo: 'Fiat Uno', vei_tipo: 1, vei_cor: 'Branco', vei_vagas: vagas });
+        .send({ vei_placa: 'COB' + String(Math.floor(Math.random() * 9000) + 1000), vei_marca_modelo: 'Fiat Uno', vei_tipo: 1, vei_cor: 'Branco', vei_vagas: vagas });
     const vei_id = veiRes.body.veiculo.vei_id;
 
     const carRes = await request(app)
