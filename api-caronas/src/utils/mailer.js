@@ -11,6 +11,16 @@
 const nodemailer = require('nodemailer');
 const crypto     = require('crypto');
 
+// Escapa caracteres HTML especiais para uso seguro em templates de email
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // Transporte SMTP configurado via .env
 const transporter = nodemailer.createTransport({
     host:   process.env.SMTP_HOST,
@@ -39,6 +49,7 @@ function gerarOtp() {
  */
 function hashOtp(otp) {
     const secret = process.env.OTP_SECRET;
+    if (!secret) throw new Error('OTP_SECRET não configurado no ambiente (.env)');
     return crypto
         .createHmac('sha256', secret)
         .update(otp)
@@ -63,7 +74,7 @@ async function enviarOtp(email, otp) {
                 <div style="font-size: 36px; font-weight: bold; letter-spacing: 12px;
                             padding: 20px; background: #f0f0f0; border-radius: 8px;
                             text-align: center; color: #111;">
-                    ${otp}
+                    ${escapeHtml(otp)}
                 </div>
                 <p style="color: #888; margin-top: 20px; font-size: 14px;">
                     Este código expira em <strong>10 minutos</strong>.<br>
@@ -105,4 +116,4 @@ async function enviarEmailReset(email, resetUrl) {
     });
 }
 
-module.exports = { gerarOtp, hashOtp, enviarOtp, enviarEmailReset };
+module.exports = { gerarOtp, hashOtp, enviarOtp, enviarEmailReset, escapeHtml };

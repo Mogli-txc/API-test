@@ -104,7 +104,7 @@ class CaronaPessoasController {
                 [car_id, usu_id]
             );
             await conn.query(
-                'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo - 1 WHERE car_id = ?',
+                'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo - 1 WHERE car_id = ? AND car_vagas_dispo > 0',
                 [car_id]
             );
 

@@ -211,6 +211,30 @@ class AvaliacaoController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
+            // PASSO 1: Verifica se o usuário autenticado é motorista ou passageiro desta carona.
+            // Avaliações revelam quem participou da carona — dado sensível, restrito a participantes.
+            const [motorista] = await db.query(
+                `SELECT cu.usu_id FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE c.car_id = ?`,
+                [car_id]
+            );
+            const ehMotorista = motorista.length > 0 && motorista[0].usu_id === req.user.id;
+
+            if (!ehMotorista) {
+                const [participacao] = await db.query(
+                    `SELECT 1 FROM CARONA_PESSOAS
+                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                     UNION
+                     SELECT 1 FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+                    [car_id, req.user.id, car_id, req.user.id]
+                );
+                if (participacao.length === 0) {
+                    return res.status(403).json({ error: "Apenas participantes da carona podem visualizar suas avaliações." });
+                }
+            }
+
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
             const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;

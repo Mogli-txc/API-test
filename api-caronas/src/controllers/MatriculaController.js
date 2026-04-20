@@ -38,9 +38,13 @@ class MatriculaController {
                 });
             }
 
-            // cur_usu_dataFinal: deve estar no formato YYYY-MM-DD e ser uma data futura válida
+            // cur_usu_dataFinal: deve estar no formato YYYY-MM-DD e ser uma data atual ou futura válida
             if (!/^\d{4}-\d{2}-\d{2}$/.test(cur_usu_dataFinal) || isNaN(new Date(cur_usu_dataFinal).getTime())) {
                 return res.status(400).json({ error: "cur_usu_dataFinal deve estar no formato YYYY-MM-DD." });
+            }
+            const hoje = new Date().toISOString().slice(0, 10);
+            if (cur_usu_dataFinal < hoje) {
+                return res.status(400).json({ error: "cur_usu_dataFinal deve ser uma data atual ou futura." });
             }
 
             // PASSO 3: Busca dados da escola (domínio e cota) via curso informado
@@ -75,7 +79,7 @@ class MatriculaController {
                      FROM CURSOS_USUARIOS cu
                      INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
                      INNER JOIN USUARIOS u ON cu.usu_id = u.usu_id
-                     WHERE c.esc_id = ? AND u.usu_status = 1 AND u.usu_deletado_em IS NULL`,
+                     WHERE c.esc_id = ? AND u.usu_status = 1`,
                     [esc_id]
                 );
                 if (total >= esc_max_usuarios) {

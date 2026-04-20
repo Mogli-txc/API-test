@@ -46,6 +46,10 @@ const documentoRoutes    = require('./routes/documentoRoutes');         // Compr
 // Instancia a aplicação Express
 const app = express();
 
+// Confia no primeiro proxy reverso (nginx, Heroku, etc.) para obter o IP real via X-Forwarded-For
+// Necessário para que rate limiting e logging funcionem corretamente em produção
+app.set('trust proxy', 1);
+
 // ========== MIDDLEWARE GLOBAL ==========
 
 /**
@@ -304,7 +308,7 @@ app.use((err, req, res, next) => {
 // OTP_SECRET é obrigatório e deve ser diferente de JWT_SECRET — segredos distintos
 // garantem isolamento: se JWT_SECRET vazar, os hashes OTP e de reset continuam seguros.
 // APP_URL é necessária para montar o link de redefinição de senha no e-mail
-const requiredEnvVars = ['JWT_SECRET', 'OTP_SECRET', 'PORT', 'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'APP_URL'];
+const requiredEnvVars = ['JWT_SECRET', 'REFRESH_SECRET', 'OTP_SECRET', 'PORT', 'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'APP_URL'];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
     console.error(`[ERRO] Variáveis de ambiente ausentes: ${missingEnvVars.join(', ')}`);

@@ -17,9 +17,18 @@ const { URL } = require('url');
 const PUBLIC_ROOT_PATH = path.join(process.cwd(), 'public');
 
 // URL base da API lida do .env (ex: http://localhost:3000)
-const API_URL = process.env.API_BASE_URL || 'http://localhost:3000';
+// Usa APP_URL — mesma variável validada no startup do server.js
+const API_URL = process.env.APP_URL || 'http://localhost:3000';
+if (!process.env.APP_URL) {
+    console.warn('[gerarUrl] APP_URL não configurado — usando http://localhost:3000. Defina no .env para produção.');
+}
 
 function gerarUrl(nomeArquivo, pasta, arquivoPadrao) {
+    // Proteção contra path traversal em nomeArquivo
+    if (nomeArquivo && (nomeArquivo.includes('..') || nomeArquivo.includes('/'))) {
+        throw new Error(`[gerarUrl] Nome de arquivo inválido: "${nomeArquivo}"`);
+    }
+
     const arquivoVerificar = nomeArquivo || arquivoPadrao;
     const caminhoFisico    = path.join(PUBLIC_ROOT_PATH, pasta, arquivoVerificar);
 

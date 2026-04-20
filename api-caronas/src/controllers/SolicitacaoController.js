@@ -135,7 +135,7 @@ class SolicitacaoController {
             }
 
             // Moto (vei_tipo=0): aceita no máximo 1 passageiro por corrida
-            if (Number(carona[0].vei_tipo) === 0 && sol_vaga_soli > 1) {
+            if (carona[0].vei_tipo === 0 && sol_vaga_soli > 1) {
                 return res.status(400).json({ error: "Corridas de moto permitem no máximo 1 passageiro." });
             }
 
@@ -394,13 +394,14 @@ class SolicitacaoController {
         let conn;
         try {
             // PASSO 1: Busca a solicitação e verifica se o usuário autenticado é o motorista desta carona
+            // car_status IN (1, 2): impede resposta a solicitações de caronas já finalizadas ou canceladas
             const [sol] = await db.query(
                 `SELECT s.sol_vaga_soli, s.car_id, s.usu_id_passageiro,
                         cu.usu_id AS usu_id_motorista
                  FROM SOLICITACOES_CARONA s
                  INNER JOIN CARONAS        c  ON s.car_id        = c.car_id
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id   = cu.cur_usu_id
-                 WHERE s.sol_id = ?`,
+                 WHERE s.sol_id = ? AND c.car_status IN (1, 2)`,
                 [soli_id]
             );
 
@@ -531,10 +532,10 @@ class SolicitacaoController {
                 [soli_id]
             );
 
-            // Se estava aceita (sol_status = 2): devolve a vaga à carona
+            // Se estava aceita (sol_status = 2): devolve a vaga à carona (só se ainda estiver aberta/em espera)
             if (sol[0].sol_status === 2) {
                 await conn.query(
-                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + ? WHERE car_id = ?',
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + ? WHERE car_id = ? AND car_status IN (1, 2)',
                     [sol[0].sol_vaga_soli, sol[0].car_id]
                 );
             }
@@ -604,14 +605,14 @@ class SolicitacaoController {
 
             if (sol[0].sol_status === 2) {
                 await conn.query(
-                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + ? WHERE car_id = ?',
+                    'UPDATE CARONAS SET car_vagas_dispo = car_vagas_dispo + ? WHERE car_id = ? AND car_status IN (1, 2)',
                     [sol[0].sol_vaga_soli, sol[0].car_id]
                 );
             }
 
             await conn.commit();
 
-            return res.status(204).send();
+            return res.status(204).end();
 
         } catch (error) {
             if (conn) await conn.rollback();

@@ -37,6 +37,23 @@ class PontoEncontroController {
                 });
             }
 
+            // Valida pon_endereco_geom: aceita "lat,lng" ou GeoJSON {type, coordinates}
+            const geomStr = String(pon_endereco_geom).trim();
+            const isLatLng = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(geomStr);
+            if (!isLatLng) {
+                let geomObj;
+                try {
+                    geomObj = typeof pon_endereco_geom === 'string'
+                        ? JSON.parse(pon_endereco_geom)
+                        : pon_endereco_geom;
+                } catch {
+                    return res.status(400).json({ error: "pon_endereco_geom inválido. Use 'lat,lng' ou GeoJSON com 'type' e 'coordinates'." });
+                }
+                if (!geomObj || typeof geomObj.type !== 'string' || !Array.isArray(geomObj.coordinates)) {
+                    return res.status(400).json({ error: "pon_endereco_geom inválido. Use 'lat,lng' ou GeoJSON com 'type' e 'coordinates'." });
+                }
+            }
+
             // pon_tipo: apenas 0 (Partida) ou 1 (Destino) são valores válidos
             const tipoNum = parseInt(pon_tipo, 10);
             if (tipoNum !== 0 && tipoNum !== 1) {

@@ -97,6 +97,18 @@ class DocumentoController {
             }
 
             // PASSO 5: OCR aprovado — determina novo nível (5→1 ou 6→2)
+            // Para nível 6→2: garante que o veículo ainda está ativo antes de promover
+            if (verificacao === 6) {
+                const [vei] = await db.query(
+                    'SELECT vei_id FROM VEICULOS WHERE usu_id = ? AND vei_status = 1 LIMIT 1',
+                    [usu_id]
+                );
+                if (vei.length === 0) {
+                    return res.status(409).json({
+                        error: 'Veículo não encontrado. Cadastre um veículo ativo antes de enviar o comprovante.'
+                    });
+                }
+            }
             const novoNivel  = verificacao === 6 ? 2 : 1;
             const novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000); // +6 meses
 
@@ -223,7 +235,7 @@ class DocumentoController {
             // PASSO 5: OCR aprovado — verifica se o usuário tem veículo ativo
             const [veiculos] = await db.query(
                 `SELECT vei_id FROM VEICULOS
-                 WHERE usu_id = ? AND vei_status = 1 AND vei_apagado_em IS NULL
+                 WHERE usu_id = ? AND vei_status = 1
                  LIMIT 1`,
                 [usu_id]
             );

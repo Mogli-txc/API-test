@@ -24,6 +24,20 @@
 const db = require('../config/database');
 const { stripHtml } = require('../utils/sanitize');
 
+// Calcula a data de expiração da penalidade em JS para evitar interpolação SQL
+function calcularExpiraPenalidade(pen_duracao) {
+    const d = new Date();
+    switch (pen_duracao) {
+        case '1semana':  d.setDate(d.getDate() + 7);   break;
+        case '2semanas': d.setDate(d.getDate() + 14);  break;
+        case '1mes':     d.setMonth(d.getMonth() + 1); break;
+        case '3meses':   d.setMonth(d.getMonth() + 3); break;
+        case '6meses':   d.setMonth(d.getMonth() + 6); break;
+        default: return null;
+    }
+    return d;
+}
+
 class AdminController {
 
     /**
@@ -350,46 +364,59 @@ class AdminController {
                 return res.status(409).json({ error: "Usuário já possui penalidade ativa deste tipo." });
             }
 
-            // PASSO 8: Insere a penalidade
-            // DURACAO_SQL[pen_duracao] é constante de whitelist — seguro para interpolação
-            const expiraSQL  = tipoNum === 4 ? 'NULL' : DURACAO_SQL[pen_duracao];
+            // PASSO 8: Calcula pen_expira_em em JS e insere a penalidade em transação atômica
+            // Tipo 4 (suspensão) é permanente (expira = null) e requer cascata de cancelamentos
             const motivoLimpo = pen_motivo ? stripHtml(pen_motivo.trim()).substring(0, 255) : null;
+            const expiraEm    = tipoNum === 4 ? null : calcularExpiraPenalidade(pen_duracao);
 
-            const [resultado] = await db.query(
-                `INSERT INTO PENALIDADES (usu_id, pen_tipo, pen_motivo, pen_expira_em, pen_aplicado_por)
-                 VALUES (?, ?, ?, ${expiraSQL}, ?)`,
-                [usu_id, tipoNum, motivoLimpo, admin_id]
-            );
+            const conn = await db.getConnection();
+            let insertId;
+            try {
+                await conn.beginTransaction();
 
-            // PASSO 9: Penalidade tipo 4 bloqueia login e cancela caronas ativas do motorista
-            if (tipoNum === 4) {
-                await db.query(
-                    'UPDATE USUARIOS SET usu_verificacao = 9 WHERE usu_id = ?',
-                    [usu_id]
+                const [resultado] = await conn.query(
+                    `INSERT INTO PENALIDADES (usu_id, pen_tipo, pen_motivo, pen_expira_em, pen_aplicado_por)
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [usu_id, tipoNum, motivoLimpo, expiraEm, admin_id]
                 );
-                // Cancela solicitações ativas nas caronas do motorista suspenso (antes de cancelar as caronas)
-                await db.query(
-                    `UPDATE SOLICITACOES_CARONA sc
-                     INNER JOIN CARONAS c          ON sc.car_id    = c.car_id
-                     INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                     SET sc.sol_status = 0
-                     WHERE cu.usu_id = ? AND c.car_status IN (1, 2) AND sc.sol_status IN (1, 2)`,
-                    [usu_id]
-                );
-                // Cancela as caronas abertas onde o usuário é motorista
-                await db.query(
-                    `UPDATE CARONAS c
-                     INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                     SET c.car_status = 0
-                     WHERE cu.usu_id = ? AND c.car_status IN (1, 2)`,
-                    [usu_id]
-                );
+                insertId = resultado.insertId;
+
+                // PASSO 9: Penalidade tipo 4 bloqueia login e cancela caronas ativas do motorista
+                if (tipoNum === 4) {
+                    await conn.query(
+                        'UPDATE USUARIOS SET usu_verificacao = 9 WHERE usu_id = ?',
+                        [usu_id]
+                    );
+                    // Cancela solicitações ativas nas caronas do motorista suspenso
+                    await conn.query(
+                        `UPDATE SOLICITACOES_CARONA sc
+                         INNER JOIN CARONAS c          ON sc.car_id    = c.car_id
+                         INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                         SET sc.sol_status = 0
+                         WHERE cu.usu_id = ? AND c.car_status IN (1, 2) AND sc.sol_status IN (1, 2)`,
+                        [usu_id]
+                    );
+                    // Cancela as caronas abertas onde o usuário é motorista
+                    await conn.query(
+                        `UPDATE CARONAS c
+                         INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                         SET c.car_status = 0
+                         WHERE cu.usu_id = ? AND c.car_status IN (1, 2)`,
+                        [usu_id]
+                    );
+                }
+
+                await conn.commit();
+            } catch (err) {
+                await conn.rollback();
+                throw err;
+            } finally {
+                conn.release();
             }
 
-            // Recupera o registro inserido para retornar pen_expira_em calculado pelo banco
             const [[pen]] = await db.query(
                 'SELECT pen_id, pen_tipo, pen_expira_em FROM PENALIDADES WHERE pen_id = ?',
-                [resultado.insertId]
+                [insertId]
             );
 
             return res.status(201).json({
@@ -501,30 +528,40 @@ class AdminController {
                     return res.status(400).json({ error: "esc_id deve ser um número inteiro." });
                 }
 
-                const whereExtra = filtroEsc ? `INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id
-                     INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
-                     WHERE c.esc_id = ? AND u.usu_status = 1` : 'WHERE u.usu_status = 1';
-                const countExtra = filtroEsc ? `INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id
-                     INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
-                     WHERE c.esc_id = ? AND u.usu_status = 1` : 'WHERE u.usu_status = 1';
-
-                const params = filtroEsc ? [filtroEsc, limit, offset] : [limit, offset];
-                const countParams = filtroEsc ? [filtroEsc] : [];
-
-                [usuarios] = await db.query(
-                    `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status, u.usu_verificacao
-                     FROM USUARIOS u
-                     ${whereExtra}
-                     ORDER BY u.usu_id ASC
-                     LIMIT ? OFFSET ?`,
-                    params
-                );
-                [[{ totalGeral }]] = await db.query(
-                    `SELECT COUNT(DISTINCT u.usu_id) AS totalGeral
-                     FROM USUARIOS u
-                     ${countExtra}`,
-                    countParams
-                );
+                if (filtroEsc) {
+                    [usuarios] = await db.query(
+                        `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status, u.usu_verificacao
+                         FROM USUARIOS u
+                         INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                         INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                         WHERE c.esc_id = ? AND u.usu_status = 1
+                         ORDER BY u.usu_id ASC
+                         LIMIT ? OFFSET ?`,
+                        [filtroEsc, limit, offset]
+                    );
+                    [[{ totalGeral }]] = await db.query(
+                        `SELECT COUNT(DISTINCT u.usu_id) AS totalGeral
+                         FROM USUARIOS u
+                         INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                         INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                         WHERE c.esc_id = ? AND u.usu_status = 1`,
+                        [filtroEsc]
+                    );
+                } else {
+                    [usuarios] = await db.query(
+                        `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status, u.usu_verificacao
+                         FROM USUARIOS u
+                         WHERE u.usu_status = 1
+                         ORDER BY u.usu_id ASC
+                         LIMIT ? OFFSET ?`,
+                        [limit, offset]
+                    );
+                    [[{ totalGeral }]] = await db.query(
+                        `SELECT COUNT(DISTINCT u.usu_id) AS totalGeral
+                         FROM USUARIOS u
+                         WHERE u.usu_status = 1`
+                    );
+                }
             } else {
                 // PASSO 3: Administrador — apenas usuários da sua escola
                 [usuarios] = await db.query(

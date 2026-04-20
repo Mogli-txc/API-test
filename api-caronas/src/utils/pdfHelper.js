@@ -32,10 +32,14 @@ async function extrairTextoPdf(caminhoPdf) {
         const lib = require('pdfjs-dist/legacy/build/pdf.js');
         getDocument         = lib.getDocument;
         GlobalWorkerOptions = lib.GlobalWorkerOptions;
-    } catch {
-        const lib = require('pdfjs-dist');
-        getDocument         = lib.getDocument;
-        GlobalWorkerOptions = lib.GlobalWorkerOptions;
+    } catch (e1) {
+        try {
+            const lib = require('pdfjs-dist');
+            getDocument         = lib.getDocument;
+            GlobalWorkerOptions = lib.GlobalWorkerOptions;
+        } catch (e2) {
+            throw new Error(`pdfjs-dist não encontrado. Tente: npm install pdfjs-dist. Detalhes: [legacy] ${e1.message} | [padrão] ${e2.message}`);
+        }
     }
 
     // PASSO 2: Desabilita o worker do pdfjs — em Node.js o worker roda no thread principal

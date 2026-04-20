@@ -77,7 +77,7 @@ const CRITERIOS = {
 // Confiança mínima do Tesseract por tipo (0-100).
 // CNH tem tipografia mais legível → threshold mais alto.
 // Comprovantes de matrícula têm layouts variados → threshold menor.
-const CONFIANCA_MINIMA = { comprovante: 55, cnh: 60 };
+const CONFIANCA_MINIMA = { comprovante: 75, cnh: 75 };
 
 /**
  * Normaliza o texto removendo acentos e convertendo para minúsculas.
@@ -153,7 +153,8 @@ module.exports = (tipo) => async (req, res, next) => {
         }
 
         // PASSO 3: Avalia critérios de palavras-chave
-        const confMinima = CONFIANCA_MINIMA[tipo] ?? 55;
+        const confMinima = CONFIANCA_MINIMA[tipo];
+        if (confMinima === undefined) throw new Error(`Tipo de documento desconhecido: "${tipo}". Adicione ao mapa CONFIANCA_MINIMA.`);
         const avaliacao  = avaliarCriterios(texto, tipo);
         const aprovado   = confianca >= confMinima && avaliacao.aprovado;
 

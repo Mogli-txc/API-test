@@ -861,13 +861,15 @@ paths:
         2. OCR automático: tenta extração de texto nativo (`pdfjs-dist`); se insuficiente,
            converte a 1ª página para PNG e executa Tesseract.js.
         3. Avalia ≥ 2 de 3 grupos de critérios (`instituicao`, `matricula`, `periodo`)
-           com confiança mínima de 55%.
+           com confiança mínima de 75%.
 
         **Promoção automática (OCR aprovado):**
         - Nível 5 → **1** (matrícula verificada, +6 meses)
         - Nível 6 → **2** (matrícula + veículo, +6 meses)
 
         **OCR reprovado:** documento salvo com `doc_status=2` para auditoria — retorna 422.
+
+        **Variáveis de ambiente necessárias:** `JWT_SECRET`, `REFRESH_SECRET`, `OTP_SECRET`, `APP_URL`, `SMTP_*` — todas obrigatórias na inicialização.
       security:
         - bearerAuth: []
       requestBody:
@@ -948,7 +950,7 @@ paths:
         1. Magic bytes verificados (`%PDF`) — rejeita arquivos falsificados.
         2. OCR automático com Tesseract.js (português + inglês, OEM LSTM).
         3. Avalia ≥ 2 de 3 grupos de critérios (`cabecalho`, `categoria`, `identificacao`)
-           com confiança mínima de 60%.
+           com confiança mínima de 75%.
 
         **Promoção automática (OCR aprovado):**
         - Com veículo ativo (`vei_status = 1`) → **nível 2** (+6 meses)

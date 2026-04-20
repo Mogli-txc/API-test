@@ -290,6 +290,13 @@ class UsuarioController {
                 return res.status(400).json({ error: "Campo obrigatório: usu_email." });
             }
 
+            // Rejeita emails mal-formados antes de consultar o banco (evita queries desnecessárias)
+            if (!EMAIL_REGEX.test(usu_email)) {
+                return res.status(200).json({
+                    message: "Se o email existir e estiver pendente, um novo código será enviado."
+                });
+            }
+
             const [rows] = await db.query(
                 `SELECT usu_id, usu_verificacao FROM USUARIOS WHERE usu_email = ? AND usu_status = 1`,
                 [usu_email]
@@ -397,16 +404,16 @@ class UsuarioController {
 
             await registrarAudit({ tabela: 'USUARIOS', registroId: usuario.usu_id, acao: 'LOGIN', usuId: usuario.usu_id, ip: req.ip });
 
-            // Access token — curta duração (24h)
+            // Access token — duração configurada em JWT_EXPIRES_IN (padrão: 24h)
             const token = jwt.sign(
                 { id: usuario.usu_id, email: usuario.usu_email },
                 process.env.JWT_SECRET,
-                { expiresIn: '24h' }
+                { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
             );
 
             // Refresh token — longa duração (30 dias), rotacionado a cada uso
             // Apenas o hash HMAC-SHA256 é persistido; o token plaintext vai somente na resposta
-            const REFRESH_SECRET     = process.env.REFRESH_SECRET || process.env.JWT_SECRET;
+            const REFRESH_SECRET     = process.env.REFRESH_SECRET;
             const refreshToken       = crypto.randomBytes(40).toString('hex');
             const refreshHash        = crypto.createHmac('sha256', REFRESH_SECRET).update(refreshToken).digest('hex');
             const refreshExpira      = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // +30 dias
@@ -550,6 +557,9 @@ class UsuarioController {
                 const senhaHash = await bcrypt.hash(usu_senha, 12);
                 campos.push('usu_senha = ?');
                 valores.push(senhaHash);
+                // Invalida sessões ativas — força novo login após troca de senha
+                campos.push('usu_refresh_hash = ?');  valores.push(null);
+                campos.push('usu_refresh_expira = ?'); valores.push(null);
             }
 
             // Troca de email: zera verificação e exige novo OTP para confirmar o novo endereço
@@ -863,7 +873,7 @@ class UsuarioController {
             }
 
             // PASSO 1: Reconstrói o hash para lookup seguro (timing-safe via DB lookup)
-            const REFRESH_SECRET = process.env.REFRESH_SECRET || process.env.JWT_SECRET;
+            const REFRESH_SECRET = process.env.REFRESH_SECRET;
             const hashRecebido = crypto.createHmac('sha256', REFRESH_SECRET)
                 .update(refresh_token)
                 .digest('hex');

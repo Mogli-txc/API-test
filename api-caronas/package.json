@@ -1,15 +1,15 @@
 {
   "name": "api-caronas",
   "version": "1.0.0",
-  "description": "",
+  "description": "API REST para sistema de caronas universitárias com autenticação JWT, validação OCR de documentos e chat em tempo real via Socket.io",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "jest"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["caronas", "api", "nodejs", "express", "mysql", "jwt", "socket.io", "ocr"],
+  "author": "Mogli-txc",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {

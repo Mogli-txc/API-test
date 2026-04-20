@@ -373,7 +373,7 @@ class CaronaController {
             // Valida car_status se enviado (0=Cancelada, 1=Aberta, 2=Em espera)
             // Status 3 (Finalizada) é exclusivo do endpoint POST /finalizar
             if (car_status !== undefined && ![0, 1, 2].includes(parseInt(car_status))) {
-                return res.status(400).json({ error: "car_status inválido. Use 0, 1 ou 2. Para finalizar, use POST /api/caronas/:car_id/finalizar." });
+                return res.status(400).json({ error: "car_status inválido. Use 0 (cancelar), 1 (abrir) ou 2 (em espera). Para finalizar a carona, use o endpoint de finalização." });
             }
 
             // Verifica se o motorista autenticado é o dono desta carona
@@ -425,7 +425,7 @@ class CaronaController {
                 valores.push(car_desc_limpa);
             }
             if (car_data)      { campos.push('car_data = ?');      valores.push(String(car_data).substring(0, 10)); }
-            if (car_hor_saida) { campos.push('car_hor_saida = ?'); valores.push(String(car_hor_saida).substring(0, 8)); }
+            if (car_hor_saida) { campos.push('car_hor_saida = ?'); valores.push(String(car_hor_saida).substring(0, 5)); }
             if (car_vagas_dispo) {
                 // Valida car_vagas_dispo contra a capacidade real do veículo da carona
                 const [veiCarona] = await db.query(

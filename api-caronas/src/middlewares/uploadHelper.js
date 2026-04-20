@@ -24,6 +24,9 @@ const fs     = require('fs');
 const fsp    = require('fs').promises;
 const path   = require('path');
 
+// Pastas permitidas para upload — impede path traversal via pastaDestino inválida
+const PASTAS_PERMITIDAS = new Set(['usuarios', 'veiculos', 'documentos']);
+
 /**
  * Magic bytes dos tipos suportados.
  * Cada entrada contém uma ou mais assinaturas possíveis para o tipo.
@@ -90,6 +93,9 @@ const validarImagem = async (req, res, next) => {
 const uploadImage = (pastaDestino) => {
     if (!pastaDestino) {
         throw new Error('O nome da pasta de destino é obrigatório.');
+    }
+    if (!PASTAS_PERMITIDAS.has(pastaDestino)) {
+        throw new Error(`Pasta de destino inválida: "${pastaDestino}". Permitidas: ${[...PASTAS_PERMITIDAS].join(', ')}.`);
     }
 
     const caminhoCompleto = path.join(process.cwd(), 'public', pastaDestino);
@@ -172,6 +178,9 @@ const validarDocumento = async (req, res, next) => {
 const uploadDocument = (pastaDestino) => {
     if (!pastaDestino) {
         throw new Error('O nome da pasta de destino é obrigatório.');
+    }
+    if (!PASTAS_PERMITIDAS.has(pastaDestino)) {
+        throw new Error(`Pasta de destino inválida: "${pastaDestino}". Permitidas: ${[...PASTAS_PERMITIDAS].join(', ')}.`);
     }
 
     const caminhoCompleto = path.join(process.cwd(), 'public', pastaDestino);

@@ -22,7 +22,7 @@ API REST para sistema de compartilhamento de caronas entre alunos de instituiç�
 | pdf-to-img          | Renderização de página PDF como PNG para o Tesseract         |
 | socket.io           | WebSocket para mensagens em tempo real                       |
 | nodemailer          | Envio de email (OTP, reset de senha)                         |
-| jest + supertest    | Testes (198 testes)                                          |
+| jest + supertest    | Testes (266 testes)                                          |
 
 ---
 
@@ -41,21 +41,23 @@ DB_USER=seu_usuario
 DB_PASSWORD=sua_senha
 DB_NAME=caronas_db
 
-JWT_SECRET=sua_chave_secreta_jwt
-OTP_SECRET=sua_chave_otp
+JWT_SECRET=sua_chave_secreta_jwt_longa_e_aleatoria
+REFRESH_SECRET=sua_chave_refresh_separada_do_jwt
+OTP_SECRET=sua_chave_otp_separada_do_jwt
 
-EMAIL_HOST=smtp.exemplo.com
-EMAIL_PORT=587
-EMAIL_USER=email@exemplo.com
-EMAIL_PASS=senha_email
-EMAIL_FROM="Sistema de Caronas <noreply@exemplo.com>"
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=seu_email@gmail.com
+SMTP_PASS=sua_app_password
+SMTP_FROM="Sistema de Caronas <seu_email@gmail.com>"
 
 APP_URL=http://localhost:3000
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 LOG_REQUESTS=false
 ```
 
-`OTP_SECRET` é opcional — usa `JWT_SECRET` como fallback se não definido.
+`JWT_SECRET`, `REFRESH_SECRET` e `OTP_SECRET` são **obrigatórios** e devem ser strings longas e aleatórias distintas. A API encerra na inicialização se qualquer um estiver ausente.
 
 ### Banco de dados
 
@@ -383,7 +385,7 @@ Fábrica de middlewares que valida documentos PDF via OCR ou extração de texto
 
 1. **Extração nativa** (`pdfjs-dist`) — rápido, sem OCR. Cobre PDFs digitais gerados por sistemas (ex: comprovante do portal USP). Se o texto extraído tiver menos de 80 caracteres, considera-se um PDF escaneado.
 2. **OCR** (`Tesseract.js`) — converte a 1ª página do PDF para PNG e executa reconhecimento. Cobre fotos e scans de documentos físicos. Linguagens: português + inglês (OEM LSTM).
-3. **Avaliação de critérios** — verifica se o texto contém palavras-chave esperadas para o tipo. Exige ≥ 2 de 3 grupos de critérios + confiança mínima do OCR (55% para comprovante, 60% para CNH).
+3. **Avaliação de critérios** — verifica se o texto contém palavras-chave esperadas para o tipo. Exige ≥ 2 de 3 grupos de critérios + confiança mínima do OCR (75% para comprovante e CNH).
 4. **Injeção no request** — preenche `req.ocrResultado` com `{ aprovado, confianca, criteriosAtingidos, criteriosTotal, gruposOk, texto, origem }`. O controller usa `req.ocrResultado.aprovado` para decidir a promoção.
 
 Em `NODE_ENV=test`, o OCR é automaticamente ignorado e `req.ocrResultado` é preenchido com aprovação automática para não bloquear os testes existentes.
@@ -764,8 +766,8 @@ Para ser aprovado, o documento precisa satisfazer **≥ 2 de 3 grupos de critér
 
 | Tipo | Grupos de critérios | Confiança mínima |
 |---|---|---|
-| comprovante | `instituicao`, `matricula`, `periodo` | 55% |
-| cnh | `cabecalho`, `categoria`, `identificacao` | 60% |
+| comprovante | `instituicao`, `matricula`, `periodo` | 75% |
+| cnh | `cabecalho`, `categoria`, `identificacao` | 75% |
 
 Documentos **reprovados** retornam `422` com `detalhes` dos critérios identificados e são salvos no banco com `doc_status = 2` para auditoria posterior. Documentos **aprovados** promovem o `usu_verificacao` automaticamente e retornam o resultado do OCR (`confianca`, `criteriosAtingidos`, `origem`).
 
@@ -801,10 +803,10 @@ const CRITERIOS = {
 Objeto `CONFIANCA_MINIMA` no mesmo arquivo:
 
 ```js
-const CONFIANCA_MINIMA = { comprovante: 55, cnh: 60 };
+const CONFIANCA_MINIMA = { comprovante: 75, cnh: 75 };
 ```
 
-Valores de 0 a 100. Aumente para exigir documentos mais nítidos; reduza se documentos legítimos de baixa resolução estiverem sendo rejeitados.
+Valores de 0 a 100. Aumente para exigir documentos mais nítidos; reduza se documentos legítimos de baixa resolução estiverem sendo rejeitados. Ao adicionar um novo tipo de documento, inclua seu threshold aqui — a ausência gera erro explícito na validação.
 
 #### Limiar de texto nativo
 
