@@ -17,6 +17,8 @@
 const PLACA_REGEX = /^[A-Z]{3}-?\d{4}$|^[A-Z]{3}\d[A-Z]\d{2}$/i;
 
 const db = require('../config/database'); // Pool de conexão MySQL
+
+const LIMITE_MAX_PAGINACAO = 100;
 const { checkDevOrOwner } = require('../utils/authHelper');
 const { stripHtml } = require('../utils/sanitize');
 
@@ -295,7 +297,7 @@ class VeiculoController {
             }
 
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
             // Busca apenas veículos ativos (vei_status = 1) do usuário

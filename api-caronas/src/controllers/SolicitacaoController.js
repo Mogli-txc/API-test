@@ -146,26 +146,42 @@ class SolicitacaoController {
                 });
             }
 
-            // Verifica se o passageiro já tem uma solicitação ativa para essa carona
-            // sol_status 1 (Enviado) ou 2 (Aceito) = solicitação ativa
-            const [jaExiste] = await db.query(
-                `SELECT sol_id FROM SOLICITACOES_CARONA
-                 WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status IN (1, 2)`,
-                [car_id, usu_id]
-            );
+            // Verifica duplicidade e insere em transação atômica para eliminar race condition:
+            // dois requests simultâneos poderiam passar o SELECT e ambos fazer o INSERT.
+            const conn = await db.getConnection();
+            let resultado;
+            try {
+                await conn.beginTransaction();
 
-            if (jaExiste.length > 0) {
-                return res.status(409).json({
-                    error: "Você já tem uma solicitação ativa para esta carona."
-                });
+                // Verifica se o passageiro já tem uma solicitação ativa para essa carona
+                // sol_status 1 (Enviado) ou 2 (Aceito) = solicitação ativa
+                const [jaExiste] = await conn.query(
+                    `SELECT sol_id FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status IN (1, 2)`,
+                    [car_id, usu_id]
+                );
+
+                if (jaExiste.length > 0) {
+                    await conn.rollback();
+                    return res.status(409).json({
+                        error: "Você já tem uma solicitação ativa para esta carona."
+                    });
+                }
+
+                // Insere a solicitação com status 1 (Enviado) — usu_id vem sempre do token JWT
+                [resultado] = await conn.query(
+                    `INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli)
+                     VALUES (?, ?, 1, ?)`,
+                    [usu_id, car_id, sol_vaga_soli]
+                );
+
+                await conn.commit();
+            } catch (err) {
+                await conn.rollback();
+                throw err;
+            } finally {
+                conn.release();
             }
-
-            // Insere a solicitação com status 1 (Enviado) — usu_id vem sempre do token JWT
-            const [resultado] = await db.query(
-                `INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli)
-                 VALUES (?, ?, 1, ?)`,
-                [usu_id, car_id, sol_vaga_soli]
-            );
 
             return res.status(201).json({
                 message: "Solicitação de carona criada com sucesso!",
@@ -186,13 +202,13 @@ class SolicitacaoController {
      * Retorna os detalhes de uma solicitação específica.
      *
      * Tabela: SOLICITACOES_CARONA (SELECT)
-     * Parâmetro: soli_id (via URL)
+     * Parâmetro: sol_id (via URL)
      */
     async obterPorId(req, res) {
         try {
-            const { soli_id } = req.params;
+            const { sol_id } = req.params;
 
-            if (!soli_id || isNaN(soli_id)) {
+            if (!sol_id || isNaN(sol_id)) {
                 return res.status(400).json({ error: "ID de solicitação inválido." });
             }
 
@@ -207,7 +223,7 @@ class SolicitacaoController {
                  INNER JOIN CARONAS        c  ON s.car_id            = c.car_id
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id       = cu.cur_usu_id
                  WHERE s.sol_id = ?`,
-                [soli_id]
+                [sol_id]
             );
 
             if (rows.length === 0) {
@@ -314,18 +330,18 @@ class SolicitacaoController {
      * Lista todas as solicitações feitas por um passageiro.
      *
      * Tabela: SOLICITACOES_CARONA + CARONAS (JOIN)
-     * Parâmetro: usua_id (via URL)
+     * Parâmetro: usu_id (via URL)
      */
     async listarPorUsuario(req, res) {
         try {
-            const { usua_id } = req.params;
+            const { usu_id } = req.params;
 
-            if (!usua_id || isNaN(usua_id)) {
+            if (!usu_id || isNaN(usu_id)) {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
             // Apenas o próprio usuário pode listar suas solicitações
-            if (req.user.id !== parseInt(usua_id)) {
+            if (req.user.id !== parseInt(usu_id)) {
                 return res.status(403).json({ error: "Sem permissão para visualizar solicitações deste usuário." });
             }
 
@@ -341,12 +357,12 @@ class SolicitacaoController {
                  WHERE s.usu_id_passageiro = ?
                  ORDER BY s.sol_id DESC
                  LIMIT ? OFFSET ?`,
-                [usua_id, limit, offset]
+                [usu_id, limit, offset]
             );
 
             const [[{ totalGeral }]] = await db.query(
                 'SELECT COUNT(*) AS totalGeral FROM SOLICITACOES_CARONA WHERE usu_id_passageiro = ?',
-                [usua_id]
+                [usu_id]
             );
 
             return res.status(200).json({
@@ -355,7 +371,7 @@ class SolicitacaoController {
                 total:       solicitacoes.length,
                 page,
                 limit,
-                usu_id:      parseInt(usua_id),
+                usu_id:      parseInt(usu_id),
                 solicitacoes
             });
 
@@ -371,14 +387,14 @@ class SolicitacaoController {
      * Se aceito, subtrai as vagas da carona.
      *
      * Tabelas: SOLICITACOES_CARONA (UPDATE) + CARONAS (UPDATE vagas se aceito)
-     * Parâmetro: soli_id (via URL)
+     * Parâmetro: sol_id (via URL)
      * Campo no body: novo_status ('Aceito' ou 'Recusado')
      */
     async responderSolicitacao(req, res) {
-        const { soli_id } = req.params;
+        const { sol_id } = req.params;
         const { novo_status } = req.body;
 
-        if (!soli_id || isNaN(soli_id)) {
+        if (!sol_id || isNaN(sol_id)) {
             return res.status(400).json({ error: "ID de solicitação inválido." });
         }
 
@@ -402,7 +418,7 @@ class SolicitacaoController {
                  INNER JOIN CARONAS        c  ON s.car_id        = c.car_id
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id   = cu.cur_usu_id
                  WHERE s.sol_id = ? AND c.car_status IN (1, 2)`,
-                [soli_id]
+                [sol_id]
             );
 
             if (sol.length === 0) {
@@ -425,7 +441,7 @@ class SolicitacaoController {
 
             const [upd] = await conn.query(
                 'UPDATE SOLICITACOES_CARONA SET sol_status = ? WHERE sol_id = ? AND sol_status = 1',
-                [statusCodigo, soli_id]
+                [statusCodigo, sol_id]
             );
 
             if (upd.affectedRows === 0) {
@@ -442,7 +458,7 @@ class SolicitacaoController {
                      INNER JOIN CARONAS c ON s.car_id = c.car_id
                      WHERE s.usu_id_passageiro = ? AND s.sol_status = 2
                        AND c.car_status IN (1, 2) AND s.sol_id != ?`,
-                    [sol[0].usu_id_passageiro, soli_id]
+                    [sol[0].usu_id_passageiro, sol_id]
                 );
                 if (jaVinculado.length > 0) {
                     await conn.rollback();
@@ -474,7 +490,7 @@ class SolicitacaoController {
 
             return res.status(200).json({
                 message: `Solicitação ${novo_status.toLowerCase()} com sucesso!`,
-                solicitacao: { sol_id: parseInt(soli_id), sol_status: statusCodigo }
+                solicitacao: { sol_id: parseInt(sol_id), sol_status: statusCodigo }
             });
 
         } catch (error) {
@@ -494,9 +510,9 @@ class SolicitacaoController {
      * Tabelas: SOLICITACOES_CARONA (UPDATE) + CARONAS (UPDATE vagas se necessário)
      */
     async cancelarSolicitacao(req, res) {
-        const { soli_id } = req.params;
+        const { sol_id } = req.params;
 
-        if (!soli_id || isNaN(soli_id)) {
+        if (!sol_id || isNaN(sol_id)) {
             return res.status(400).json({ error: "ID de solicitação inválido." });
         }
 
@@ -506,7 +522,7 @@ class SolicitacaoController {
             // PASSO 1: Busca a solicitação atual para saber o status, vagas e o passageiro
             const [sol] = await db.query(
                 'SELECT sol_status, sol_vaga_soli, car_id, usu_id_passageiro FROM SOLICITACOES_CARONA WHERE sol_id = ?',
-                [soli_id]
+                [sol_id]
             );
 
             if (sol.length === 0) {
@@ -529,7 +545,7 @@ class SolicitacaoController {
 
             await conn.query(
                 'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE sol_id = ?',
-                [soli_id]
+                [sol_id]
             );
 
             // Se estava aceita (sol_status = 2): devolve a vaga à carona (só se ainda estiver aberta/em espera)
@@ -544,7 +560,7 @@ class SolicitacaoController {
 
             return res.status(200).json({
                 message: "Solicitação cancelada com sucesso!",
-                solicitacao: { sol_id: parseInt(soli_id), sol_status: 0 }
+                solicitacao: { sol_id: parseInt(sol_id), sol_status: 0 }
             });
 
         } catch (error) {
@@ -563,12 +579,12 @@ class SolicitacaoController {
      * Apenas o motorista da carona pode deletar solicitações.
      *
      * Tabela: SOLICITACOES_CARONA (UPDATE sol_status)
-     * Parâmetro: soli_id (via URL)
+     * Parâmetro: sol_id (via URL)
      */
     async deletarSolicitacao(req, res) {
-        const { soli_id } = req.params;
+        const { sol_id } = req.params;
 
-        if (!soli_id || isNaN(soli_id)) {
+        if (!sol_id || isNaN(sol_id)) {
             return res.status(400).json({ error: "ID de solicitação inválido." });
         }
 
@@ -581,7 +597,7 @@ class SolicitacaoController {
                  INNER JOIN CARONAS c         ON s.car_id       = c.car_id
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
                  WHERE s.sol_id = ?`,
-                [soli_id]
+                [sol_id]
             );
             if (sol.length === 0) {
                 return res.status(404).json({ error: "Solicitação não encontrada." });
@@ -600,7 +616,7 @@ class SolicitacaoController {
 
             await conn.query(
                 'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE sol_id = ?',
-                [soli_id]
+                [sol_id]
             );
 
             if (sol[0].sol_status === 2) {

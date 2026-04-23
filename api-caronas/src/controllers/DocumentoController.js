@@ -19,6 +19,8 @@
 const db  = require('../config/database');
 const fsp = require('fs').promises;
 
+const SEIS_MESES_MS = 180 * 24 * 60 * 60 * 1000;
+
 class DocumentoController {
 
     /**
@@ -83,6 +85,7 @@ class DocumentoController {
                     );
                     await conn.commit();
                 } catch (e) {
+                    console.error('[ERRO] Salvar comprovante reprovado (OCR):', e);
                     await conn.rollback();
                 } finally {
                     conn.release();
@@ -110,7 +113,7 @@ class DocumentoController {
                 }
             }
             const novoNivel  = verificacao === 6 ? 2 : 1;
-            const novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000); // +6 meses
+            const novaExpira = new Date(Date.now() + SEIS_MESES_MS); // +6 meses
 
             // PASSO 6: Registra o documento aprovado e promove o usuário em transação atômica
             const conn = await db.getConnection();
@@ -219,6 +222,7 @@ class DocumentoController {
                     );
                     await conn.commit();
                 } catch (e) {
+                    console.error('[ERRO] Salvar CNH reprovada (OCR):', e);
                     await conn.rollback();
                 } finally {
                     conn.release();
@@ -255,7 +259,7 @@ class DocumentoController {
                 );
 
                 if (temVeiculo) {
-                    novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000); // +6 meses
+                    novaExpira = new Date(Date.now() + SEIS_MESES_MS); // +6 meses
                     await conn.query(
                         `UPDATE USUARIOS SET usu_verificacao = 2, usu_verificacao_expira = ?
                          WHERE usu_id = ?`,

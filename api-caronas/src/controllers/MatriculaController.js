@@ -9,6 +9,8 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+
+const LIMITE_MAX_PAGINACAO = 100;
 const { checkDevOrOwner } = require('../utils/authHelper');
 const { registrarAudit } = require('../utils/auditLog');
 
@@ -72,30 +74,50 @@ class MatriculaController {
                 }
             }
 
-            // PASSO 5: Verifica cota de usuários por escola (quando configurado)
-            if (esc_max_usuarios !== null) {
-                const [[{ total }]] = await db.query(
-                    `SELECT COUNT(DISTINCT cu.usu_id) AS total
-                     FROM CURSOS_USUARIOS cu
-                     INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
-                     INNER JOIN USUARIOS u ON cu.usu_id = u.usu_id
-                     WHERE c.esc_id = ? AND u.usu_status = 1`,
-                    [esc_id]
-                );
-                if (total >= esc_max_usuarios) {
-                    return res.status(409).json({
-                        error: `Esta instituição atingiu o limite máximo de ${esc_max_usuarios} usuários ativos.`
-                    });
-                }
-            }
+            // PASSO 5: Verifica cota e insere em transação atômica.
+            // FOR UPDATE na escola serializa requisições concorrentes — impede que dois
+            // usuários simultâneos passem pela verificação de cota e ambos insiram.
+            const conn = await db.getConnection();
+            let resultado;
+            try {
+                await conn.beginTransaction();
 
-            // PASSO 6: Insere a matrícula no banco
-            // O banco rejeita duplicata via UNIQUE KEY UQ_CursoUsuario
-            const [resultado] = await db.query(
-                `INSERT INTO CURSOS_USUARIOS (usu_id, cur_id, cur_usu_dataFinal)
-                 VALUES (?, ?, ?)`,
-                [usu_id, cur_id, cur_usu_dataFinal]
-            );
+                if (esc_max_usuarios !== null) {
+                    await conn.query(
+                        'SELECT esc_id FROM ESCOLAS WHERE esc_id = ? FOR UPDATE',
+                        [esc_id]
+                    );
+                    const [[{ total }]] = await conn.query(
+                        `SELECT COUNT(DISTINCT cu.usu_id) AS total
+                         FROM CURSOS_USUARIOS cu
+                         INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
+                         INNER JOIN USUARIOS u ON cu.usu_id = u.usu_id
+                         WHERE c.esc_id = ? AND u.usu_status = 1`,
+                        [esc_id]
+                    );
+                    if (total >= esc_max_usuarios) {
+                        await conn.rollback();
+                        return res.status(409).json({
+                            error: `Esta instituição atingiu o limite máximo de ${esc_max_usuarios} usuários ativos.`
+                        });
+                    }
+                }
+
+                // PASSO 6: Insere a matrícula no banco
+                // O banco rejeita duplicata via UNIQUE KEY UQ_CursoUsuario
+                [resultado] = await conn.query(
+                    `INSERT INTO CURSOS_USUARIOS (usu_id, cur_id, cur_usu_dataFinal)
+                     VALUES (?, ?, ?)`,
+                    [usu_id, cur_id, cur_usu_dataFinal]
+                );
+
+                await conn.commit();
+            } catch (err) {
+                await conn.rollback();
+                throw err;
+            } finally {
+                conn.release();
+            }
 
             // PASSO 7: Resposta de sucesso com o ID gerado
             return res.status(201).json({
@@ -142,7 +164,7 @@ class MatriculaController {
 
             // PASSO 4: Parâmetros de paginação
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
             // PASSO 5: Busca as matrículas com nome do curso e escola via JOIN
@@ -212,7 +234,7 @@ class MatriculaController {
 
             // PASSO 4: Parâmetros de paginação
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
             // PASSO 5: Busca os alunos do curso com nome do usuário via JOIN

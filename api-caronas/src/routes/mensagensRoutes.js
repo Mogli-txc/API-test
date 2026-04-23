@@ -14,7 +14,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
  * ROTA: POST /api/mensagens/enviar
  * Descrição: Envia uma mensagem durante uma carona
  * Acesso: PROTEGIDO - Requer Token JWT
- * Campos obrigatórios: car_id, mens_texto (remetente_id vem do JWT)
+ * Campos obrigatórios: car_id, mens_texto (usu_id_remetente vem do JWT)
  * Retorno: Status 201 com dados da mensagem criada
  * MER: Tabela MENSAGENS
  */
@@ -31,9 +31,9 @@ router.post('/enviar', authMiddleware, MensagemController.enviarMensagem);
   "message": "Mensagens recuperadas com sucesso",
   "mensagens": [
     {
-      "mens_id": 1,
+      "men_id": 1,
       "car_id": 1,
-      "remetente_id": 2,
+      "usu_id_remetente": 2,
       "mens_texto": "Olá, tudo bem?",
       "criado_em": "2026-03-17T12:00:00.000Z"
     }
@@ -43,22 +43,22 @@ router.post('/enviar', authMiddleware, MensagemController.enviarMensagem);
 router.get('/carona/:car_id', authMiddleware, MensagemController.listarConversa);
 
 /**
- * ROTA: DELETE /api/mensagens/:mens_id
+ * ROTA: DELETE /api/mensagens/:men_id
  * Descrição: Deleta uma mensagem enviada pelo usuário
  * Acesso: PROTEGIDO - Apenas o remetente pode deletar sua própria mensagem
- * Parâmetros: mens_id (via URL)
+ * Parâmetros: men_id (via URL)
  * Retorno: Status 204 (No Content)
  * OBS: Recomenda-se soft delete (marcar como deletada) para preservar thread
  */
-router.delete('/:mens_id', authMiddleware, MensagemController.deletarMensagem);
+router.delete('/:men_id', authMiddleware, MensagemController.deletarMensagem);
 
 /**
- * ROTA: PUT /api/mensagens/:mens_id
+ * ROTA: PUT /api/mensagens/:men_id
  * Descrição: Edita uma mensagem já enviada (apenas o remetente)
  * Acesso: PROTEGIDO
  * Campos atualizáveis: mens_texto
  * Retorno: Status 200 com mensagem atualizada
  */
-router.put('/:mens_id', authMiddleware, MensagemController.editarMensagem);
+router.put('/:men_id', authMiddleware, MensagemController.editarMensagem);
 
 module.exports = router;

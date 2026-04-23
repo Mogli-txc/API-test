@@ -139,10 +139,10 @@ class MensagemController {
     async listarConversa(req, res) {
         try {
             // PASSO 1: Extrai o ID da carona
-            const { car_id: caro_id } = req.params;
+            const { car_id } = req.params;
 
             // PASSO 2: Validação do ID
-            if (!caro_id || isNaN(caro_id)) {
+            if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
@@ -152,7 +152,7 @@ class MensagemController {
                 `SELECT cu.usu_id AS motorista_id FROM CARONAS c
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
                  WHERE c.car_id = ?`,
-                [caro_id]
+                [car_id]
             );
             if (participante.length === 0) {
                 return res.status(404).json({ error: "Carona não encontrada." });
@@ -168,7 +168,7 @@ class MensagemController {
                      UNION
                      SELECT 1 FROM SOLICITACOES_CARONA
                      WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
-                    [caro_id, req.user.id, caro_id, req.user.id]
+                    [car_id, req.user.id, car_id, req.user.id]
                 );
                 if (passageiro.length === 0) {
                     return res.status(403).json({ error: "Sem permissão para visualizar esta conversa." });
@@ -194,7 +194,7 @@ class MensagemController {
                    AND (m.usu_id_remetente = ? OR m.usu_id_destinatario = ?)
                  ORDER BY m.men_id ASC
                  LIMIT ? OFFSET ?`,
-                [caro_id, req.user.id, req.user.id, limit, offset]
+                [car_id, req.user.id, req.user.id, limit, offset]
             );
 
             // PASSO 6: Conta total de mensagens visíveis ao usuário (mesmo filtro do PASSO 5)
@@ -203,7 +203,7 @@ class MensagemController {
                  FROM MENSAGENS
                  WHERE car_id = ? AND men_deletado_em IS NULL
                    AND (usu_id_remetente = ? OR usu_id_destinatario = ?)`,
-                [caro_id, req.user.id, req.user.id]
+                [car_id, req.user.id, req.user.id]
             );
 
             // PASSO 7: Resposta de sucesso
@@ -213,7 +213,7 @@ class MensagemController {
                 total:      mensagens.length,
                 page,
                 limit,
-                caro_id:    parseInt(caro_id),
+                car_id:     parseInt(car_id),
                 mensagens
             });
 
@@ -226,17 +226,17 @@ class MensagemController {
     /**
      * MÉTODO: editarMensagem
      * Descrição: Edita o texto de uma mensagem já enviada (apenas o remetente)
-     * Parâmetros: mens_id (via URL)
+     * Parâmetros: men_id (via URL)
      * Acesso: PROTEGIDO — Apenas o remetente pode editar
      */
     async editarMensagem(req, res) {
         try {
             // PASSO 1: Extrai ID e novo texto
-            const { mens_id } = req.params;
+            const { men_id } = req.params;
             const { men_texto } = req.body;
 
             // PASSO 2: Validação do ID
-            if (!mens_id || isNaN(mens_id)) {
+            if (!men_id || isNaN(men_id)) {
                 return res.status(400).json({ error: "ID de mensagem inválido." });
             }
 
@@ -251,7 +251,7 @@ class MensagemController {
             // Retorna 404 em ambos os casos (não encontrada ou não é dono) para não revelar existência a terceiros
             const [mensagem] = await db.query(
                 'SELECT men_id FROM MENSAGENS WHERE men_id = ? AND usu_id_remetente = ? AND men_deletado_em IS NULL',
-                [mens_id, req.user.id]
+                [men_id, req.user.id]
             );
             if (mensagem.length === 0) {
                 return res.status(404).json({ error: "Mensagem não encontrada." });
@@ -260,13 +260,13 @@ class MensagemController {
             // PASSO 5: Atualização no banco (usa o texto já trimado)
             await db.query(
                 'UPDATE MENSAGENS SET men_texto = ? WHERE men_id = ?',
-                [men_texto_trim, mens_id]
+                [men_texto_trim, men_id]
             );
 
-            // PASSO 5: Resposta de sucesso
+            // PASSO 6: Resposta de sucesso
             return res.status(200).json({
                 message:  "Mensagem atualizada com sucesso!",
-                mensagem: { men_id: parseInt(mens_id), men_texto: men_texto_trim }
+                mensagem: { men_id: parseInt(men_id), men_texto: men_texto_trim }
             });
 
         } catch (error) {
@@ -279,16 +279,16 @@ class MensagemController {
      * MÉTODO: deletarMensagem
      * Descrição: Soft delete — marca men_deletado_em em vez de remover do banco.
      *   Preserva o histórico e evita quebra de referências via men_id_resposta.
-     * Parâmetros: mens_id (via URL)
+     * Parâmetros: men_id (via URL)
      * Acesso: PROTEGIDO — Apenas o remetente pode deletar
      */
     async deletarMensagem(req, res) {
         try {
             // PASSO 1: Extrai o ID
-            const { mens_id } = req.params;
+            const { men_id } = req.params;
 
             // PASSO 2: Validação do ID
-            if (!mens_id || isNaN(mens_id)) {
+            if (!men_id || isNaN(men_id)) {
                 return res.status(400).json({ error: "ID de mensagem inválido." });
             }
 
@@ -296,7 +296,7 @@ class MensagemController {
             // Retorna 404 em ambos os casos (não encontrada ou não é dono) para não revelar existência a terceiros
             const [mensagem] = await db.query(
                 'SELECT men_id FROM MENSAGENS WHERE men_id = ? AND usu_id_remetente = ? AND men_deletado_em IS NULL',
-                [mens_id, req.user.id]
+                [men_id, req.user.id]
             );
             if (mensagem.length === 0) {
                 return res.status(404).json({ error: "Mensagem não encontrada." });
@@ -305,10 +305,10 @@ class MensagemController {
             // PASSO 4: Soft delete — registra data de remoção sem apagar o registro
             await db.query(
                 'UPDATE MENSAGENS SET men_deletado_em = NOW() WHERE men_id = ?',
-                [mens_id]
+                [men_id]
             );
 
-            // PASSO 4: Resposta de sucesso (204 = sem conteúdo no retorno)
+            // PASSO 5: Resposta de sucesso (204 = sem conteúdo no retorno)
             return res.status(204).send();
 
         } catch (error) {

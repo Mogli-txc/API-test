@@ -151,9 +151,11 @@ const validarDocumento = async (req, res, next) => {
         await fh.close();
         fh = null;
 
-        // Verifica assinatura %PDF (magic bytes do formato PDF)
+        // Verifica assinatura %PDF- (magic bytes + byte de versão obrigatório)
+        // %PDF = 0x25 0x50 0x44 0x46 | '-' = 0x2D (presente em %PDF-1.x e %PDF-2.x)
         const ehPdf = buffer[0] === 0x25 && buffer[1] === 0x50 &&
-                      buffer[2] === 0x44 && buffer[3] === 0x46;
+                      buffer[2] === 0x44 && buffer[3] === 0x46 &&
+                      buffer[4] === 0x2D;
 
         if (!ehPdf) {
             await fsp.unlink(req.file.path);

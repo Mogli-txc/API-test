@@ -101,7 +101,7 @@ async function enviarEmailReset(email, resetUrl) {
                 <h2 style="color: #333;">Redefinição de Senha</h2>
                 <p style="color: #555;">Você solicitou a redefinição da sua senha. Clique no botão abaixo para continuar:</p>
                 <div style="text-align: center; margin: 28px 0;">
-                    <a href="${resetUrl}"
+                    <a href="${escapeHtml(resetUrl)}"
                        style="background: #0066cc; color: #fff; padding: 14px 28px;
                               border-radius: 6px; text-decoration: none; font-size: 16px;">
                         Redefinir Senha

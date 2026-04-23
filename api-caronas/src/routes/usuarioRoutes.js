@@ -129,7 +129,7 @@ router.put('/:id/foto', authMiddleware, uploadFotoMiddleware, validarImagem, Usu
  * ROTA: DELETE /api/usuarios/:id
  * Descrição: Deleta a conta do usuário (soft delete recomendado)
  * Acesso: PROTEGIDO - Apenas o próprio usuário pode deletar sua conta
- * Parâmetro: id (usua_id via URL)
+ * Parâmetro: id (usu_id via URL)
  * Retorno: Status 204 (No Content)
  * OBS: Recomenda-se usar soft delete para manter histórico de dados
  */

@@ -219,7 +219,13 @@ class UsuarioController {
             }
 
             const hashFornecido = hashOtp(otp.toString().trim());
-            if (hashFornecido !== usuario.usu_otp_hash) {
+            // timingSafeEqual previne timing attacks — a comparação demora o mesmo tempo
+            // independente de quantos bytes coincidem, impedindo ataques de enumeração por tempo
+            const bufFornecido = Buffer.from(hashFornecido, 'hex');
+            const bufArmazenado = Buffer.from(usuario.usu_otp_hash, 'hex');
+            const otpInvalido = bufFornecido.length !== bufArmazenado.length
+                || !crypto.timingSafeEqual(bufFornecido, bufArmazenado);
+            if (otpInvalido) {
                 // Incrementa contador de tentativas falhas e bloqueia após 3
                 const tentativas = (usuario.usu_otp_tentativas || 0) + 1;
                 const bloqueio   = tentativas >= 3

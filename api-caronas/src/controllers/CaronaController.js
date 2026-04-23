@@ -27,6 +27,8 @@ const { registrarAudit } = require('../utils/auditLog');
 // Regex para validar formato HH:MM ou HH:MM:SS
 const HORA_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
 
+const LIMITE_MAX_PAGINACAO = 100;
+
 /**
  * Valida data e hora da carona combinados no fuso local do servidor.
  * Retorna { ok: true } ou { ok: false, error: '...' }.
@@ -78,7 +80,7 @@ class CaronaController {
      */
     async listarTodas(req, res) {
         try {
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
 
             // Paginação cursor-based: quando ?cursor=<car_id> é fornecido, busca registros
             // com car_id < cursor — performance constante independente da profundidade da página.
@@ -180,13 +182,13 @@ class CaronaController {
      * Retorna os detalhes de uma carona específica pelo ID.
      *
      * Tabela: CARONAS
-     * Parâmetro: caro_id (via URL)
+     * Parâmetro: car_id (via URL)
      */
     async obterPorId(req, res) {
         try {
-            const { car_id: caro_id } = req.params;
+            const { car_id } = req.params;
 
-            if (!caro_id || isNaN(caro_id)) {
+            if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
@@ -200,7 +202,7 @@ class CaronaController {
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
                  INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
                  WHERE c.car_id = ?`,
-                [caro_id]
+                [car_id]
             );
 
             if (rows.length === 0) {
@@ -353,16 +355,16 @@ class CaronaController {
      * Atualiza os campos de uma carona existente.
      *
      * Tabela: CARONAS (UPDATE)
-     * Parâmetro: caro_id (via URL)
+     * Parâmetro: car_id (via URL)
      * Campos opcionais no body: car_desc, car_data, car_vagas_dispo, car_status
      * car_status: 0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada
      */
     async atualizar(req, res) {
         try {
-            const { car_id: caro_id } = req.params;
+            const { car_id } = req.params;
             const { car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status } = req.body;
 
-            if (!caro_id || isNaN(caro_id)) {
+            if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
@@ -384,7 +386,7 @@ class CaronaController {
                  FROM CARONAS c
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
                  WHERE c.car_id = ?`,
-                [caro_id]
+                [car_id]
             );
             if (dono.length === 0) {
                 return res.status(404).json({ error: "Carona não encontrada." });
@@ -432,7 +434,7 @@ class CaronaController {
                     `SELECT v.vei_vagas FROM CARONAS c
                      INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                      WHERE c.car_id = ?`,
-                    [caro_id]
+                    [car_id]
                 );
                 if (veiCarona.length > 0 && parseInt(car_vagas_dispo) > veiCarona[0].vei_vagas) {
                     return res.status(400).json({
@@ -442,7 +444,7 @@ class CaronaController {
                 // Garante que o novo valor não fique abaixo do número de passageiros já aceitos
                 const [[{ aceitos }]] = await db.query(
                     'SELECT COUNT(*) AS aceitos FROM SOLICITACOES_CARONA WHERE car_id = ? AND sol_status = 2',
-                    [caro_id]
+                    [car_id]
                 );
                 if (parseInt(car_vagas_dispo) < aceitos) {
                     return res.status(409).json({
@@ -454,7 +456,7 @@ class CaronaController {
             }
             if (car_status !== undefined) { campos.push('car_status = ?'); valores.push(parseInt(car_status)); }
 
-            valores.push(caro_id); // WHERE car_id = ?
+            valores.push(car_id); // WHERE car_id = ?
 
             // Whitelist: apenas colunas conhecidas podem entrar na query (car_status=3 bloqueado acima)
             const COLUNAS_PERMITIDAS = ['car_desc = ?', 'car_data = ?', 'car_hor_saida = ?', 'car_vagas_dispo = ?', 'car_status = ?'];
@@ -471,7 +473,7 @@ class CaronaController {
             if (parseInt(car_status) === 0) {
                 await db.query(
                     'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE car_id = ? AND sol_status IN (1, 2)',
-                    [caro_id]
+                    [car_id]
                 );
             }
 
@@ -495,7 +497,7 @@ class CaronaController {
             const usu_id = req.user.id;
 
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
             // Filtro opcional por status (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
@@ -560,9 +562,9 @@ class CaronaController {
     async finalizar(req, res) {
         let conn;
         try {
-            const { car_id: caro_id } = req.params;
+            const { car_id } = req.params;
 
-            if (!caro_id || isNaN(caro_id)) {
+            if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
@@ -571,7 +573,7 @@ class CaronaController {
                 `SELECT cu.usu_id, c.car_status FROM CARONAS c
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
                  WHERE c.car_id = ?`,
-                [caro_id]
+                [car_id]
             );
             if (dono.length === 0) {
                 return res.status(404).json({ error: "Carona não encontrada." });
@@ -595,16 +597,16 @@ class CaronaController {
 
             await conn.query(
                 'UPDATE CARONAS SET car_status = 3 WHERE car_id = ?',
-                [caro_id]
+                [car_id]
             );
             await conn.query(
                 'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE car_id = ? AND sol_status = 1',
-                [caro_id]
+                [car_id]
             );
 
             await conn.commit();
 
-            await registrarAudit({ tabela: 'CARONAS', registroId: parseInt(caro_id), acao: 'CARONA_FINALIZAR', usuId: req.user.id, ip: req.ip });
+            await registrarAudit({ tabela: 'CARONAS', registroId: parseInt(car_id), acao: 'CARONA_FINALIZAR', usuId: req.user.id, ip: req.ip });
 
             return res.status(200).json({ message: "Carona finalizada com sucesso!" });
 
@@ -628,9 +630,9 @@ class CaronaController {
     async deletar(req, res) {
         let conn;
         try {
-            const { car_id: caro_id } = req.params;
+            const { car_id } = req.params;
 
-            if (!caro_id || isNaN(caro_id)) {
+            if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
@@ -639,7 +641,7 @@ class CaronaController {
                 `SELECT cu.usu_id, c.car_status FROM CARONAS c
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
                  WHERE c.car_id = ?`,
-                [caro_id]
+                [car_id]
             );
             if (dono.length === 0) {
                 return res.status(404).json({ error: "Carona não encontrada." });
@@ -662,17 +664,17 @@ class CaronaController {
 
             await conn.query(
                 'UPDATE CARONAS SET car_status = 0 WHERE car_id = ?',
-                [caro_id]
+                [car_id]
             );
             // Cancela solicitações pendentes (1) e aceitas (2) — libera passageiros para novas caronas
             await conn.query(
                 'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE car_id = ? AND sol_status IN (1, 2)',
-                [caro_id]
+                [car_id]
             );
 
             await conn.commit();
 
-            await registrarAudit({ tabela: 'CARONAS', registroId: parseInt(caro_id), acao: 'CARONA_CANCEL', usuId: req.user.id, ip: req.ip });
+            await registrarAudit({ tabela: 'CARONAS', registroId: parseInt(car_id), acao: 'CARONA_CANCEL', usuId: req.user.id, ip: req.ip });
 
             return res.status(204).send();
 

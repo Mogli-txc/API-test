@@ -22,13 +22,13 @@ const authMiddleware = require('../middlewares/authMiddleware');
 router.post('/criar', authMiddleware, SolicitacaoController.solicitarCarona);
 
 /**
- * ROTA: GET /api/solicitacoes/:soli_id
+ * ROTA: GET /api/solicitacoes/:sol_id
  * Descrição: Recupera os detalhes de uma solicitação específica
  * Acesso: PROTEGIDO - Apenas motorista ou passageiro envolvido
- * Parâmetros: soli_id (via URL)
+ * Parâmetros: sol_id (via URL)
  * Retorno: Status 200 com dados da solicitação
  */
-router.get('/:soli_id', authMiddleware, SolicitacaoController.obterPorId);
+router.get('/:sol_id', authMiddleware, SolicitacaoController.obterPorId);
 
 /**
  * ROTA: GET /api/solicitacoes/carona/:car_id
@@ -40,43 +40,43 @@ router.get('/:soli_id', authMiddleware, SolicitacaoController.obterPorId);
 router.get('/carona/:car_id', authMiddleware, SolicitacaoController.listarPorCarona);
 
 /**
- * ROTA: GET /api/solicitacoes/usuario/:usua_id
+ * ROTA: GET /api/solicitacoes/usuario/:usu_id
  * Descrição: Lista todas as solicitações feitas por um usuário (passageiro)
  * Acesso: PROTEGIDO - Apenas o próprio usuário pode ver suas solicitações
- * Parâmetros: usua_id = usu_id (via URL)
+ * Parâmetros: usu_id (via URL)
  * Retorno: Status 200 com array de solicitações
  */
-router.get('/usuario/:usua_id', authMiddleware, SolicitacaoController.listarPorUsuario);
+router.get('/usuario/:usu_id', authMiddleware, SolicitacaoController.listarPorUsuario);
 
 /**
- * ROTA: PUT /api/solicitacoes/:soli_id/responder
+ * ROTA: PUT /api/solicitacoes/:sol_id/responder
  * Descrição: Motorista responde uma solicitação (aceita ou recusa)
  * Acesso: PROTEGIDO - Apenas o motorista pode responder
- * Parâmetros: soli_id (via URL)
+ * Parâmetros: sol_id (via URL)
  * Campos obrigatórios: novo_status ('Aceito' ou 'Recusado')
  * Retorno: Status 200 com solicitação atualizada
  * LÓGICA: Se 'Aceito', subtrai vagas de CARONAS.car_vagas_dispo
  */
-router.put('/:soli_id/responder', authMiddleware, SolicitacaoController.responderSolicitacao);
+router.put('/:sol_id/responder', authMiddleware, SolicitacaoController.responderSolicitacao);
 
 /**
- * ROTA: PUT /api/solicitacoes/:soli_id/cancelar
+ * ROTA: PUT /api/solicitacoes/:sol_id/cancelar
  * Descrição: Passageiro cancela sua solicitação
  * Acesso: PROTEGIDO - Apenas o passageiro que fez a solicitação
- * Parâmetros: soli_id (via URL)
+ * Parâmetros: sol_id (via URL)
  * Retorno: Status 200 com confirmação do cancelamento
  * OBS: Se status = 'Aceito', adiciona vaga de volta para a carona
  */
-router.put('/:soli_id/cancelar', authMiddleware, SolicitacaoController.cancelarSolicitacao);
+router.put('/:sol_id/cancelar', authMiddleware, SolicitacaoController.cancelarSolicitacao);
 
 /**
- * ROTA: DELETE /api/solicitacoes/:soli_id
+ * ROTA: DELETE /api/solicitacoes/:sol_id
  * Descrição: Deleta uma solicitação (apenas motorista da carona - admin)
  * Acesso: PROTEGIDO - Apenas motorista ou admin
- * Parâmetros: soli_id (via URL)
+ * Parâmetros: sol_id (via URL)
  * Retorno: Status 204 (No Content)
  * OBS: Soft delete recomendado
  */
-router.delete('/:soli_id', authMiddleware, SolicitacaoController.deletarSolicitacao);
+router.delete('/:sol_id', authMiddleware, SolicitacaoController.deletarSolicitacao);
 
 module.exports = router;

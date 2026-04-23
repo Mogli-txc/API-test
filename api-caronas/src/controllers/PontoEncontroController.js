@@ -11,6 +11,8 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
+
+const LIMITE_MAX_PAGINACAO = 100;
 const { stripHtml } = require('../utils/sanitize');
 
 class PontoEncontroController {
@@ -139,7 +141,7 @@ class PontoEncontroController {
 
             // PASSO 3: Parâmetros de paginação
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
             // PASSO 4: Busca no banco ordenado pela ordem dos pontos (NULLs ao final)
