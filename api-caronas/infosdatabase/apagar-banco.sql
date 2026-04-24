@@ -6,6 +6,12 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+-- Nível 5: Tabelas auxiliares sem dependentes (podem ser dropadas em qualquer ordem com FK_CHECKS=0)
+DROP TABLE IF EXISTS AUDIT_LOG;              -- [sem FK ativa para outras tabelas]
+DROP TABLE IF EXISTS PENALIDADES;            -- [v8] referencia USUARIOS
+DROP TABLE IF EXISTS DOCUMENTOS_VERIFICACAO; -- [v6+v7] referencia USUARIOS
+DROP TABLE IF EXISTS AVALIACOES;             -- [v5] referencia CARONAS e USUARIOS
+
 -- Nível 4: Tabelas que dependem de CARONAS
 DROP TABLE IF EXISTS MENSAGENS;
 DROP TABLE IF EXISTS SOLICITACOES_CARONA;

@@ -56,7 +56,7 @@ SELECT 'BLOCO 1 removido com sucesso.' AS Status;
 
 -- =====================================================
 -- BLOCO 2 — DELETE dos dados do INSERT DE TESTES
--- (9 usuários: Carlos, Mariana, Pedro, Ana, Lucas, Admin, Novo, Pendente, Suspenso)
+-- (10 usuários: Carlos, Mariana, Pedro, Ana, Lucas, Admin, Novo, Pendente, Suspenso, TempVei)
 -- =====================================================
 
 -- Nível 4: Tabelas que dependem de CARONAS e USUARIOS
@@ -68,17 +68,22 @@ DELETE FROM PONTO_ENCONTROS     WHERE car_id IN (1, 2, 3, 4, 5, 6);
 -- Nível 3: CARONAS
 DELETE FROM CARONAS             WHERE cur_usu_id IN (1, 2, 3, 4, 5);
 
+-- Nível 2.5: PENALIDADES — deve ser removido antes dos USUARIOS para evitar erro FK RESTRICT
+-- em pen_aplicado_por (Admin usu_id=6 não pode ser deletado enquanto houver penalidades que ele aplicou)
+DELETE FROM PENALIDADES         WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+                                   OR pen_aplicado_por IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
 -- Nível 2: Tabelas intermediárias
-DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
-DELETE FROM VEICULOS            WHERE usu_id IN (1, 3, 5);
+DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+DELETE FROM VEICULOS            WHERE usu_id IN (1, 3, 5, 10);
 
 -- Nível 1: Tabelas dependentes de USUARIOS
-DELETE FROM SUGESTAO_DENUNCIA   WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
-DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
-DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
+DELETE FROM SUGESTAO_DENUNCIA   WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 
 -- Nível 0: Usuários
-DELETE FROM USUARIOS            WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9);
+DELETE FROM USUARIOS            WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 
 -- Cursos e Escolas (se quiser limpar também)
 DELETE FROM CURSOS              WHERE esc_id IN (1, 2, 3);
