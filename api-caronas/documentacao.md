@@ -266,7 +266,7 @@ components:
     Solicitacao:
       type: object
       properties:
-        soli_id:
+        sol_id:
           type: integer
           example: 1
         car_id:
@@ -337,30 +337,41 @@ components:
     # ─── Mensagem ───────────────────────────────────────────────────────────────
     MensagemEnviarRequest:
       type: object
-      required: [car_id, mens_texto]
+      required: [car_id, usu_id_destinatario, men_texto]
       properties:
         car_id:
           type: integer
           example: 1
-        mens_texto:
+        usu_id_destinatario:
+          type: integer
+          example: 3
+        men_texto:
           type: string
           example: Já estou a caminho!
+        men_id_resposta:
+          type: integer
+          nullable: true
+          description: ID da mensagem sendo respondida (opcional)
 
     Mensagem:
       type: object
       properties:
-        mens_id:
+        men_id:
           type: integer
           example: 1
         car_id:
           type: integer
           example: 1
-        remetente_id:
+        usu_id_remetente:
           type: integer
           example: 2
-        mens_texto:
+        men_texto:
           type: string
           example: Já estou a caminho!
+        men_id_resposta:
+          type: integer
+          nullable: true
+          example: null
         criado_em:
           type: string
           format: date-time
@@ -857,7 +868,7 @@ paths:
         Aceita usuários nos níveis **5** (sem veículo) ou **6** (com veículo).
 
         **Pipeline de validação:**
-        1. Magic bytes verificados (`%PDF`) — rejeita arquivos falsificados.
+        1. Magic bytes verificados (`%PDF-`, 5 bytes) — rejeita arquivos falsificados.
         2. OCR automático: tenta extração de texto nativo (`pdfjs-dist`); se insuficiente,
            converte a 1ª página para PNG e executa Tesseract.js.
         3. Avalia ≥ 2 de 3 grupos de critérios (`instituicao`, `matricula`, `periodo`)
@@ -947,7 +958,7 @@ paths:
         Aceita apenas usuários no nível **1** (matrícula verificada).
 
         **Pipeline de validação:**
-        1. Magic bytes verificados (`%PDF`) — rejeita arquivos falsificados.
+        1. Magic bytes verificados (`%PDF-`, 5 bytes) — rejeita arquivos falsificados.
         2. OCR automático com Tesseract.js (português + inglês, OEM LSTM).
         3. Avalia ≥ 2 de 3 grupos de critérios (`cabecalho`, `categoria`, `identificacao`)
            com confiança mínima de 75%.
@@ -1412,14 +1423,14 @@ paths:
         '401':
           description: Não autenticado
 
-  /api/solicitacoes/{soli_id}:
+  /api/solicitacoes/{sol_id}:
     get:
       tags: [Solicitações]
       summary: Obter solicitação por ID
       security:
         - bearerAuth: []
       parameters:
-        - name: soli_id
+        - name: sol_id
           in: path
           required: true
           schema:
@@ -1441,7 +1452,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - name: soli_id
+        - name: sol_id
           in: path
           required: true
           schema:
@@ -1479,14 +1490,14 @@ paths:
                     items:
                       $ref: '#/components/schemas/Solicitacao'
 
-  /api/solicitacoes/usuario/{usua_id}:
+  /api/solicitacoes/usuario/{usu_id}:
     get:
       tags: [Solicitações]
       summary: Listar solicitações do usuário
       security:
         - bearerAuth: []
       parameters:
-        - name: usua_id
+        - name: usu_id
           in: path
           required: true
           schema:
@@ -1505,7 +1516,7 @@ paths:
                     items:
                       $ref: '#/components/schemas/Solicitacao'
 
-  /api/solicitacoes/{soli_id}/responder:
+  /api/solicitacoes/{sol_id}/responder:
     put:
       tags: [Solicitações]
       summary: Motorista responde solicitação
@@ -1514,7 +1525,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - name: soli_id
+        - name: sol_id
           in: path
           required: true
           schema:
@@ -1534,7 +1545,7 @@ paths:
         '404':
           description: Solicitação não encontrada
 
-  /api/solicitacoes/{soli_id}/cancelar:
+  /api/solicitacoes/{sol_id}/cancelar:
     put:
       tags: [Solicitações]
       summary: Passageiro cancela solicitação
@@ -1545,7 +1556,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - name: soli_id
+        - name: sol_id
           in: path
           required: true
           schema:
@@ -1670,7 +1681,7 @@ paths:
       tags: [Mensagens]
       summary: Enviar mensagem na carona
       description: |
-        `remetente_id` é extraído do JWT — não aceito no body (evita spoofing).
+        `usu_id_remetente` é extraído do JWT — não aceito no body (evita spoofing).
 
         **Validações de participação:**
         - O remetente deve ser motorista ou passageiro aceito da carona (`car_pes_status = 1`
@@ -1751,14 +1762,14 @@ paths:
                     items:
                       $ref: '#/components/schemas/Mensagem'
 
-  /api/mensagens/{mens_id}:
+  /api/mensagens/{men_id}:
     put:
       tags: [Mensagens]
       summary: Editar mensagem
       security:
         - bearerAuth: []
       parameters:
-        - name: mens_id
+        - name: men_id
           in: path
           required: true
           schema:
@@ -1770,9 +1781,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [mens_texto]
+              required: [men_texto]
               properties:
-                mens_texto:
+                men_texto:
                   type: string
                   example: Texto corrigido da mensagem.
       responses:
@@ -1787,7 +1798,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - name: mens_id
+        - name: men_id
           in: path
           required: true
           schema:
@@ -2546,6 +2557,8 @@ paths:
         Desativa a penalidade (`pen_ativo = 0`).
         Se `pen_tipo = 4`, consulta os veículos ativos do usuário e restaura
         `usu_verificacao` para o nível correto: `2` (com veículo ativo) ou `1` (sem veículo).
+        Renova também `usu_verificacao_expira` por +6 meses para que o usuário possa
+        utilizar a plataforma imediatamente após a remoção da suspensão.
         Admin só pode remover penalidades de usuários da sua escola.
       security:
         - bearerAuth: []
