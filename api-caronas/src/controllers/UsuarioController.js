@@ -19,6 +19,11 @@
  *           usu_verificacao, usu_verificacao_expira, usu_otp_hash, usu_otp_expira
  * USUARIOS_REGISTROS: usu_id, usu_criado_em, usu_data_login, usu_atualizado_em
  * PERFIL: per_id, usu_id, per_nome, per_data, per_tipo, per_habilitado
+ *
+ * Geocodificação [v10]:
+ *   cadastrar(): se usu_endereco for fornecido, chama geocodificarEndereco() após o commit
+ *   e persiste usu_lat/usu_lon em UPDATE separado (fora da transação crítica).
+ *   Falha no Nominatim é logada com console.warn e não reverte o cadastro.
  */
 
 const jwt            = require('jsonwebtoken');
@@ -31,6 +36,10 @@ const { enqueue: enqueueEmail } = require('../utils/emailQueue');
 const { checkDevOrOwner } = require('../utils/authHelper');
 const { registrarAudit } = require('../utils/auditLog');
 const { stripHtml } = require('../utils/sanitize');
+
+// Geocodificação do endereço do usuário via Nominatim  [v10]
+// Importado aqui para manter o serviço centralizado em geocodingService.js
+const { geocodificarEndereco } = require('../services/geocodingService');
 
 // Regex básico de formato de email (RFC 5322 simplificado)
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -127,6 +136,27 @@ class UsuarioController {
             );
 
             await conn.commit();
+
+            // PASSO 2d: Geocodificação do endereço via Nominatim  [v10]
+            // Executada FORA da transação principal para dois motivos:
+            //   1. Não manter a conexão/transação aberta enquanto aguarda resposta de API externa
+            //   2. Falha no Nominatim não deve reverter o cadastro (best-effort)
+            // O UPDATE é idempotente: se falhar, usu_lat/usu_lon ficam NULL e podem ser
+            // preenchidos futuramente por uma rotina de retrogeodificação.
+            if (endereco_limpo) {
+                try {
+                    const coordenadas = await geocodificarEndereco(endereco_limpo);
+                    if (coordenadas) {
+                        await db.query(
+                            'UPDATE USUARIOS SET usu_lat = ?, usu_lon = ? WHERE usu_id = ?',
+                            [coordenadas.lat, coordenadas.lon, novoId]
+                        );
+                    }
+                } catch (geoErr) {
+                    // Falha silenciosa: não impede o fluxo nem o OTP
+                    console.warn('[GEOCODING] Falha ao geocodificar endereço do usuário:', geoErr.message);
+                }
+            }
 
             // PASSO 3: Gera OTP, armazena hash e envia email
             // Feito fora da transação para não manter a conexão aberta durante o envio SMTP

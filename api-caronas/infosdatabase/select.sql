@@ -506,19 +506,73 @@ WHERE car_id = 1
 ORDER BY pon_ordem ASC;
 
 -- [C] TESTE: Ponto de partida do motorista de uma carona
-SELECT pon_nome, pon_endereco, pon_endereco_geom
+SELECT pon_nome, pon_endereco, pon_endereco_geom, pon_lat, pon_lon
 FROM PONTO_ENCONTROS
 WHERE car_id = 1
   AND pon_tipo = 0
   AND pon_status = 1;
 
 -- [C] TESTE: Pontos de embarque dos passageiros de uma carona
-SELECT pon_id, pon_nome, pon_endereco, pon_ordem
+SELECT pon_id, pon_nome, pon_endereco, pon_lat, pon_lon, pon_ordem
 FROM PONTO_ENCONTROS
 WHERE car_id = 4
   AND pon_tipo = 1
   AND pon_status = 1
 ORDER BY pon_ordem ASC;
+
+-- [C] TESTE: Pontos com coordenadas dentro de bounding-box (pré-filtro do filtro por raio)
+-- Substitua os valores pelos limites calculados em CaronaController a partir do raio informado.
+-- Exemplo: raio=10km a partir de (-23.5505, -46.6333)
+-- lat delta ~10km ≈ 0.09 graus; lon delta ~10km ≈ 0.11 graus (SP)
+SELECT pon_id, car_id, pon_endereco, pon_lat, pon_lon
+FROM PONTO_ENCONTROS
+WHERE pon_tipo = 0
+  AND pon_status = 1
+  AND pon_lat  BETWEEN -23.6405 AND -23.4605
+  AND pon_lon  BETWEEN -46.7433 AND -46.5233;
+
+
+-- =====================================================
+-- GEOCODIFICAÇÃO — Diagnósticos Nominatim  [v10]
+-- Verificação do estado das coordenadas no banco após
+-- implantação da integração com Nominatim.
+-- =====================================================
+
+-- [GEO] Pontos de encontro SEM coordenadas geocodificadas
+-- Resultado esperado após seed completo: 0 linhas
+-- Em produção: pontos criados antes de v10 ou com geocoding best-effort falho
+SELECT pon_id, car_id, pon_endereco
+FROM PONTO_ENCONTROS
+WHERE pon_lat IS NULL
+  AND pon_status = 1
+ORDER BY pon_id;
+
+-- [GEO] Escolas SEM coordenadas geocodificadas
+-- Resultado esperado após seed: 0 linhas
+SELECT esc_id, esc_nome, esc_endereco
+FROM ESCOLAS
+WHERE esc_lat IS NULL
+ORDER BY esc_id;
+
+-- [GEO] Usuários com endereço mas SEM coordenadas geocodificadas
+-- Resultado esperado: 0 linhas (seed preenche usu_lat/usu_lon onde usu_endereco existe)
+-- Em produção: usuários cadastrados antes de v10
+SELECT usu_id, usu_nome, usu_endereco
+FROM USUARIOS
+WHERE usu_endereco IS NOT NULL
+  AND usu_lat IS NULL
+  AND usu_deletado_em IS NULL
+ORDER BY usu_id;
+
+-- [GEO] Distribuição de cobertura de geocodificação nos pontos de encontro
+SELECT
+    COUNT(*)                                   AS total_pontos,
+    SUM(pon_lat IS NOT NULL)                   AS com_coordenadas,
+    SUM(pon_lat IS NULL)                       AS sem_coordenadas,
+    ROUND(SUM(pon_lat IS NOT NULL) * 100.0
+          / COUNT(*), 1)                       AS cobertura_pct
+FROM PONTO_ENCONTROS
+WHERE pon_status = 1;
 
 
 -- =====================================================

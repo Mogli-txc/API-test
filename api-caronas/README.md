@@ -22,7 +22,8 @@ API REST para sistema de compartilhamento de caronas entre alunos de instituiç�
 | pdf-to-img          | Renderização de página PDF como PNG para o Tesseract         |
 | socket.io           | WebSocket para mensagens em tempo real                       |
 | nodemailer          | Envio de email (OTP, reset de senha)                         |
-| jest + supertest    | Testes (266 testes)                                          |
+| jest + supertest    | Testes (266 + 34 testes de geocodificação)                   |
+| fetch (Node nativo) | Requisições HTTP ao Nominatim (geocodificação OpenStreetMap) |
 
 ---
 
@@ -140,6 +141,8 @@ O `access_token` é obtido no login e válido por **24 horas**. Quando expirar, 
 
 **Filtro de status em `/minhas`:** `GET /api/caronas/minhas?status=1` retorna apenas caronas abertas. Valores: `0`=Cancelada, `1`=Aberta, `2`=Em espera, `3`=Finalizada. Sem o parâmetro, retorna todos os status.
 
+**Filtro de proximidade:** `GET /api/caronas?lat=-23.5614&lon=-46.6560&raio=10` retorna apenas caronas cujo ponto de partida esteja a até 10 km das coordenadas informadas. A resposta inclui `raio_km`. Caronas sem ponto de partida geocodificado são excluídas.
+
 ### Solicitações — `/api/solicitacoes`
 
 | Método | Rota                 | Auth | Descrição                                    |
@@ -203,10 +206,11 @@ Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no
 
 ### Pontos de encontro — `/api/pontos`
 
-| Método | Rota              | Auth | Descrição                                |
-|--------|-------------------|------|------------------------------------------|
-| POST   | `/`               | JWT  | Cadastra ponto de encontro de uma carona |
-| GET    | `/carona/:car_id` | JWT  | Lista pontos de encontro de uma carona   |
+| Método | Rota              | Auth | Descrição                                                                 |
+|--------|-------------------|------|---------------------------------------------------------------------------|
+| GET    | `/geocode`        | JWT  | Autocomplete de endereços via Nominatim (`?q=<texto>&limite=<n>`)         |
+| POST   | `/`               | JWT  | Cadastra ponto de encontro (`pon_endereco_geom` opcional — geocodificado) |
+| GET    | `/carona/:car_id` | JWT  | Lista pontos de encontro de uma carona (inclui `pon_lat` e `pon_lon`)    |
 
 ### Sugestões e Denúncias — `/api/sugestoes`
 
@@ -282,6 +286,8 @@ api-caronas/
 │   ├── controllers/             # Lógica de negócio por recurso
 │   ├── middlewares/             # authMiddleware, roleMiddleware, uploadHelper, ocrValidator
 │   ├── routes/                  # Definição de rotas por recurso
+│   ├── services/
+│   │   └── geocodingService.js  # Nominatim: geocodificar, reverse, autocomplete, Haversine  [v10]
 │   ├── sockets/
 │   │   └── mensagensSocket.js   # Handler Socket.io com autenticação JWT
 │   └── utils/
@@ -830,3 +836,74 @@ const [w1, w2] = await Promise.all([
 ```
 
 Aumente o número de workers para suportar mais uploads simultâneos. Cada worker consome aproximadamente 300 MB de RAM.
+
+---
+
+## Geocodificação com Nominatim
+
+### O que é
+
+[Nominatim](https://nominatim.openstreetmap.org) é a API de geocodificação do OpenStreetMap. Converte endereços em coordenadas (forward geocoding) e coordenadas em endereços (reverse geocoding). É **gratuita, sem chave de API e sem cadastro**.
+
+### Como funciona na API de Caronas
+
+A integração é centralizada em [`src/services/geocodingService.js`](src/services/geocodingService.js) e atua em três pontos:
+
+| Onde | Quando | O que faz |
+|---|---|---|
+| `PontoEncontroController.criar()` | `POST /api/pontos` sem `pon_endereco_geom` | Geocodifica `pon_endereco` e salva `pon_lat`/`pon_lon` |
+| `UsuarioController.cadastrar()` | `POST /api/usuarios/cadastro` com `usu_endereco` | Geocodifica e salva `usu_lat`/`usu_lon` após o commit |
+| `CaronaController.listarTodas()` | `GET /api/caronas?lat=&lon=&raio=` | Filtra caronas por proximidade usando Haversine |
+
+O endpoint `GET /api/pontos/geocode?q=<texto>` permite que a UI implemente autocomplete de endereços.
+
+### Funções disponíveis
+
+```js
+const {
+    geocodificarEndereco,   // "Av. Paulista, 1000" → { lat, lon, display_name }
+    reverseGeocodificar,    // (-23.56, -46.65) → { display_name, address }
+    buscarSugestoes,        // "Av. Paul" → [{ lat, lon, display_name }, ...]
+    calcularDistanciaKm     // (lat1, lon1, lat2, lon2) → km (Haversine puro, sem API)
+} = require('./src/services/geocodingService');
+```
+
+### Política de uso
+
+O Nominatim público é mantido pela OpenStreetMap Foundation. Para usá-lo corretamente:
+
+| Regra | Detalhe |
+|---|---|
+| **User-Agent obrigatório** | Identifica a aplicação e fornece contato. Requisições sem User-Agent são bloqueadas. |
+| **Máximo 1 req/s** | O serviço aplica fila interna FIFO com intervalo de 1100 ms entre chamadas. |
+| **Apenas Brasil** | Parâmetro `countrycodes=br` em todas as buscas para reduzir volume e melhorar relevância. |
+| **Falha silenciosa** | Erros de rede ou timeout retornam `null`/`[]` sem derrubar o fluxo principal. |
+
+O User-Agent configurado é:
+
+```
+api-caronas/1.0 (gm.monteiro@unesp.br)
+```
+
+### Filtro de proximidade
+
+```
+GET /api/caronas?lat=-23.5614&lon=-46.6560&raio=10
+```
+
+Retorna caronas com ponto de partida a até 10 km das coordenadas informadas. O filtro usa dois estágios:
+
+1. **Pré-filtro SQL** — bounding box (`WHERE pon_lat BETWEEN ? AND ?`) usa o índice `idx_pon_coords` para eliminar registros fora da área sem varredura total.
+2. **Refinamento Haversine** — JavaScript calcula a distância real e descarta os falsos positivos dos cantos do quadrado.
+
+Caronas sem ponto de partida geocodificado (`pon_lat IS NULL`) são excluídas do resultado com filtro ativo.
+
+### Para instância própria (alta escala)
+
+Se o volume de requisições exceder os limites do servidor público, é possível hospedar uma instância própria do Nominatim. Basta alterar `BASE_URL` em [`src/services/geocodingService.js`](src/services/geocodingService.js):
+
+```js
+const BASE_URL = 'https://seu-servidor-nominatim.com';
+```
+
+Nenhuma outra alteração é necessária.

@@ -15,6 +15,8 @@
 --   v7   — migration-ocr.sql: doc_ocr_confianca em DOCUMENTOS_VERIFICACAO (Tesseract.js)
 --   v8   — migration-penalidades.sql: tabela PENALIDADES (bloqueio temporário/permanente pelo admin)
 --   v9   — migration-escola-quota.sql: esc_dominio + esc_max_usuarios em ESCOLAS; vei_placa UNIQUE em VEICULOS
+--   v10  — migration-nominatim.sql: esc_lat/esc_lon em ESCOLAS; usu_lat/usu_lon em USUARIOS;
+--           pon_lat/pon_lon + índice em PONTO_ENCONTROS; pon_endereco_geom passa a NULL (opcional)
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -29,8 +31,15 @@ CREATE TABLE ESCOLAS (
     esc_id           INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Escola (PK)',
     esc_nome         VARCHAR(255) NOT NULL               COMMENT 'Nome da Escola',
     esc_endereco     VARCHAR(255) NOT NULL               COMMENT 'Endereço escolar',
-    esc_dominio      VARCHAR(100) NULL DEFAULT NULL      COMMENT 'Domínio de e-mail institucional (ex: usp.br). NULL = sem restrição de domínio  [v9]',
-    esc_max_usuarios INT          NULL DEFAULT NULL      COMMENT 'Limite máximo de usuários ativos por escola. NULL = sem limite  [v9]',
+    esc_dominio      VARCHAR(100)  NULL DEFAULT NULL      COMMENT 'Domínio de e-mail institucional (ex: usp.br). NULL = sem restrição de domínio  [v9]',
+    esc_max_usuarios INT           NULL DEFAULT NULL      COMMENT 'Limite máximo de usuários ativos por escola. NULL = sem limite  [v9]',
+
+    -- Geocodificação via Nominatim  [v10]
+    -- Preenchido automaticamente pelo backend ao criar/atualizar escola (AdminController).
+    -- NULL enquanto não houver geocodificação realizada.
+    esc_lat          DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Latitude da escola (Nominatim)  [v10]',
+    esc_lon          DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Longitude da escola (Nominatim)  [v10]',
+
     PRIMARY KEY (esc_id)
 ) ENGINE = InnoDB;
 
@@ -83,6 +92,12 @@ CREATE TABLE USUARIOS (
     usu_endereco          VARCHAR(255)                        COMMENT 'Endereço descrito (NULL no cadastro temporário)',
     usu_endereco_geom     VARCHAR(255)                        COMMENT 'Endereço com localização geométrica (NULL no cadastro temporário)',
     usu_horario_habitual  TIME                                COMMENT 'Horário habitual (NULL) (HH:MM:SS)',
+
+    -- Geocodificação via Nominatim  [v10]
+    -- Preenchido automaticamente pelo backend a partir de usu_endereco (UsuarioController).
+    -- NULL para cadastros temporários (usu_id=7,8,10) ou quando a geocodificação não retornar resultado.
+    usu_lat              DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Latitude do endereço do usuário (Nominatim)  [v10]',
+    usu_lon              DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Longitude do endereço do usuário (Nominatim)  [v10]',
 
     -- Soft delete com timestamp  [v3]
     usu_deletado_em       DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de remoção lógica (NULL = ativo); usu_status=0 mantido para compatibilidade',
@@ -204,15 +219,33 @@ CREATE TABLE CARONAS (
 -- =====================================================
 DROP TABLE IF EXISTS PONTO_ENCONTROS;
 CREATE TABLE PONTO_ENCONTROS (
-    pon_id            INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Ponto de Encontro (PK)',
-    car_id            INT          NOT NULL               COMMENT 'Carona relacionada (FK)',
-    pon_endereco      VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Descritivo)',
-    pon_endereco_geom VARCHAR(255) NOT NULL               COMMENT 'Endereço de Saída/Encontro (Geométrico)',
-    pon_tipo          TINYINT      NOT NULL               COMMENT '0=Partida, 1=Destino',
-    pon_nome          VARCHAR(25)  NOT NULL               COMMENT 'Descrição do ponto de encontro',
-    pon_ordem         TINYINT                             COMMENT 'Ordem dos pontos na rota (NULL)',
-    pon_status        BIT(1)       NOT NULL               COMMENT '1=Usado, 0=Inativo',
-    PRIMARY KEY (pon_id)
+    pon_id            INT           NOT NULL AUTO_INCREMENT COMMENT 'Identificador do Ponto de Encontro (PK)',
+    car_id            INT           NOT NULL               COMMENT 'Carona relacionada (FK)',
+    pon_endereco      VARCHAR(255)  NOT NULL               COMMENT 'Endereço de Saída/Encontro (Descritivo)',
+
+    -- pon_endereco_geom: campo legado de formato misto ("lat,lng" ou GeoJSON).
+    -- Passa a ser NULL (opcional)  [v10]: o backend geocodifica pon_endereco automaticamente
+    -- via Nominatim e salva os valores separados em pon_lat/pon_lon.
+    -- Mantido para retrocompatibilidade com clientes que ainda enviam coordenadas manualmente.
+    pon_endereco_geom VARCHAR(255)  NULL                   COMMENT 'Endereço de Saída/Encontro (Geométrico — legado). NULL quando geocodificado pelo backend  [v10]',
+
+    -- Coordenadas normalizadas geradas pelo geocodingService (Nominatim)  [v10]
+    -- Usadas para filtro de caronas por proximidade (Haversine em CaronaController).
+    -- NULL enquanto a geocodificação não for realizada (best-effort: falha não bloqueia o cadastro).
+    pon_lat           DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Latitude geocodificada via Nominatim  [v10]',
+    pon_lon           DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Longitude geocodificada via Nominatim  [v10]',
+
+    pon_tipo          TINYINT       NOT NULL               COMMENT '0=Partida, 1=Destino',
+    pon_nome          VARCHAR(25)   NOT NULL               COMMENT 'Descrição do ponto de encontro',
+    pon_ordem         TINYINT                              COMMENT 'Ordem dos pontos na rota (NULL)',
+    pon_status        BIT(1)        NOT NULL               COMMENT '1=Usado, 0=Inativo',
+    PRIMARY KEY (pon_id),
+
+    -- Índice composto para bounding-box query no filtro de proximidade  [v10]
+    -- CaronaController aplica WHERE pon_lat BETWEEN ? AND ? AND pon_lon BETWEEN ? AND ?
+    -- antes de refinar com Haversine em JS. Elimina registros fora da área sem varredura total.
+    INDEX idx_pon_coords (pon_lat, pon_lon)
+
 ) ENGINE = InnoDB;
 
 

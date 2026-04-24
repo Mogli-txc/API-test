@@ -36,9 +36,9 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.0.0
+  version: 1.1.0
   contact:
-    email: matheus.sanches9@usp.br
+    email: gm.monteiro@unesp.br
 
 servers:
   - url: http://localhost:3000
@@ -379,22 +379,95 @@ components:
     # ─── Ponto de Encontro ──────────────────────────────────────────────────────
     PontoCriarRequest:
       type: object
-      required: [car_id, pon_descricao]
+      required: [car_id, pon_endereco, pon_tipo, pon_nome]
       properties:
         car_id:
           type: integer
           example: 1
-        pon_descricao:
+        pon_endereco:
+          type: string
+          description: Endereço descritivo do ponto (obrigatório)
+          example: Portão principal da FFLCH, Av. Prof. Luciano Gualberto, São Paulo
+        pon_endereco_geom:
+          type: string
+          nullable: true
+          description: |
+            Coordenadas no formato "lat,lon" ou GeoJSON. **Opcional [v10]** — quando ausente,
+            o backend geocodifica `pon_endereco` via Nominatim automaticamente.
+          example: "-23.5614,-46.7215"
+        pon_tipo:
+          type: integer
+          enum: [0, 1]
+          description: "0 = Partida | 1 = Destino"
+          example: 0
+        pon_nome:
+          type: string
+          maxLength: 25
+          example: Portão FFLCH
+        pon_ordem:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Ordem do ponto na rota (opcional)
+          example: 1
+
+    PontoResponse:
+      type: object
+      properties:
+        pon_id:
+          type: integer
+          example: 1
+        car_id:
+          type: integer
+          example: 1
+        pon_endereco:
           type: string
           example: Portão principal da FFLCH
+        pon_tipo:
+          type: integer
+          enum: [0, 1]
+          example: 0
+        pon_nome:
+          type: string
+          example: Portão FFLCH
         pon_lat:
           type: number
           format: float
-          example: -23.561
-        pon_lng:
+          nullable: true
+          description: Latitude geocodificada via Nominatim. NULL se a geocodificação não retornou resultado.
+          example: -23.5614
+        pon_lon:
           type: number
           format: float
-          example: -46.731
+          nullable: true
+          description: Longitude geocodificada via Nominatim.
+          example: -46.7215
+        pon_status:
+          type: integer
+          example: 1
+        geocodificado:
+          type: boolean
+          description: true = coordenadas geradas pelo backend via Nominatim | false = fornecidas pelo cliente ou ausentes
+          example: true
+
+    SugestaoCoordenada:
+      type: object
+      description: Item retornado pelo endpoint de autocomplete de endereços
+      properties:
+        lat:
+          type: number
+          format: float
+          example: -23.5614
+        lon:
+          type: number
+          format: float
+          example: -46.6560
+        display_name:
+          type: string
+          example: "Avenida Paulista, 1000, Bela Vista, São Paulo, SP, Brasil"
+        address:
+          type: object
+          description: Componentes do endereço (rua, cidade, estado, país)
 
     # ─── Passageiros da Carona ───────────────────────────────────────────────────
     PassageiroCriarRequest:
@@ -1121,8 +1194,66 @@ paths:
     get:
       tags: [Caronas]
       summary: Listar todas as caronas disponíveis
+      description: |
+        Retorna caronas abertas (`car_status = 1`) futuras. Suporta paginação cursor-based e
+        filtros opcionais por escola, curso e proximidade geográfica.
+
+        **Filtro de proximidade [v10]:** informe `lat`, `lon` e `raio` (em km) para obter apenas
+        caronas cujo ponto de partida esteja dentro do raio. A resposta inclui `raio_km`.
+        Caronas sem ponto de partida geocodificado são excluídas quando o filtro está ativo.
+
+        **Estratégia interna:**
+        1. Pré-filtro SQL via bounding box (índice `idx_pon_coords`) — elimina registros distantes.
+        2. Refinamento Haversine em JS — descarta falsos positivos dos cantos do quadrado.
       security:
         - bearerAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: integer
+          description: car_id da última página — retorna registros com car_id < cursor
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: esc_id
+          in: query
+          schema:
+            type: integer
+          description: Filtra por escola
+        - name: cur_id
+          in: query
+          schema:
+            type: integer
+          description: Filtra por curso
+        - name: lat
+          in: query
+          schema:
+            type: number
+            format: float
+          description: "Latitude do ponto de referência (filtro de proximidade — requer lon e raio)"
+          example: -23.5614
+        - name: lon
+          in: query
+          schema:
+            type: number
+            format: float
+          description: "Longitude do ponto de referência (filtro de proximidade — requer lat e raio)"
+          example: -46.6560
+        - name: raio
+          in: query
+          schema:
+            type: number
+            format: float
+          description: "Raio em km (filtro de proximidade — requer lat e lon). Deve ser > 0."
+          example: 10
       responses:
         '200':
           description: Array de caronas
@@ -1133,12 +1264,25 @@ paths:
                 properties:
                   message:
                     type: string
+                  totalGeral:
+                    type: integer
                   total:
                     type: integer
+                  limit:
+                    type: integer
+                  next_cursor:
+                    type: integer
+                    nullable: true
+                  raio_km:
+                    type: number
+                    nullable: true
+                    description: Presente apenas quando filtro de proximidade está ativo
                   caronas:
                     type: array
                     items:
                       $ref: '#/components/schemas/Carona'
+        '400':
+          description: Parâmetro numérico inválido ou raio <= 0
         '401':
           description: Não autenticado
 
@@ -1813,10 +1957,68 @@ paths:
   # ────────────────────────────────────────────────────────────────────────────
   # PONTOS DE ENCONTRO — /api/pontos
   # ────────────────────────────────────────────────────────────────────────────
+  /api/pontos/geocode:
+    get:
+      tags: [Pontos de Encontro]
+      summary: Autocomplete de endereços via Nominatim
+      description: |
+        Retorna sugestões de endereços para o texto informado em `?q=`.
+        Usado pela UI para implementar autocomplete durante a digitação do endereço do ponto.
+
+        **Debounce recomendado:** 400ms após o último caractere digitado para não exceder
+        o rate-limit do Nominatim (1 req/s).
+
+        O backend aplica rate-limit interno (fila FIFO, 1100ms entre requisições) e
+        restringe a busca ao Brasil (`countrycodes=br`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Texto do endereço (mínimo 3 caracteres)
+          schema:
+            type: string
+          example: Av. Paulista 1000
+        - name: limite
+          in: query
+          required: false
+          description: Número máximo de sugestões (padrão 5, teto 10)
+          schema:
+            type: integer
+            default: 5
+            maximum: 10
+      responses:
+        '200':
+          description: Lista de sugestões de endereços
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sugestoes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SugestaoCoordenada'
+        '400':
+          description: Parâmetro `q` ausente ou com menos de 3 caracteres
+        '401':
+          description: Não autenticado
+
   /api/pontos:
     post:
       tags: [Pontos de Encontro]
       summary: Cadastrar ponto de encontro
+      description: |
+        Registra um ponto de partida (`pon_tipo=0`) ou destino (`pon_tipo=1`) para uma carona.
+
+        **Geocodificação automática [v10]:** `pon_endereco_geom` é **opcional**. Quando não
+        enviado, o backend chama o Nominatim para geocodificar `pon_endereco` e preenche
+        `pon_lat` e `pon_lon` automaticamente. A geocodificação é *best-effort*: se o
+        Nominatim não encontrar resultado, o ponto é salvo com `pon_lat = NULL`.
+
+        Quando `pon_endereco_geom` é fornecido pelo cliente (usuário escolheu via mapa),
+        as coordenadas são extraídas diretamente sem chamar o Nominatim.
       security:
         - bearerAuth: []
       requestBody:
@@ -1827,7 +2029,7 @@ paths:
               $ref: '#/components/schemas/PontoCriarRequest'
       responses:
         '201':
-          description: Ponto criado
+          description: Ponto criado — coordenadas preenchidas quando geocodificação bem-sucedida
           content:
             application/json:
               schema:
@@ -1835,19 +2037,17 @@ paths:
                 properties:
                   message:
                     type: string
+                    example: Ponto de encontro registrado!
                   ponto:
-                    type: object
-                    properties:
-                      pon_id:
-                        type: integer
-                      car_id:
-                        type: integer
-                      pon_descricao:
-                        type: string
-                      pon_lat:
-                        type: number
-                      pon_lng:
-                        type: number
+                    $ref: '#/components/schemas/PontoResponse'
+        '400':
+          description: Campo obrigatório ausente, pon_tipo inválido ou pon_endereco_geom mal formatado
+        '403':
+          description: Usuário não é o motorista da carona
+        '404':
+          description: Carona não encontrada
+        '409':
+          description: Carona não está aberta ou em espera
         '401':
           description: Não autenticado
 
@@ -1855,6 +2055,9 @@ paths:
     get:
       tags: [Pontos de Encontro]
       summary: Listar pontos de uma carona
+      description: |
+        Lista os pontos de encontro ativos (`pon_status=1`) de uma carona, ordenados por `pon_ordem`.
+        A resposta inclui `pon_lat` e `pon_lon` para renderização no mapa pelo frontend.
       security:
         - bearerAuth: []
       parameters:
@@ -1864,27 +2067,44 @@ paths:
           schema:
             type: integer
           example: 1
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
-          description: Lista de pontos de encontro
+          description: Lista de pontos de encontro com coordenadas
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  message:
+                    type: string
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  car_id:
+                    type: integer
                   pontos:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        pon_id:
-                          type: integer
-                        pon_descricao:
-                          type: string
-                        pon_lat:
-                          type: number
-                        pon_lng:
-                          type: number
+                      $ref: '#/components/schemas/PontoResponse'
+        '400':
+          description: car_id inválido
+        '401':
+          description: Não autenticado
 
   # ────────────────────────────────────────────────────────────────────────────
   # PASSAGEIROS — /api/passageiros
@@ -2603,7 +2823,7 @@ tags:
   - name: Mensagens
     description: Chat assíncrono e em tempo real (Socket.io) entre participantes
   - name: Pontos de Encontro
-    description: Locais de embarque definidos pelo motorista
+    description: Locais de embarque e destino definidos pelo motorista. Inclui autocomplete via Nominatim e geocodificação automática.
   - name: Passageiros
     description: Gerenciamento direto de passageiros em uma carona
   - name: Sugestões e Denúncias

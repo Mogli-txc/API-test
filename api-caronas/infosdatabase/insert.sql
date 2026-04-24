@@ -25,6 +25,9 @@
 -- CARONAS:          car_status      (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
 -- PONTO_ENCONTROS:  pon_tipo        (0=Partida, 1=Destino)
 --                   pon_status      (0=Inativo, 1=Ativo)
+--                   pon_lat/pon_lon (DECIMAL(10,7) — coordenadas Nominatim; NULL se não geocodificado)  [v10]
+-- ESCOLAS:          esc_lat/esc_lon (DECIMAL(10,7) — coordenadas Nominatim da escola)  [v10]
+-- USUARIOS:         usu_lat/usu_lon (DECIMAL(10,7) — coordenadas Nominatim do endereço; NULL se sem endereço)  [v10]
 -- MENSAGENS:        men_status      (0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida)
 -- SOLICITACOES:     sol_status      (0=Cancelado, 1=Enviado, 2=Aceito, 3=Negado)
 -- CARONA_PESSOAS:   car_pes_status  (0=Cancelado, 1=Aceito, 2=Negado)
@@ -47,10 +50,12 @@
 --   - Escola 2: Universidade em Campinas (usuários de outra cidade)
 --   - Escola 3: Escola sem nenhum usuário cadastrado (testa listagem vazia)
 -- =====================================================
-INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios) VALUES
-    ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',    'inova.edu.br', 100),  -- esc_id=1: domínio restrito, cota de 100 usuários
-    ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP',   'saber.edu.br', 50),   -- esc_id=2: domínio restrito, cota de 50 usuários
-    ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',   NULL,           NULL); -- esc_id=3: sem restrição de domínio, sem cota (sem usuários)
+-- esc_lat/esc_lon: coordenadas reais obtidas via Nominatim para os endereços seed.
+-- Em produção, serão preenchidas automaticamente pelo AdminController ao criar/atualizar escola.
+INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon) VALUES
+    ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',  'inova.edu.br', 100, -23.5614, -46.6560),  -- esc_id=1: Av. Paulista, SP
+    ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP', 'saber.edu.br', 50,  -22.9056, -47.0608),  -- esc_id=2: Campinas, SP
+    ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP', NULL,           NULL,-21.2091, -50.4294);  -- esc_id=3: Araçatuba, SP
 
 
 -- =====================================================
@@ -108,17 +113,21 @@ INSERT INTO CURSOS (cur_semestre, cur_nome, esc_id) VALUES
 --   - usu_id=10 (TempVei):   Temporário com veículo (verificacao=6) — OTP confirmado + veículo
 --                             cadastrado, acesso por 5 dias para pedir e oferecer caronas
 -- =====================================================
-INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_verificacao_expira, usu_status, usu_email, usu_descricao, usu_endereco, usu_endereco_geom, usu_horario_habitual) VALUES
-    ('Carlos Silva',  '11999991111', 'MAT2023001',  'hash_carlos_1',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',  'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP', '-23.5505,-46.6333', '07:30:00'),  -- usu_id=1
-    ('Mariana Souza', '11988882222', 'MAT2023002',  'hash_mariana_2', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'mariana.souza@aluno.inova.br', 'Passageira tranquila, nunca me atraso.',            'Av. Brasil, 456, Jardins, São Paulo - SP',     '-23.5599,-46.6400', '07:45:00'),  -- usu_id=2
-    ('Pedro Santos',  '19977773333', 'MAT2022099',  'hash_pedro_3',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'pedro.santos@uni.saber.br',    'Moto rápida, somente 1 passageiro.',               'Rua da Paz, 88, Vila Nova, Campinas - SP',     '-22.9056,-47.0608', '18:30:00'),  -- usu_id=3
-    ('Ana Oliveira',  '11966664444', 'MAT2024001',  'hash_ana_4',     0, NULL,                              0, 'ana.oliveira@aluno.inova.br',  NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL),         -- usu_id=4 (inativa: usu_status=0 → resposta "Conta inativa")
-    ('Lucas Pereira', '11955553333', 'MAT2023050',  'hash_lucas_5',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'lucas.pereira@aluno.inova.br', NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL),         -- usu_id=5 (sem foto, sem horário)
-    ('Admin Sistema', '11900000001', 'ADMIN000001', 'hash_admin_6',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin@sistema.inova.br',       'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL),         -- usu_id=6
-    (NULL,            NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',    NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=7:  Temporário sem veículo — OTP confirmado, só pede caronas
-    (NULL,            NULL,          NULL,           'hash_pend_8',   0, NULL,                              1, 'pendente.otp@aluno.inova.br',  NULL,                                               NULL,                                          NULL,                NULL),          -- usu_id=8:  Aguardando OTP — ativo mas login bloqueado (resposta "Email não verificado")
-    ('Fábio Suspenso', '11900000009', 'MAT2023099',  'hash_fabio_9',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                              'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL),          -- usu_id=9:  usu_status=1 + verificacao=1 MAS per_habilitado=0 → testa bloqueio C2 no login
-    (NULL,            NULL,          NULL,           'hash_tempv_10', 6, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'temp.veiculo@aluno.inova.br',  NULL,                                               NULL,                                          NULL,                NULL);          -- usu_id=10: Temporário com veículo (verificacao=6) — pode pedir e oferecer caronas por 5 dias
+-- usu_lat/usu_lon: coordenadas extraídas de usu_endereco_geom nos dados seed  [v10].
+-- Em produção, são preenchidas automaticamente pelo UsuarioController.cadastrar()
+-- chamando geocodingService.geocodificarEndereco(usu_endereco) após a transação principal.
+-- NULL para cadastros temporários (7, 8, 10) que não possuem endereço.
+INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_verificacao_expira, usu_status, usu_email, usu_descricao, usu_endereco, usu_endereco_geom, usu_horario_habitual, usu_lat, usu_lon) VALUES
+    ('Carlos Silva',   '11999991111', 'MAT2023001',  'hash_carlos_1',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',   'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP', '-23.5505,-46.6333', '07:30:00', -23.5505, -46.6333),  -- usu_id=1
+    ('Mariana Souza',  '11988882222', 'MAT2023002',  'hash_mariana_2', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'mariana.souza@aluno.inova.br',  'Passageira tranquila, nunca me atraso.',            'Av. Brasil, 456, Jardins, São Paulo - SP',     '-23.5599,-46.6400', '07:45:00', -23.5599, -46.6400),  -- usu_id=2
+    ('Pedro Santos',   '19977773333', 'MAT2022099',  'hash_pedro_3',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'pedro.santos@uni.saber.br',     'Moto rápida, somente 1 passageiro.',               'Rua da Paz, 88, Vila Nova, Campinas - SP',     '-22.9056,-47.0608', '18:30:00', -22.9056, -47.0608),  -- usu_id=3
+    ('Ana Oliveira',   '11966664444', 'MAT2024001',  'hash_ana_4',     0, NULL,                              0, 'ana.oliveira@aluno.inova.br',   NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL,        -23.5000, -46.6000),  -- usu_id=4 (inativa)
+    ('Lucas Pereira',  '11955553333', 'MAT2023050',  'hash_lucas_5',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'lucas.pereira@aluno.inova.br',  NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL,        -23.5678, -46.6890),  -- usu_id=5
+    ('Admin Sistema',  '11900000001', 'ADMIN000001', 'hash_admin_6',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin@sistema.inova.br',        'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560),  -- usu_id=6
+    (NULL,             NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',     NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=7:  Temporário sem endereço
+    (NULL,             NULL,          NULL,           'hash_pend_8',   0, NULL,                              1, 'pendente.otp@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=8:  Aguardando OTP
+    ('Fábio Suspenso', '11900000009', 'MAT2023099',  'hash_fabio_9',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                               'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL,        -23.5000, -46.6500),  -- usu_id=9
+    (NULL,             NULL,          NULL,           'hash_tempv_10', 6, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'temp.veiculo@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL);           -- usu_id=10: Temporário com veículo
 
 
 -- =====================================================
@@ -272,18 +281,21 @@ INSERT INTO CARONAS (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_
 --   - Carona 3: apenas ponto do motorista — sem paradas intermediárias
 --   - Carona 4: motorista + 2 pontos, sendo 1 inativo — testa filtragem por status
 -- =====================================================
-INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_endereco_geom, pon_tipo, pon_nome, pon_ordem, pon_status) VALUES
+-- pon_lat/pon_lon: extraídos de pon_endereco_geom dos dados seed  [v10].
+-- Em produção, são preenchidos automaticamente pelo PontoEncontroController.criar()
+-- via geocodingService.geocodificarEndereco(pon_endereco) quando pon_endereco_geom não é enviado.
+INSERT INTO PONTO_ENCONTROS (car_id, pon_endereco, pon_endereco_geom, pon_lat, pon_lon, pon_tipo, pon_nome, pon_ordem, pon_status) VALUES
     -- Carona 1 (Carlos)
-    (1, 'Rua das Flores, 123, Centro, São Paulo',    '-23.5505,-46.6333', 0, 'Saída - Casa do Carlos', 1, 1),  -- Ponto do motorista
-    (1, 'Estação Metrô Consolação, São Paulo',        '-23.5599,-46.6600', 1, 'Metrô Consolação',       2, 1),  -- Ponto do passageiro
+    (1, 'Rua das Flores, 123, Centro, São Paulo',  '-23.5505,-46.6333', -23.5505, -46.6333, 0, 'Saída - Casa do Carlos', 1, 1),  -- Ponto de partida do motorista
+    (1, 'Estação Metrô Consolação, São Paulo',      '-23.5599,-46.6600', -23.5599, -46.6600, 1, 'Metrô Consolação',       2, 1),  -- Ponto de embarque do passageiro
 
     -- Carona 3 (Pedro, moto)
-    (3, 'Rua da Paz, 88, Vila Nova, Campinas',        '-22.9056,-47.0608', 0, 'Saída - Casa do Pedro',  1, 1),  -- Só partida
+    (3, 'Rua da Paz, 88, Vila Nova, Campinas',      '-22.9056,-47.0608', -22.9056, -47.0608, 0, 'Saída - Casa do Pedro',  1, 1),  -- Apenas partida (moto, 1 passageiro)
 
     -- Carona 4 (Lucas)
-    (4, 'Rua Nova, 200, Pinheiros, São Paulo',        '-23.5678,-46.6890', 0, 'Saída - Casa do Lucas',  1, 1),  -- Ponto do motorista
-    (4, 'Av. Faria Lima, 1000, São Paulo',            '-23.5765,-46.6887', 1, 'Av. Faria Lima',         2, 1),  -- Ponto ativo
-    (4, 'Estação Metrô Butantã, São Paulo',           '-23.5722,-46.7198', 1, 'Metrô Butantã',          3, 0);  -- Ponto desativado (testa pon_status=0)
+    (4, 'Rua Nova, 200, Pinheiros, São Paulo',      '-23.5678,-46.6890', -23.5678, -46.6890, 0, 'Saída - Casa do Lucas',  1, 1),  -- Ponto de partida do motorista
+    (4, 'Av. Faria Lima, 1000, São Paulo',          '-23.5765,-46.6887', -23.5765, -46.6887, 1, 'Av. Faria Lima',         2, 1),  -- Ponto ativo
+    (4, 'Estação Metrô Butantã, São Paulo',         '-23.5722,-46.7198', -23.5722, -46.7198, 1, 'Metrô Butantã',          3, 0);  -- Inativo (testa pon_status=0)
 
 
 -- =====================================================

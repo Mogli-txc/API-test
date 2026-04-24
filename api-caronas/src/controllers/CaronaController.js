@@ -20,9 +20,12 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
-const { stripHtml } = require('../utils/sanitize');
-const { checkPenalidade } = require('../utils/penaltyHelper');
-const { registrarAudit } = require('../utils/auditLog');
+const { stripHtml }        = require('../utils/sanitize');
+const { checkPenalidade }  = require('../utils/penaltyHelper');
+const { registrarAudit }   = require('../utils/auditLog');
+
+// Haversine para filtro de proximidade — sem custo de API, executado em memória  [v10]
+const { calcularDistanciaKm } = require('../services/geocodingService');
 
 // Regex para validar formato HH:MM ou HH:MM:SS
 const HORA_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
@@ -77,6 +80,16 @@ class CaronaController {
      * junto com dados do veículo, motorista e curso.
      *
      * Tabelas: CARONAS + VEICULOS + CURSOS_USUARIOS + USUARIOS + CURSOS (JOINs)
+     *
+     * Filtro de proximidade [v10]:
+     *   Parâmetros opcionais: ?lat=<latitude>&lon=<longitude>&raio=<km>
+     *   Estratégia em dois estágios para evitar varredura total da tabela:
+     *     1. Pré-filtro SQL (bounding box): WHERE pon_lat BETWEEN ? AND ? AND pon_lon BETWEEN ? AND ?
+     *        Elimina a maioria dos registros fora da área usando o índice idx_pon_coords.
+     *     2. Refinamento JS (Haversine): calcularDistanciaKm() descarta os que passaram no bounding
+     *        box mas estão fora do raio real (false positives nos cantos do quadrado).
+     *   O filtro considera apenas o ponto de partida da carona (pon_tipo=0).
+     *   Caronas sem ponto de partida geocodificado (pon_lat=NULL) são excluídas do resultado.
      */
     async listarTodas(req, res) {
         try {
@@ -109,8 +122,68 @@ class CaronaController {
                 filtros.push('AND cur.cur_id = ?');
                 filtroParams.push(cur_id);
             }
+
+            // ── Filtro de proximidade [v10] ──────────────────────────────────────────────
+            // Ativado quando lat, lon e raio são todos fornecidos na query.
+            // Variáveis de controle: proximidadeAtiva, lat/lon do usuário, raio em km,
+            // e os deltas para cálculo do bounding box.
+            let proximidadeAtiva = false;
+            let latUsuario, lonUsuario, raioKm;
+            let latMin, latMax, lonMin, lonMax;
+
+            if (req.query.lat !== undefined || req.query.lon !== undefined || req.query.raio !== undefined) {
+                latUsuario = parseFloat(req.query.lat);
+                lonUsuario = parseFloat(req.query.lon);
+                raioKm     = parseFloat(req.query.raio);
+
+                // Todos os três parâmetros devem ser números válidos
+                if (isNaN(latUsuario) || isNaN(lonUsuario) || isNaN(raioKm)) {
+                    return res.status(400).json({ error: 'Filtro de proximidade requer lat, lon e raio numéricos.' });
+                }
+                if (raioKm <= 0) {
+                    return res.status(400).json({ error: 'raio deve ser maior que zero.' });
+                }
+
+                proximidadeAtiva = true;
+
+                // Calcula bounding box: deltas em graus para o raio informado.
+                // 1 grau latitude ≈ 111 km (constante).
+                // 1 grau longitude ≈ 111 * cos(lat) km (varia com a latitude).
+                const deltaLat = raioKm / 111;
+                const deltaLon = raioKm / (111 * Math.cos(latUsuario * Math.PI / 180));
+
+                latMin = latUsuario - deltaLat;
+                latMax = latUsuario + deltaLat;
+                lonMin = lonUsuario - deltaLon;
+                lonMax = lonUsuario + deltaLon;
+
+                // Adiciona filtros de bounding box que serão aplicados via JOIN com PONTO_ENCONTROS
+                filtros.push('AND pe.pon_lat BETWEEN ? AND ?');
+                filtros.push('AND pe.pon_lon BETWEEN ? AND ?');
+                filtroParams.push(latMin, latMax, lonMin, lonMax);
+            }
+            // ────────────────────────────────────────────────────────────────────────────
+
             const filtroExtra = filtros.join(' ');
-            const joinEscola  = filtroParams.length > 0 ? 'INNER JOIN ESCOLAS e ON cur.esc_id = e.esc_id' : '';
+            const joinEscola  = (req.query.esc_id !== undefined || req.query.cur_id !== undefined)
+                ? 'INNER JOIN ESCOLAS e ON cur.esc_id = e.esc_id'
+                : '';
+
+            // JOIN com PONTO_ENCONTROS apenas quando filtro de proximidade está ativo  [v10]
+            // LEFT JOIN para não excluir caronas cujo ponto ainda não foi geocodificado
+            // quando o filtro NÃO está ativo. Quando ativo, o bounding box no WHERE
+            // já garante que apenas caronas com coords válidas são retornadas.
+            const joinPontos = proximidadeAtiva
+                ? `INNER JOIN PONTO_ENCONTROS pe ON pe.car_id = c.car_id
+                       AND pe.pon_tipo   = 0
+                       AND pe.pon_status = 1
+                       AND pe.pon_lat IS NOT NULL`
+                : '';
+
+            // Inclui pon_lat/pon_lon na projeção apenas quando filtro ativo (necessário para Haversine em JS)
+            const selecaoCoordenadas = proximidadeAtiva
+                ? ', pe.pon_lat AS partida_lat, pe.pon_lon AS partida_lon'
+                : '';
 
             const whereExtra = cursor !== null ? 'AND c.car_id < ?' : '';
 
@@ -125,12 +198,14 @@ class CaronaController {
                         v.vei_marca_modelo AS veiculo,
                         u.usu_nome         AS motorista,
                         cur.cur_nome       AS curso_motorista
+                        ${selecaoCoordenadas}
                  FROM CARONAS c
-                 INNER JOIN VEICULOS       v   ON c.vei_id     = v.vei_id
+                 INNER JOIN VEICULOS        v   ON c.vei_id     = v.vei_id
                  INNER JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
                  INNER JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
                  INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
                  ${joinEscola}
+                 ${joinPontos}
                  WHERE c.car_status = 1
                    AND (c.car_data > CURDATE()
                         OR (c.car_data = CURDATE() AND c.car_hor_saida >= CURTIME()))
@@ -141,9 +216,22 @@ class CaronaController {
                 params
             );
 
+            // ── Refinamento Haversine [v10] ──────────────────────────────────────────────
+            // O bounding box SQL é um quadrado: inclui pontos nos cantos que estão fora
+            // do círculo real de raio. O Haversine descarta esses false positives.
+            // Também remove os campos de coordenada da resposta (uso interno do filtro).
+            let caronasFiltradas = caronas;
+            if (proximidadeAtiva) {
+                caronasFiltradas = caronas.filter(c => {
+                    const dist = calcularDistanciaKm(latUsuario, lonUsuario, c.partida_lat, c.partida_lon);
+                    return dist <= raioKm;
+                }).map(({ partida_lat, partida_lon, ...rest }) => rest); // remove coords internas da resposta
+            }
+            // ────────────────────────────────────────────────────────────────────────────
+
             // next_cursor: menor car_id da página atual — cliente envia na próxima requisição
-            const next_cursor = caronas.length === limit
-                ? caronas[caronas.length - 1].car_id
+            const next_cursor = caronasFiltradas.length === limit
+                ? caronasFiltradas[caronasFiltradas.length - 1].car_id
                 : null;
 
             const [[{ totalGeral }]] = await db.query(
@@ -152,6 +240,7 @@ class CaronaController {
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
                  INNER JOIN CURSOS cur ON cu.cur_id = cur.cur_id
                  ${joinEscola}
+                 ${joinPontos}
                  WHERE c.car_status = 1
                    AND (c.car_data > CURDATE()
                         OR (c.car_data = CURDATE() AND c.car_hor_saida >= CURTIME()))
@@ -162,13 +251,14 @@ class CaronaController {
             return res.status(200).json({
                 message:     "Lista de caronas recuperada com sucesso",
                 totalGeral,
-                total:       caronas.length,
+                total:       caronasFiltradas.length,
                 limit,
                 ...(page        && { page }),
                 ...(next_cursor && { next_cursor }),
                 ...(req.query.esc_id !== undefined && { esc_id: parseInt(req.query.esc_id) }),
                 ...(req.query.cur_id !== undefined && { cur_id: parseInt(req.query.cur_id) }),
-                caronas
+                ...(proximidadeAtiva && { raio_km: raioKm }),
+                caronas: caronasFiltradas
             });
 
         } catch (error) {
