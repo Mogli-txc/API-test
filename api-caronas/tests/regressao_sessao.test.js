@@ -86,7 +86,7 @@ async function criarUsuarioAtivo(sufixo) {
         .post('/api/usuarios/login')
         .send({ usu_email: email, usu_senha: 'senha123' });
 
-    const token = loginRes.body?.token;
+    const token = loginRes.body?.access_token;
     if (!token) throw new Error(`[helper] Login falhou para ${email}: ${JSON.stringify(loginRes.body)}`);
 
     return { usu_id, token, email };
@@ -97,7 +97,7 @@ async function loginAdmin() {
     const res = await request(app)
         .post('/api/usuarios/login')
         .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
-    return res.body.token;
+    return res.body.access_token;
 }
 
 /** Eleva usu_verificacao para 2 (pode oferecer caronas). */

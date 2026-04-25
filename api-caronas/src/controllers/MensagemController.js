@@ -73,10 +73,10 @@ class MensagemController {
                 return res.status(404).json({ error: "Carona não encontrada." });
             }
             const motoristaId = infoCarona[0].motorista_id;
-            const ehRemMetorista = motoristaId === usu_id_remetente;
-            const ehDestMotorista = motoristaId === parseInt(usu_id_destinatario);
+            const ehRemetenteMotorista = motoristaId === usu_id_remetente;
+            const ehDestinatarioMotorista = motoristaId === parseInt(usu_id_destinatario);
 
-            if (!ehRemMetorista) {
+            if (!ehRemetenteMotorista) {
                 const [remPassageiro] = await db.query(
                     `SELECT 1 FROM CARONA_PESSOAS
                      WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
@@ -91,7 +91,7 @@ class MensagemController {
             }
 
             // PASSO 7: Verifica se o destinatário também é participante da mesma carona
-            if (!ehDestMotorista) {
+            if (!ehDestinatarioMotorista) {
                 const [destPassageiro] = await db.query(
                     `SELECT 1 FROM CARONA_PESSOAS
                      WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1

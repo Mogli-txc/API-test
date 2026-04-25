@@ -77,11 +77,12 @@ class SolicitacaoController {
             // Penalidade tipo 2 (não pode solicitar caronas) ou tipo 3 (ambos bloqueados)
             const penalidade = await checkPenalidade(usu_id, 2);
             if (penalidade) {
-                const expira = penalidade.pen_expira_em
+                // expiraPenalidade é distinto de 'expira' (usu_verificacao_expira) declarado acima
+                const expiraPenalidade = penalidade.pen_expira_em
                     ? ` até ${new Date(penalidade.pen_expira_em).toLocaleDateString('pt-BR')}`
                     : '';
                 return res.status(403).json({
-                    error: `Você está impedido de solicitar caronas${expira}. Entre em contato com o administrador da sua escola.`
+                    error: `Você está impedido de solicitar caronas${expiraPenalidade}. Entre em contato com o administrador da sua escola.`
                 });
             }
 

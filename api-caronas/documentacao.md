@@ -55,6 +55,7 @@ components:
     # ─── Usuário ────────────────────────────────────────────────────────────────
     Usuario:
       type: object
+      description: Retornado por GET /api/usuarios/perfil/:id
       properties:
         usu_id:
           type: integer
@@ -69,9 +70,16 @@ components:
         usu_telefone:
           type: string
           example: "(11) 99999-0001"
-        usu_matricula:
+        usu_descricao:
           type: string
-          example: "12345678"
+          nullable: true
+        usu_foto:
+          type: string
+          description: URL pública da foto de perfil (gerada pelo backend)
+          example: http://localhost:3000/public/usuarios/foto.jpg
+        usu_endereco:
+          type: string
+          nullable: true
         usu_verificacao:
           type: integer
           enum: [0, 1, 2, 5, 6, 9]
@@ -81,8 +89,16 @@ components:
           type: string
           format: date-time
           nullable: true
-        usu_status:
+          description: "Data de expiração do acesso. NULL = sem prazo (nível 1 ou 2 com verificação ativa)."
+        per_tipo:
           type: integer
+          enum: [0, 1, 2]
+          description: "0=Usuário comum, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)"
+          example: 0
+        per_habilitado:
+          type: integer
+          enum: [0, 1]
+          description: "0=conta desabilitada pelo admin, 1=ativa"
           example: 1
 
     UsuarioCadastroRequest:
@@ -131,15 +147,26 @@ components:
     LoginResponse:
       type: object
       properties:
-        message:
-          type: string
-          example: Login realizado com sucesso.
         access_token:
           type: string
+          description: "JWT de acesso — válido por 24h. Enviar em Authorization: Bearer <token>."
           example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         refresh_token:
           type: string
-          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+          description: "Token de renovação — válido por 30 dias. Rotacionado a cada uso."
+          example: a3f9c2d1e8b74a56...
+        user:
+          type: object
+          properties:
+            usu_id:
+              type: integer
+              example: 1
+            usu_nome:
+              type: string
+              example: Carlos Silva
+            usu_email:
+              type: string
+              example: carlos@usp.br
 
     # ─── Veículo ────────────────────────────────────────────────────────────────
     VeiculoCadastroRequest:
@@ -201,7 +228,7 @@ components:
     # ─── Carona ─────────────────────────────────────────────────────────────────
     CaronaCriarRequest:
       type: object
-      required: [cur_usu_id, vei_id, car_desc, car_data, car_vagas_dispo]
+      required: [cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo]
       properties:
         cur_usu_id:
           type: integer
@@ -215,8 +242,13 @@ components:
           example: Saindo do centro às 7h30
         car_data:
           type: string
-          format: date-time
-          example: "2026-04-20T07:30:00"
+          format: date
+          description: "Data da carona no formato YYYY-MM-DD (não inclui o horário)"
+          example: "2026-04-20"
+        car_hor_saida:
+          type: string
+          description: "Horário de saída no formato HH:MM ou HH:MM:SS. Combinado com car_data deve ser no futuro."
+          example: "07:30"
         car_vagas_dispo:
           type: integer
           minimum: 1
@@ -804,6 +836,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErroResponse'
 
+  /api/usuarios/logout:
+    post:
+      tags: [Usuários]
+      summary: Logout — invalida refresh token server-side
+      description: |
+        Invalida o `refresh_token` do usuário no banco (`usu_refresh_hash = NULL`).
+        O `access_token` JWT atual permanece tecnicamente válido até expirar (máx. 24h),
+        mas sem refresh token o cliente não consegue renovar a sessão.
+
+        O frontend deve descartar `access_token` e `refresh_token` do estado local após esta chamada.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout realizado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SucessoSimples'
+        '401':
+          description: Não autenticado
+
   /api/usuarios/perfil/{id}:
     get:
       tags: [Usuários]
@@ -819,7 +873,7 @@ paths:
           example: 1
       responses:
         '200':
-          description: Dados do perfil
+          description: "Dados do perfil (inclui usu_verificacao, per_tipo e usu_verificacao_expira)"
           content:
             application/json:
               schema:
@@ -827,12 +881,12 @@ paths:
                 properties:
                   message:
                     type: string
-                  usuario:
+                  user:
                     $ref: '#/components/schemas/Usuario'
         '401':
           description: Não autenticado
         '404':
-          description: Usuário não encontrado
+          description: Usuário não encontrado ou inativo
 
   /api/usuarios/{id}:
     put:
@@ -1186,6 +1240,96 @@ paths:
                       $ref: '#/components/schemas/Veiculo'
         '401':
           description: Não autenticado
+
+  /api/veiculos/{vei_id}:
+    put:
+      tags: [Veículos]
+      summary: Atualizar dados do veículo
+      description: |
+        Atualiza `vei_marca_modelo`, `vei_cor` e/ou `vei_vagas` de um veículo ativo do próprio usuário.
+        `vei_placa` e `vei_tipo` não podem ser alterados (identificador único e regra de capacidade imutáveis).
+
+        **Regra de vagas:** `vei_vagas` deve respeitar os limites do `vei_tipo` original:
+        Moto (0): exatamente 1 | Carro (1): 1–4.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: vei_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vei_marca_modelo:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                  example: Honda Civic
+                vei_cor:
+                  type: string
+                  minLength: 2
+                  maxLength: 50
+                  example: Preto
+                vei_vagas:
+                  type: integer
+                  minimum: 1
+                  maximum: 4
+                  example: 2
+      responses:
+        '200':
+          description: Veículo atualizado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SucessoSimples'
+        '400':
+          description: Campo inválido ou vagas fora do limite permitido pelo tipo
+        '401':
+          description: Não autenticado
+        '404':
+          description: Veículo não encontrado ou não pertence ao usuário
+        '409':
+          description: Veículo está desativado
+
+    delete:
+      tags: [Veículos]
+      summary: Desativar veículo
+      description: |
+        Seta `vei_status = 0` (desativado). Apenas o próprio usuário pode desativar seu veículo.
+
+        **Bloqueado** se houver carona ativa (`car_status IN (1, 2)`) vinculada ao veículo.
+
+        **Efeito colateral:** se não restar nenhum veículo ativo após a desativação, o `usu_verificacao`
+        é rebaixado automaticamente: `2 → 1` e `6 → 5`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: vei_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Veículo desativado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SucessoSimples'
+        '401':
+          description: Não autenticado
+        '404':
+          description: Veículo não encontrado ou não pertence ao usuário
+        '409':
+          description: Veículo já desativado ou possui carona em andamento
 
   # ────────────────────────────────────────────────────────────────────────────
   # CARONAS — /api/caronas
@@ -2653,6 +2797,75 @@ paths:
           description: Resumo geral de todos os módulos
         '403':
           description: Apenas Dev
+
+  /api/admin/usuarios:
+    get:
+      tags: [Admin]
+      summary: Listar usuários
+      description: |
+        Lista usuários com paginação.
+
+        - **Admin (per_tipo=1):** retorna apenas usuários da sua escola.
+        - **Dev (per_tipo=2):** retorna todos os usuários. Aceita `?esc_id=` para filtrar por escola.
+
+        Apenas usuários ativos (`usu_status = 1`) são retornados.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: esc_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: "Filtra por escola (Dev apenas). Admin usa sempre o próprio esc_id."
+          example: 1
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista paginada de usuários
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  usuarios:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        usu_id:
+                          type: integer
+                        usu_nome:
+                          type: string
+                        usu_email:
+                          type: string
+                        usu_status:
+                          type: integer
+                        usu_verificacao:
+                          type: integer
+        '400':
+          description: esc_id inválido
+        '403':
+          description: Requer papel Admin ou Dev
 
   /api/admin/usuarios/{usu_id}/penalidades:
     get:

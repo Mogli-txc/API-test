@@ -97,7 +97,7 @@ describe('29/03 — Correção veiculoRoutes (:usua_id → :usu_id)', () => {
             .post('/api/usuarios/login')
             .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
 
-        const token = login.body.token;
+        const token = login.body.access_token;
         expect(token).toBeDefined();
 
         // PASSO 2: chama a rota corrigida com token válido
@@ -134,8 +134,8 @@ describe('29/03 — Usuário de teste (criado pelo globalSetup)', () => {
 
         // PASSO 2: valida que o token foi gerado
         expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('token');
-        expect(res.body.auth).toBe(true);
+        expect(res.body).toHaveProperty('access_token');
+        expect(res.body).toHaveProperty('user');
     });
 
 });

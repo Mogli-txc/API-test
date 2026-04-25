@@ -129,8 +129,8 @@ describe('Usuário 1 — Motorista', () => {
 
         // PASSO 2: valida token e guarda para as próximas chamadas protegidas
         expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('token');
-        token1 = res.body.token;
+        expect(res.body).toHaveProperty('access_token');
+        token1 = res.body.access_token;
     });
 
     it('1.3 — Matrícula em curso (valida vínculo institucional)', async () => {
@@ -240,8 +240,8 @@ describe('Usuário 2 — Passageiro', () => {
 
         // PASSO 2: valida token e guarda para as próximas chamadas protegidas
         expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('token');
-        token2 = res.body.token;
+        expect(res.body).toHaveProperty('access_token');
+        token2 = res.body.access_token;
     });
 
     it('2.3 — Matrícula em curso (valida vínculo institucional)', async () => {

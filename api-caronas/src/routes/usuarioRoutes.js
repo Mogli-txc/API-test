@@ -90,11 +90,22 @@ router.post('/login', UsuarioController.login);
  * Descrição: Troca um refresh token válido por novo access token + refresh token rotacionado
  * Acesso: Público (o refresh token é a credencial)
  * Campo obrigatório: refresh_token
- * Retorno: Status 200 com novo token e novo refresh_token
+ * Retorno: Status 200 com novo access_token e novo refresh_token
  */
 router.post('/refresh', UsuarioController.refreshToken);
 
 // ========== ROTAS PROTEGIDAS (REQUEREM AUTENTICAÇÃO JWT) ==========
+
+/**
+ * ROTA: POST /api/usuarios/logout
+ * Descrição: Invalida o refresh token do usuário no banco (logout server-side).
+ *   O access token JWT atual permanece válido até expirar (máx. 24h),
+ *   mas sem refresh token o cliente não consegue renovar a sessão.
+ *   O frontend deve descartar access_token e refresh_token localmente após esta chamada.
+ * Acesso: PROTEGIDO — requer JWT válido
+ * Retorno: Status 200
+ */
+router.post('/logout', authMiddleware, UsuarioController.logout);
 
 /**
  * ROTA: GET /api/usuarios/perfil/:id

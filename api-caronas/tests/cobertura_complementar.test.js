@@ -58,11 +58,11 @@ async function criarUsuarioAtivo(sufixo) {
         usu_senha: senha,
     });
 
-    if (!loginRes.body.token) {
+    if (!loginRes.body.access_token) {
         throw new Error(`[helper] Login falhou para ${email}: ${JSON.stringify(loginRes.body)}`);
     }
 
-    return { usu_id, token: loginRes.body.token, email, senha };
+    return { usu_id, token: loginRes.body.access_token, email, senha };
 }
 
 // ──────────────────────────────────────────────
@@ -73,7 +73,7 @@ async function loginAdmin() {
         usu_email: 'admin@escola.com',
         usu_senha: '123456',
     });
-    return res.body.token;
+    return res.body.access_token;
 }
 
 // ══════════════════════════════════════════════

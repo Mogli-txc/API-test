@@ -12,6 +12,7 @@
  *   2 = Matrícula + veículo registrado
  *   5 = Temporário sem veículo (5 dias para pedir caronas; promovido para 6 ao cadastrar veículo)
  *   6 = Temporário com veículo (5 dias para pedir e oferecer caronas; vira 2 ao completar validação)
+ *   9 = Suspenso pelo administrador (login bloqueado — penalidade tipo 4)
  *
  * Colunas do banco usadas:
  * USUARIOS: usu_id, usu_nome, usu_email, usu_senha, usu_telefone,
@@ -173,14 +174,11 @@ class UsuarioController {
             // Envio de email é não-crítico e assíncrono — a fila processa em background
             // sem bloquear a resposta ao cliente nem desfazer o cadastro em caso de falha SMTP
             enqueueEmail({ type: 'otp', email: usu_email, otp });
-            const emailEnviado = true; // fila aceita sempre; falhas são logadas internamente
 
             await registrarAudit({ tabela: 'USUARIOS', registroId: novoId, acao: 'CADASTRO', ip: req.ip });
 
             return res.status(201).json({
-                message: emailEnviado
-                    ? "Usuário cadastrado! Verifique seu email com o código enviado."
-                    : "Usuário cadastrado! Não foi possível enviar o email de verificação. Use o endpoint de reenvio.",
+                message: "Usuário cadastrado! Verifique seu email com o código enviado.",
                 usuario: { usu_id: novoId, usu_email, usu_verificacao: 0 }
             });
 
@@ -294,7 +292,7 @@ class UsuarioController {
                 [usuario.usu_id]
             );
 
-            // PASSO 4: Habilita o perfil — sem isso o login seria bloqueado pela verificação de per_habilitado
+            // PASSO 5: Habilita o perfil — sem isso o login seria bloqueado pela verificação de per_habilitado
             // Usuários recém-cadastrados começam com per_habilitado=0 até confirmar o email
             await db.query(
                 'UPDATE PERFIL SET per_habilitado = 1 WHERE usu_id = ?',
@@ -460,8 +458,7 @@ class UsuarioController {
             );
 
             return res.status(200).json({
-                auth: true,
-                token,
+                access_token:  token,
                 refresh_token: refreshToken,
                 user: {
                     usu_id:    usuario.usu_id,
@@ -492,10 +489,13 @@ class UsuarioController {
             }
 
             const [rows] = await db.query(
-                `SELECT u.usu_id, u.usu_nome, u.usu_telefone,
-                        u.usu_descricao, u.usu_foto, u.usu_endereco
+                `SELECT u.usu_id, u.usu_nome, u.usu_email, u.usu_telefone,
+                        u.usu_descricao, u.usu_foto, u.usu_endereco,
+                        u.usu_verificacao, u.usu_verificacao_expira,
+                        p.per_tipo, p.per_habilitado
                  FROM USUARIOS u
-                 WHERE u.usu_id = ?`,
+                 INNER JOIN PERFIL p ON u.usu_id = p.usu_id
+                 WHERE u.usu_id = ? AND u.usu_status = 1`,
                 [id]
             );
 
@@ -893,6 +893,31 @@ class UsuarioController {
     }
 
     /**
+     * MÉTODO: logout
+     * Invalida o refresh token do usuário autenticado no banco.
+     * O access token (JWT) continua tecnicamente válido até expirar (24h),
+     * mas sem refresh token o cliente não consegue obter novos tokens.
+     *
+     * Tabela: USUARIOS (UPDATE usu_refresh_hash = NULL)
+     * Requer: JWT válido no header Authorization
+     */
+    async logout(req, res) {
+        try {
+            // Limpa o refresh hash — impede que qualquer refresh token emitido anteriormente seja reutilizado
+            await db.query(
+                'UPDATE USUARIOS SET usu_refresh_hash = NULL, usu_refresh_expira = NULL WHERE usu_id = ?',
+                [req.user.id]
+            );
+
+            return res.status(200).json({ message: "Logout realizado com sucesso." });
+
+        } catch (error) {
+            console.error("[ERRO] logout:", error);
+            return res.status(500).json({ error: "Erro ao processar logout." });
+        }
+    }
+
+    /**
      * MÉTODO: refreshToken
      * Troca um refresh token válido por um novo access token (24h) e
      * rotaciona o refresh token (30 dias). Proteção contra replay:
@@ -953,7 +978,7 @@ class UsuarioController {
             );
 
             return res.status(200).json({
-                token:         novoToken,
+                access_token:  novoToken,
                 refresh_token: novoRefresh
             });
 

@@ -7,7 +7,7 @@
  * Valores de pon_status no banco: 1 = Ativo | 0 = Inativo
  *
  * Colunas da tabela PONTO_ENCONTROS:
- *   pon_id, car_id, pon_endereco, pon_endereco_geom (legado, agora NULL opcional),
+ *   pon_id, car_id, pon_endereco, pon_endereco_geom (opcional — formato "lat,lon" ou GeoJSON),
  *   pon_lat, pon_lon (coordenadas Nominatim [v10]), pon_tipo, pon_nome, pon_ordem, pon_status
  *
  * Integração Nominatim [v10]:

@@ -146,21 +146,21 @@ async function teste2_GerarTokenJWT() {
 
     const resposta = await fazerRequisicao(opcoes, body);
 
-    const passou = resposta.status === 200 && !!resposta.body.token;
+    const passou = resposta.status === 200 && !!resposta.body.access_token;
     imprimirResultado(2, 'Login e Geração de Token', passou,
       `Status esperado: 200 | Recebido: ${resposta.status}`);
 
     if (resposta.body) {
-      if (resposta.body.token) {
+      if (resposta.body.access_token) {
         log(`   ✓ Token gerado com sucesso!`);
-        log(`   Token: ${resposta.body.token.substring(0, 30)}...`);
+        log(`   Token: ${resposta.body.access_token.substring(0, 30)}...`);
       }
       if (resposta.body.user) {
         log(`   Usuário: ${resposta.body.user.usua_nome} (ID: ${resposta.body.user.usua_id})`);
       }
     }
 
-    return { passou, resposta, token: resposta.body?.token };
+    return { passou, resposta, token: resposta.body?.access_token };
 
   } catch (erro) {
     error(`${cores.vermelho}[ERRO] ${erro.message}${cores.reset}`);
@@ -313,14 +313,14 @@ describe('Testes de Segurança - API de Caronas', () => {
       .post('/api/usuarios/login')
       .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('token');
+    expect(res.body).toHaveProperty('access_token');
   });
 
   test('Teste 3: Acesso Permitido COM Token JWT', async () => {
     const loginRes = await request(app)
       .post('/api/usuarios/login')
       .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
-    const token = loginRes.body.token;
+    const token = loginRes.body.access_token;
 
     const res = await request(app)
       .get('/api/caronas')
@@ -373,7 +373,7 @@ describe('Testes de Role - Permissões por Tipo de Perfil', () => {
     const respLogin = await request(app)
       .post('/api/usuarios/login')
       .send({ usu_email: email, usu_senha: 'senha123' });
-    return respLogin.body?.token ?? null;
+    return respLogin.body?.access_token ?? null;
   }
 
   test('Teste 6: Usuário comum NÃO pode listar sugestões (403)', async () => {
@@ -390,7 +390,7 @@ describe('Testes de Role - Permissões por Tipo de Perfil', () => {
     const loginRes = await request(app)
       .post('/api/usuarios/login')
       .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
-    const token = loginRes.body.token;
+    const token = loginRes.body.access_token;
     expect(token).toBeDefined();
 
     const res = await request(app)
@@ -423,7 +423,7 @@ describe('Testes de Role - Permissões por Tipo de Perfil', () => {
     const loginRes = await request(app)
       .post('/api/usuarios/login')
       .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
-    const token = loginRes.body.token;
+    const token = loginRes.body.access_token;
     expect(token).toBeDefined();
 
     const res = await request(app)

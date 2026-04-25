@@ -130,7 +130,7 @@ beforeAll(async () => {
         const loginRes = await request(app)
             .post('/api/usuarios/login')
             .send({ usu_email: email, usu_senha: senha });
-        const token = loginRes.body.token;
+        const token = loginRes.body.access_token;
 
         // Verificacao nível 2
         await setVerificacao(usu_id, 2);
@@ -179,7 +179,7 @@ beforeAll(async () => {
         const loginRes = await request(app)
             .post('/api/usuarios/login')
             .send({ usu_email: email, usu_senha: senha });
-        const token = loginRes.body.token;
+        const token = loginRes.body.access_token;
 
         return { usu_id, token };
     }
@@ -220,7 +220,7 @@ beforeAll(async () => {
     const tempLoginRes = await request(app)
         .post('/api/usuarios/login')
         .send({ usu_email: emailTemp, usu_senha: 'senha123' });
-    token_temp = tempLoginRes.body.token;
+    token_temp = tempLoginRes.body.access_token;
 });
 
 

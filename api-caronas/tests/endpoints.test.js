@@ -48,8 +48,8 @@ describe('Usuários', () => {
             .post('/api/usuarios/login')
             .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
         expect(res.status).toBe(200);
-        expect(res.body).toHaveProperty('token');
-        tokenTeste = res.body.token; // salva para os próximos testes
+        expect(res.body).toHaveProperty('access_token');
+        tokenTeste = res.body.access_token; // salva para os próximos testes
     });
 
     it('POST /login — deve retornar 401 com credenciais erradas', async () => {

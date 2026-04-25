@@ -75,14 +75,14 @@ WHERE NOT EXISTS (SELECT 1 FROM CURSOS c WHERE c.esc_id = e.esc_id);
 SELECT * FROM CURSOS;
 
 -- [B] Cursos com nome da escola vinculada
-SELECT
-    c.cur_id,
-    c.cur_nome,
-    c.cur_semestre,
-    e.esc_nome AS escola
-FROM CURSOS c
-INNER JOIN ESCOLAS e ON c.esc_id = e.esc_id
-ORDER BY e.esc_nome, c.cur_semestre;
+  SELECT
+      c.cur_id,
+      c.cur_nome,
+      c.cur_semestre,
+      e.esc_nome AS escola
+  FROM CURSOS c
+  INNER JOIN ESCOLAS e ON c.esc_id = e.esc_id
+  ORDER BY e.esc_nome, c.cur_semestre;
 
 -- [C] TESTE: Listar cursos de uma escola específica (dropdown no cadastro)
 SELECT cur_id, cur_nome, cur_semestre

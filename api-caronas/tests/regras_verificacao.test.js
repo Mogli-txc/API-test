@@ -91,7 +91,7 @@ beforeAll(async () => {
         .post('/api/usuarios/login')
         .send({ usu_email: email, usu_senha: 'senha123' });
 
-    token = login.body.token;
+    token = login.body.access_token;
 });
 
 // ========== OFERECER CARONA ==========

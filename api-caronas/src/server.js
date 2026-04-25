@@ -156,6 +156,23 @@ app.use('/api/mensagens/enviar', writeLimiter);
 app.use('/api/caronas/oferecer', writeLimiter);
 
 /**
+ * Middleware 2d: Rate Limiting para geocode (Nominatim)
+ * Limita cada IP a 20 requisições por minuto no autocomplete de endereços.
+ * Impede que um único cliente enfileire centenas de chamadas ao Nominatim,
+ * que só processa 1 req/s. Sem este limite, o limite global (100/15 min) seria
+ * atingido muito antes de causar dano — mas a fila interna ficaria travada.
+ */
+const geocodeLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minuto
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Muitas buscas de endereço. Aguarde um momento." },
+    skip: () => process.env.NODE_ENV === 'test'
+});
+app.use('/api/pontos/geocode', geocodeLimiter);
+
+/**
  * Middleware 2: Parsing de corpo
  * express.json()       — application/json (requisições da SPA e mobile)
  * express.urlencoded() — application/x-www-form-urlencoded (formulários HTML)

@@ -120,7 +120,8 @@ O `access_token` é obtido no login e válido por **24 horas**. Quando expirar, 
 | POST   | `/reset-password`  | —    | Valida token e redefine a senha                             |
 | POST   | `/login`           | —    | Autentica e retorna `access_token` + `refresh_token`        |
 | POST   | `/refresh`         | —    | Troca refresh token válido por novo par de tokens           |
-| GET    | `/perfil/:id`      | JWT  | Dados do perfil de um usuário                               |
+| POST   | `/logout`          | JWT  | Invalida o refresh token server-side                        |
+| GET    | `/perfil/:id`      | JWT  | Dados do perfil (inclui `usu_verificacao`, `per_tipo`)      |
 | PUT    | `/:id`             | JWT  | Atualiza dados do próprio usuário                           |
 | PUT    | `/:id/foto`        | JWT  | Atualiza foto de perfil (multipart/form-data, campo `foto`) |
 | DELETE | `/:id`             | JWT  | Soft-delete da conta                                        |
@@ -153,7 +154,7 @@ O `access_token` é obtido no login e válido por **24 horas**. Quando expirar, 
 | GET    | `/usuario/:usu_id`   | JWT  | Lista solicitações feitas pelo usuário       |
 | PUT    | `/:sol_id/responder` | JWT  | Motorista aceita ou recusa a solicitação     |
 | PUT    | `/:sol_id/cancelar`  | JWT  | Passageiro cancela a solicitação             |
-| DELETE | `/:sol_id`           | JWT  | Remove solicitação (motorista ou admin)      |
+| DELETE | `/:sol_id`           | JWT  | Soft-delete (apenas o motorista da carona)   |
 
 ### Passageiros confirmados — `/api/passageiros`
 
@@ -187,22 +188,26 @@ Regras: apenas participantes confirmados podem avaliar; nota de 1–5; cada par 
 
 Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no handshake.
 
-| Evento cliente → servidor | Payload                  | Descrição                    |
-|---------------------------|--------------------------|------------------------------|
-| `entrar_carona`           | `{ car_id }`             | Entra na sala da carona      |
-| `nova_mensagem`           | `{ car_id, men_texto }`  | Envia mensagem em tempo real |
-| `sair_carona`             | `{ car_id }`             | Sai da sala da carona        |
+| Evento cliente → servidor | Payload                                                        | Descrição                    |
+|---------------------------|----------------------------------------------------------------|------------------------------|
+| `entrar_carona`           | `{ car_id }`                                                   | Entra na sala da carona      |
+| `nova_mensagem`           | `{ car_id, usu_id_destinatario, men_texto, men_id_resposta? }` | Envia mensagem em tempo real |
+| `sair_carona`             | `{ car_id }`                                                   | Sai da sala da carona        |
 
-| Evento servidor → cliente | Payload         | Descrição                  |
-|---------------------------|-----------------|----------------------------|
-| `mensagem_recebida`       | objeto mensagem | Nova mensagem na sala       |
+| Evento servidor → cliente | Payload                                                                                 | Descrição                         |
+|---------------------------|-----------------------------------------------------------------------------------------|-----------------------------------|
+| `mensagem_recebida`       | `{ men_id, car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta }` | Nova mensagem broadcast na sala   |
+| `entrou_carona`           | `{ car_id }`                                                                            | Confirmação de entrada na sala    |
+| `erro`                    | `{ message }`                                                                           | Erro de validação ou permissão    |
 
 ### Veículos — `/api/veiculos`
 
-| Método | Rota               | Auth | Descrição                        |
-|--------|--------------------|------|----------------------------------|
-| POST   | `/`                | JWT  | Cadastra novo veículo            |
-| GET    | `/usuario/:usu_id` | JWT  | Lista veículos ativos do usuário |
+| Método | Rota               | Auth | Descrição                                                      |
+|--------|--------------------|------|----------------------------------------------------------------|
+| POST   | `/`                | JWT  | Cadastra novo veículo                                          |
+| GET    | `/usuario/:usu_id` | JWT  | Lista veículos ativos do usuário                               |
+| PUT    | `/:vei_id`         | JWT  | Atualiza dados do veículo (marca/modelo, cor, vagas)           |
+| DELETE | `/:vei_id`         | JWT  | Desativa veículo (`vei_status = 0`) — bloqueia se há carona ativa |
 
 ### Pontos de encontro — `/api/pontos`
 
@@ -245,6 +250,7 @@ Exige JWT + papel Admin (1) ou Desenvolvedor (2).
 | GET      | `/stats/caronas`                        | Totais de caronas por status                                     |
 | GET      | `/stats/sugestoes`                      | Totais de sugestões/denúncias por tipo e status                  |
 | GET      | `/stats/sistema`                        | Resumo consolidado de todos os módulos (Dev apenas)              |
+| GET      | `/usuarios`                             | Lista usuários (Admin: escola; Dev: todos, `?esc_id=` opcional)  |
 | GET      | `/usuarios/:usu_id/penalidades`         | Histórico de penalidades de um usuário (`?ativas=1` = vigentes)  |
 | POST     | `/usuarios/:usu_id/penalidades`         | Aplica penalidade a um usuário                                   |
 | DELETE   | `/penalidades/:pen_id`                  | Remove/desativa uma penalidade                                   |
@@ -262,12 +268,106 @@ Exige JWT + papel Admin (1) ou Desenvolvedor (2).
 
 ---
 
+## Integração com Frontend
+
+### Checklist de prontidão
+
+| Item | Status | Detalhe |
+|------|--------|---------|
+| CORS configurado | ✅ | `ALLOWED_ORIGINS` no `.env`; padrão inclui `localhost:5173` (Vite) |
+| Autenticação JWT | ✅ | `access_token` (24h) + `refresh_token` (30 dias, rotacionado) |
+| Logout server-side | ✅ | `POST /api/usuarios/logout` invalida refresh token no banco |
+| Nível do usuário no perfil | ✅ | `GET /perfil/:id` retorna `usu_verificacao`, `per_tipo`, `usu_verificacao_expira` |
+| Upload de imagens | ✅ | JPEG/PNG/GIF até 5 MB; validação de magic bytes |
+| Upload de documentos | ✅ | PDF até 10 MB com OCR automático |
+| Arquivos estáticos | ✅ | Servidos em `/public/<pasta>/` |
+| WebSocket (chat) | ✅ | Socket.io com JWT no handshake |
+| Autocomplete de endereços | ✅ | `GET /api/pontos/geocode?q=<texto>` |
+| Dados públicos (escolas/cursos) | ✅ | `GET /api/infra/escolas` — sem autenticação |
+
+### Fluxo de autenticação para o frontend
+
+```
+1. POST /api/usuarios/login
+   → guarda { access_token, refresh_token, user } no estado
+
+2. Cada requisição protegida:
+   → header: Authorization: Bearer <access_token>
+
+3. Ao receber 401 (token expirado):
+   → POST /api/usuarios/refresh com { refresh_token }
+   → atualiza access_token e refresh_token guardados
+
+4. Logout:
+   → POST /api/usuarios/logout (invalida server-side)
+   → limpa access_token e refresh_token do estado local
+```
+
+### Lógica de controle de acesso no frontend
+
+Use os campos retornados por `GET /api/usuarios/perfil/:id` para controlar a UI:
+
+| Campo | Uso |
+|-------|-----|
+| `usu_verificacao` | `[1,2,5,6]` → pode solicitar carona; `[2,6]` → pode oferecer |
+| `usu_verificacao_expira` | Alerta ao usuário se o prazo estiver próximo |
+| `per_tipo` | `0` = usuário comum; `1` = admin (exibe painel); `2` = dev |
+| `per_habilitado` | `0` = conta desabilitada (bloquear UI) |
+
+### Configuração do `.env` para desenvolvimento frontend
+
+```env
+APP_URL=http://localhost:3000          # URL da API (backend)
+ALLOWED_ORIGINS=http://localhost:5173  # URL do frontend (Vite)
+```
+
+> **`APP_URL`** é a URL **da API**, usada para montar o link de reset de senha no e-mail. O link aponta para `${APP_URL}/redefinir-senha?token=<token>` — o frontend precisa ter essa rota implementada.
+
+### Rate limits que o frontend deve tratar
+
+| Endpoint | Limite | Código retornado |
+|----------|--------|-----------------|
+| Login, cadastro, OTP, reset senha | 10 req / 15 min por IP | `429` |
+| Oferecer carona, solicitar, enviar mensagem | 30 req / min por IP | `429` |
+| Autocomplete de endereços (`/pontos/geocode`) | 20 req / min por IP | `429` |
+| Todos os outros | 100 req / 15 min por IP | `429` |
+
+### Conexão WebSocket (chat em tempo real)
+
+```js
+import { io } from 'socket.io-client';
+
+const socket = io('http://localhost:3000', {
+    auth: { token: access_token }   // JWT obrigatório no handshake
+});
+
+// Entrar na sala da carona
+socket.emit('entrar_carona', { car_id: 1 });
+
+// Enviar mensagem (usu_id_destinatario é obrigatório)
+socket.emit('nova_mensagem', {
+    car_id: 1,
+    usu_id_destinatario: 3,     // obrigatório — ID do destinatário (motorista ou passageiro)
+    men_texto: 'Chego em 5 minutos!',
+    men_id_resposta: null       // opcional — ID da mensagem sendo respondida
+});
+
+// Receber mensagens
+socket.on('mensagem_recebida', (mensagem) => { /* atualiza UI */ });
+
+// Tratar erros do socket
+socket.on('erro', ({ message }) => { /* exibe alerta */ });
+```
+
+---
+
 ## Segurança
 
 - **Helmet** — headers HTTP de segurança em todas as respostas
 - **Rate limiting global** — 100 req / 15 min por IP
 - **Rate limiting de autenticação** — 10 tentativas / 15 min em login, cadastro, OTP e reset
 - **Rate limiting de escrita** — 30 req / min em `/oferecer`, `/criar`, `/enviar`
+- **Rate limiting de geocode** — 20 req / min em `/pontos/geocode` (protege fila Nominatim)
 - **CORS** — restrito às origens em `ALLOWED_ORIGINS`; requisições sem `origin` (mobile, Postman) são permitidas
 - **Senhas** — bcrypt
 - **OTP** — HMAC-SHA256 com expiração e bloqueio por excesso de tentativas
@@ -322,10 +422,11 @@ Arquivo principal que monta e exporta o `app` Express. Responsabilidades:
 
 - **Helmet** — aplica cabeçalhos HTTP de segurança (CSP restritiva, HSTS em produção, X-Frame-Options via `frame-ancestors`).
 - **CORS** — lê as origens permitidas de `ALLOWED_ORIGINS` no `.env`; requisições sem `origin` (mobile, Postman, curl) são sempre permitidas.
-- **Rate limiting em três camadas:**
+- **Rate limiting em quatro camadas:**
   - Global: 100 req / 15 min por IP em todas as rotas.
   - Autenticação: 10 req / 15 min em `/login`, `/cadastro`, `/verificar-email`, `/reenviar-otp`, `/forgot-password`, `/reset-password`.
   - Escrita: 30 req / min em `/caronas/oferecer`, `/solicitacoes/criar`, `/mensagens/enviar`.
+  - Geocode: 20 req / min em `/pontos/geocode` — protege a fila interna do Nominatim (1 req/s).
 - **Parsing** — `express.json()` e `express.urlencoded()` para corpo das requisições.
 - **Arquivos estáticos** — `/public` serve imagens de perfil, fotos de veículos e documentos enviados via upload.
 - **Logging opcional** — quando `LOG_REQUESTS=true` no `.env`, loga método, path, status, duração e IP de cada requisição.
@@ -907,3 +1008,32 @@ const BASE_URL = 'https://seu-servidor-nominatim.com';
 ```
 
 Nenhuma outra alteração é necessária.
+
+---
+
+## Auditoria de Código
+
+Auditoria completa realizada em **2026-04-25**. Abaixo o resumo dos apontamentos encontrados e correções aplicadas.
+
+### Problemas corrigidos
+
+| Arquivo | Categoria | Descrição |
+|---|---|---|
+| `src/middlewares/authMiddleware.js` | Comentário errado | Docblock dizia "retorna 403 (sem token)" — o código sempre retorna 401. Corrigido. |
+| `src/controllers/UsuarioController.js` | Numeração duplicada | `verificarEmail()` tinha dois comentários `PASSO 4`. Segundo renomeado para `PASSO 5`. |
+| `src/controllers/UsuarioController.js` | Dead code | `const emailEnviado = true` seguido de ternário com branch morto. Variável removida. |
+| `src/controllers/UsuarioController.js` | Documentação | Header do controller não listava `usu_verificacao = 9` (suspenso). Adicionado. |
+| `src/controllers/SolicitacaoController.js` | Variable shadowing | `const expira` dentro de `if (penalidade)` sombreava `expira` do escopo externo. Renomeado para `expiraPenalidade`. |
+| `src/controllers/AdminController.js` | Comentário errado | `removerPenalidade()` dizia "restaura `usu_verificacao = 1`". O código pode restaurar 1 ou 2 (depende de veículo). Corrigido. |
+| `src/controllers/CaronaController.js` | Documentação | `totalGeral` com filtro de proximidade conta o pré-filtro bounding box (pode ser maior que o resultado Haversine). Comportamento documentado no código. |
+| `src/controllers/PontoEncontroController.js` | Comentário enganoso | `pon_endereco_geom` descrito como "legado" — ainda é armazenado e utilizado. Corrigido para "opcional". |
+| `src/controllers/MensagemController.js` | Nomenclatura | `ehRemMetorista` e `ehDestMotorista` — abreviações ambíguas. Renomeados para `ehRemetenteMotorista` e `ehDestinatarioMotorista`. |
+| `README.md` + `documentacao.md` | Documentação faltante | Endpoint `GET /api/admin/usuarios` existia no código e nas rotas mas não estava documentado. Adicionado. |
+
+### Apontamentos não corrigidos (decisão de design)
+
+| Arquivo | Categoria | Descrição |
+|---|---|---|
+| `src/controllers/CaronaController.js` | Performance | `totalGeral` exige query separada de COUNT. Troca por cursor-only pagination eliminaria a query, mas mudaria a API pública. |
+| `src/services/geocodingService.js` | Performance | Fila FIFO usa `Array.shift()` (O(n)). Impacto prático nulo no volume esperado; substituir por linked-list seria over-engineering. |
+| `src/utils/sanitize.js` | Segurança (baixo risco) | `stripHtml` usa regex simples. A API retorna JSON (não HTML renderizado), portanto o risco de XSS armazenado é baixo. Substituir por `sanitize-html` seria recomendado caso o front-end renderize o conteúdo sem escape. |

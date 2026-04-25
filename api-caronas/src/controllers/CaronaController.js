@@ -234,6 +234,10 @@ class CaronaController {
                 ? caronasFiltradas[caronasFiltradas.length - 1].car_id
                 : null;
 
+            // totalGeral: quando proximidade está ativa, o COUNT reflete o pré-filtro de bounding box
+            // (pode ser ligeiramente maior que o resultado Haversine — é uma aproximação intencional,
+            // pois calcular o total exato exigiria buscar todos os registros e aplicar Haversine em memória).
+            // Quando proximidade não está ativa, o COUNT é exato.
             const [[{ totalGeral }]] = await db.query(
                 `SELECT COUNT(*) AS totalGeral
                  FROM CARONAS c
@@ -285,10 +289,10 @@ class CaronaController {
             const [rows] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
                         c.car_vagas_dispo, c.car_status, c.vei_id, c.cur_usu_id,
-                        v.vei_marca_modelo AS veiculo,
-                        u.usu_nome         AS motorista
+                        v.vei_marca_modelo, v.vei_placa, v.vei_tipo, v.vei_vagas,
+                        u.usu_nome AS motorista, cu.usu_id AS motorista_id
                  FROM CARONAS c
-                 INNER JOIN VEICULOS       v  ON c.vei_id     = v.vei_id
+                 INNER JOIN VEICULOS        v  ON c.vei_id     = v.vei_id
                  INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
                  INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
                  WHERE c.car_id = ?`,

@@ -87,7 +87,7 @@ beforeAll(async () => {
     const res = await request(app)
         .post('/api/usuarios/login')
         .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
-    token = res.body.access_token || res.body.token || '';
+    token = res.body.access_token || '';
 });
 
 afterEach(() => {

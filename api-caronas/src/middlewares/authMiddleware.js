@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
  * 2. Extrai o token do formato "Bearer <token>".
  * 3. Valida o token com o segredo JWT.
  * 4. Em caso de sucesso, injeta os dados do usuário em req.user e chama next().
- * 5. Em caso de falha, retorna 403 (sem token) ou 401 (token inválido).
+ * 5. Em caso de falha, retorna 401 em todos os casos (token ausente, mal-formatado ou inválido).
  */
 
 module.exports = (req, res, next) => {
@@ -19,7 +19,7 @@ module.exports = (req, res, next) => {
         return res.status(401).json({ error: 'Token não fornecido.' });
     }
 
-    // Formato obrigatório: "Bearer <token>"
+    // Formato obrigatório: "Bearer <token>" — retorna 401 (não 403) para não revelar detalhes de permissão
     if (!authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'Formato de autorização inválido. Use: Bearer <token>.' });
     }

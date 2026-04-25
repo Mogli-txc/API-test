@@ -433,7 +433,7 @@ class AdminController {
     /**
      * MÉTODO: removerPenalidade
      * Desativa uma penalidade, restaurando o acesso correspondente ao usuário.
-     * Penalidade tipo 4 também restaura usu_verificacao = 1.
+     * Penalidade tipo 4 também restaura usu_verificacao ao nível correto: 2 (com veículo) ou 1 (sem veículo).
      * Administrador: apenas penalidades de usuários da sua escola.
      *
      * Parâmetro: pen_id (via URL)

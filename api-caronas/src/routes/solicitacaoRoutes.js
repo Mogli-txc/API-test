@@ -71,11 +71,11 @@ router.put('/:sol_id/cancelar', authMiddleware, SolicitacaoController.cancelarSo
 
 /**
  * ROTA: DELETE /api/solicitacoes/:sol_id
- * Descrição: Deleta uma solicitação (apenas motorista da carona - admin)
- * Acesso: PROTEGIDO - Apenas motorista ou admin
+ * Descrição: Soft delete de uma solicitação (sol_status → 0).
+ * Acesso: PROTEGIDO — apenas o motorista da carona pode deletar.
+ *   Se a solicitação estava aceita (sol_status = 2), a vaga é devolvida à carona.
  * Parâmetros: sol_id (via URL)
  * Retorno: Status 204 (No Content)
- * OBS: Soft delete recomendado
  */
 router.delete('/:sol_id', authMiddleware, SolicitacaoController.deletarSolicitacao);
 

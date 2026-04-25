@@ -61,7 +61,7 @@ async function criarUsuarioAtivo(sufixo = '') {
         .post('/api/usuarios/login')
         .send({ usu_email: email, usu_senha: 'senha123' });
 
-    const token = loginRes.body?.token;
+    const token = loginRes.body?.access_token;
     if (!token) throw new Error(`[helper] Falha ao logar ${email}: ${JSON.stringify(loginRes.body)}`);
 
     return { usu_id, token };
@@ -468,7 +468,7 @@ describe('Grupo 4 — Race Condition (SELECT FOR UPDATE)', () => {
         const loginRes = await request(app)
             .post('/api/usuarios/login')
             .send({ usu_email: 'admin@escola.com', usu_senha: '123456' });
-        const tokenAdmin = loginRes.body.token;
+        const tokenAdmin = loginRes.body.access_token;
 
         const res = await request(app)
             .get(`/api/caronas/${car_id}`)
