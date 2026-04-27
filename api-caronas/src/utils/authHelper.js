@@ -3,15 +3,28 @@
  *
  * Centraliza verificações de permissão repetidas nos controllers:
  *
- *   checkDevOrOwner  — verifica se o requester é o dono do recurso OU um desenvolvedor (per_tipo=2)
- *   getMotoristaId   — retorna o usu_id do motorista de uma carona (null se não encontrada)
+ *   checkDevOrOwner      — dono do recurso OU Desenvolvedor (per_tipo=2)
+ *   checkAdminOrOwner    — dono do recurso OU Administrador/Desenvolvedor (per_tipo>=1)
+ *   getMotoristaId       — retorna usu_id do motorista de uma carona (null se não encontrada)
+ *   isParticipanteCarona — verifica se usuário é motorista ou passageiro confirmado de uma carona
+ *                          Retorna: true (participante) | false (não participante) | null (carona não existe)
  *
  * Uso nos controllers:
- *   const { checkDevOrOwner, getMotoristaId } = require('../utils/authHelper');
+ *   const { checkDevOrOwner, checkAdminOrOwner, getMotoristaId, isParticipanteCarona }
+ *       = require('../utils/authHelper');
  *
  *   if (!await checkDevOrOwner(req.user.id, targetId)) {
  *       return res.status(403).json({ error: "Sem permissão." });
  *   }
+ *
+ *   // Para recursos que Admins também devem acessar (não apenas Dev):
+ *   if (!await checkAdminOrOwner(req.user.id, targetId)) {
+ *       return res.status(403).json({ error: "Sem permissão." });
+ *   }
+ *
+ *   const resultado = await isParticipanteCarona(car_id, usu_id);
+ *   if (resultado === null) return res.status(404).json({ error: "Carona não encontrada." });
+ *   if (!resultado)         return res.status(403).json({ error: "Não é participante." });
  */
 
 const db = require('../config/database');
@@ -52,4 +65,63 @@ async function getMotoristaId(caronaId) {
     return motorista.length > 0 ? motorista[0].usu_id : null;
 }
 
-module.exports = { checkDevOrOwner, getMotoristaId };
+/**
+ * Verifica se o usuário autenticado é o dono do recurso (mesmo ID) OU tem papel elevado (Admin ou Dev).
+ * Usado quando tanto Administradores (per_tipo=1) quanto Desenvolvedores (per_tipo=2) devem ter acesso,
+ * além do próprio dono do recurso.
+ *
+ * Diferença de checkDevOrOwner: inclui per_tipo=1 (Admin), não apenas per_tipo=2 (Dev).
+ *
+ * @param {number} requesterId - ID do usuário autenticado (req.user.id)
+ * @param {number|string} targetId  - ID do recurso alvo
+ * @returns {Promise<boolean>} true se permitido, false se bloqueado
+ */
+async function checkAdminOrOwner(requesterId, targetId) {
+    // PASSO 1: Dono do recurso — acesso imediato sem consulta ao banco
+    if (requesterId === parseInt(targetId)) return true;
+
+    // PASSO 2: Não é o dono — verifica se é Admin (1) ou Desenvolvedor (2)
+    const [perfil] = await db.query(
+        'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+        [requesterId]
+    );
+    return perfil.length > 0 && perfil[0].per_tipo >= 1;
+}
+
+/**
+ * Verifica se um usuário é motorista ou passageiro confirmado de uma carona.
+ * Cobre dois caminhos de participação:
+ *   - CARONA_PESSOAS (adicionado diretamente pelo motorista, car_pes_status = 1)
+ *   - SOLICITACOES_CARONA (aceito via solicitação, sol_status = 2)
+ *
+ * Usado em AvaliacaoController e MensagemController para restringir acesso a participantes.
+ *
+ * @param {number|string} caronaId - ID da carona (car_id)
+ * @param {number}        usuId    - ID do usuário a verificar
+ * @returns {Promise<boolean>} true se participante, false caso contrário
+ */
+async function isParticipanteCarona(caronaId, usuId) {
+    // PASSO 1: Verifica se a carona existe e se o usuário é o motorista
+    // Retorna null quando a carona não existe — permite ao caller distinguir 404 de 403.
+    const [motorista] = await db.query(
+        `SELECT cu.usu_id FROM CARONAS c
+         INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+         WHERE c.car_id = ?`,
+        [caronaId]
+    );
+    if (motorista.length === 0) return null;   // carona não encontrada → caller deve retornar 404
+    if (motorista[0].usu_id === usuId) return true; // é o motorista → participante confirmado
+
+    // PASSO 2: Carona existe, usuário não é motorista — verifica se é passageiro confirmado
+    const [passageiro] = await db.query(
+        `SELECT 1 FROM CARONA_PESSOAS
+         WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+         UNION
+         SELECT 1 FROM SOLICITACOES_CARONA
+         WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+        [caronaId, usuId, caronaId, usuId]
+    );
+    return passageiro.length > 0; // true = passageiro confirmado | false = não participante
+}
+
+module.exports = { checkDevOrOwner, checkAdminOrOwner, getMotoristaId, isParticipanteCarona };

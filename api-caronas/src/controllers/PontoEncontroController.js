@@ -292,6 +292,139 @@ class PontoEncontroController {
             return res.status(500).json({ error: "Erro ao recuperar pontos de encontro." });
         }
     }
+
+    /**
+     * MÉTODO: atualizar
+     * Atualiza pon_nome e/ou pon_ordem de um ponto de encontro ativo.
+     * Apenas o motorista da carona vinculada pode editar seus pontos.
+     *
+     * Parâmetro: pon_id (via URL)
+     * Body: pon_nome (opcional), pon_ordem (opcional, inteiro positivo)
+     */
+    async atualizar(req, res) {
+        try {
+            // PASSO 1: Valida o ID
+            const { pon_id } = req.params;
+            if (!pon_id || isNaN(pon_id)) {
+                return res.status(400).json({ error: "ID de ponto de encontro inválido." });
+            }
+
+            const { pon_nome, pon_ordem } = req.body;
+            if (!pon_nome && pon_ordem === undefined) {
+                return res.status(400).json({ error: "Nenhum campo para atualizar fornecido (pon_nome, pon_ordem)." });
+            }
+
+            // PASSO 2: Busca o ponto e verifica existência + propriedade
+            const [pontos] = await db.query(
+                `SELECT pe.pon_id, CAST(pe.pon_status AS UNSIGNED) AS pon_status, cu.usu_id AS motorista_id
+                 FROM PONTO_ENCONTROS pe
+                 INNER JOIN CARONAS c         ON pe.car_id     = c.car_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 WHERE pe.pon_id = ?`,
+                [pon_id]
+            );
+            if (pontos.length === 0) {
+                return res.status(404).json({ error: "Ponto de encontro não encontrado." });
+            }
+            if (pontos[0].motorista_id !== req.user.id) {
+                return res.status(403).json({ error: "Apenas o motorista pode editar pontos de encontro." });
+            }
+            if (pontos[0].pon_status === 0) {
+                return res.status(409).json({ error: "Não é possível editar um ponto desativado." });
+            }
+
+            // PASSO 3: Monta campos a atualizar
+            const campos  = [];
+            const valores = [];
+
+            if (pon_nome) {
+                const nome_limpo = stripHtml(pon_nome.trim());
+                if (nome_limpo.length < 1 || nome_limpo.length > 25) {
+                    return res.status(400).json({ error: "pon_nome deve ter entre 1 e 25 caracteres." });
+                }
+                campos.push('pon_nome = ?');
+                valores.push(nome_limpo);
+            }
+            if (pon_ordem !== undefined) {
+                if (pon_ordem === null || pon_ordem === '') {
+                    campos.push('pon_ordem = ?');
+                    valores.push(null);
+                } else {
+                    const ordemNum = parseInt(pon_ordem, 10);
+                    if (isNaN(ordemNum) || ordemNum < 1) {
+                        return res.status(400).json({ error: "pon_ordem deve ser um inteiro positivo ou null." });
+                    }
+                    campos.push('pon_ordem = ?');
+                    valores.push(ordemNum);
+                }
+            }
+
+            valores.push(pon_id);
+            await db.query(
+                `UPDATE PONTO_ENCONTROS SET ${campos.join(', ')} WHERE pon_id = ?`,
+                valores
+            );
+
+            return res.status(200).json({ message: "Ponto de encontro atualizado com sucesso." });
+
+        } catch (error) {
+            console.error("[ERRO] Atualizar ponto de encontro:", error);
+            return res.status(500).json({ error: "Erro ao atualizar ponto de encontro." });
+        }
+    }
+
+    /**
+     * MÉTODO: desativar
+     * Desativa um ponto de encontro (pon_status = 0).
+     * Apenas o motorista da carona vinculada pode desativar seus próprios pontos.
+     *
+     * Tabela: PONTO_ENCONTROS (UPDATE pon_status)
+     * Parâmetro: pon_id (via URL)
+     */
+    async desativar(req, res) {
+        try {
+            // PASSO 1: Valida o ID
+            const { pon_id } = req.params;
+            if (!pon_id || isNaN(pon_id)) {
+                return res.status(400).json({ error: "ID de ponto de encontro inválido." });
+            }
+
+            // PASSO 2: Busca o ponto e verifica existência
+            // CAST(pon_status AS UNSIGNED) garante retorno numérico — BIT(1) pode vir como Buffer em mysql2
+            const [pontos] = await db.query(
+                `SELECT pe.pon_id, CAST(pe.pon_status AS UNSIGNED) AS pon_status, cu.usu_id AS motorista_id
+                 FROM PONTO_ENCONTROS pe
+                 INNER JOIN CARONAS c         ON pe.car_id      = c.car_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
+                 WHERE pe.pon_id = ?`,
+                [pon_id]
+            );
+            if (pontos.length === 0) {
+                return res.status(404).json({ error: "Ponto de encontro não encontrado." });
+            }
+
+            // PASSO 3: Apenas o motorista da carona pode desativar pontos
+            if (pontos[0].motorista_id !== req.user.id) {
+                return res.status(403).json({ error: "Apenas o motorista pode remover pontos de encontro." });
+            }
+
+            if (pontos[0].pon_status === 0) {
+                return res.status(409).json({ error: "Ponto de encontro já está desativado." });
+            }
+
+            // PASSO 4: Desativa o ponto (soft delete via status)
+            await db.query(
+                'UPDATE PONTO_ENCONTROS SET pon_status = 0 WHERE pon_id = ?',
+                [pon_id]
+            );
+
+            return res.status(204).send();
+
+        } catch (error) {
+            console.error("[ERRO] Desativar ponto de encontro:", error);
+            return res.status(500).json({ error: "Erro ao desativar ponto de encontro." });
+        }
+    }
 }
 
 module.exports = new PontoEncontroController();

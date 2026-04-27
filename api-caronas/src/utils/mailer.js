@@ -1,11 +1,19 @@
 /**
- * UTILITÁRIO DE EMAIL - Envio de OTP via SMTP
+ * UTILITÁRIO DE EMAIL - Envio de OTP, reset de senha e notificações de solicitação
  *
  * Configuração via variáveis de ambiente:
  *   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM
  *
  * Uso com Gmail: SMTP_HOST=smtp.gmail.com, SMTP_PORT=587, SMTP_SECURE=false
  *   e uma App Password (não a senha da conta).
+ *
+ * Funções exportadas:
+ *   gerarOtp()                  — gera código numérico de 6 dígitos
+ *   hashOtp(otp)                — HMAC-SHA256 do OTP com OTP_SECRET
+ *   enviarOtp(email, otp)       — notifica o usuário do código de verificação
+ *   enviarEmailReset(email, url)— link de redefinição de senha (15 min)
+ *   enviarRespostaSolicitacao(email, nome, caronaDesc, aceito)
+ *                               — notifica passageiro da resposta do motorista
  */
 
 const nodemailer = require('nodemailer');
@@ -116,4 +124,42 @@ async function enviarEmailReset(email, resetUrl) {
     });
 }
 
-module.exports = { gerarOtp, hashOtp, enviarOtp, enviarEmailReset, escapeHtml };
+/**
+ * Envia notificação ao passageiro sobre a resposta do motorista à sua solicitação.
+ * @param {string}  email      - Email do passageiro
+ * @param {string}  nome       - Nome do passageiro
+ * @param {string}  caronaDesc - Descrição/data da carona
+ * @param {boolean} aceito     - true = aceito | false = recusado
+ */
+async function enviarRespostaSolicitacao(email, nome, caronaDesc, aceito) {
+    const statusTexto = aceito ? 'ACEITA' : 'RECUSADA';
+    const cor         = aceito ? '#2e7d32' : '#c62828';
+    const icon        = aceito ? '✅' : '❌';
+    const mensagem    = aceito
+        ? 'Sua solicitação foi <strong>aceita</strong>! Você está confirmado na carona.'
+        : 'Infelizmente sua solicitação foi <strong>recusada</strong> pelo motorista.';
+
+    await transporter.sendMail({
+        from:    process.env.SMTP_FROM || `"Caronas" <${process.env.SMTP_USER}>`,
+        to:      email,
+        subject: `${icon} Solicitação de carona ${statusTexto} - Sistema de Caronas`,
+        text:    `Olá, ${nome}!\n\nSua solicitação para a carona "${caronaDesc}" foi ${statusTexto.toLowerCase()}.\n\nAcesse o aplicativo para mais detalhes.`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px;">
+                <h2 style="color: ${cor};">${icon} Solicitação ${statusTexto}</h2>
+                <p style="color: #555;">Olá, <strong>${escapeHtml(nome)}</strong>!</p>
+                <p style="color: #555;">${mensagem}</p>
+                <div style="border-left: 4px solid ${cor}; padding: 12px 16px; background: #f9f9f9;
+                            border-radius: 0 6px 6px 0; margin: 16px 0;">
+                    <strong style="color: #333;">Carona:</strong>
+                    <span style="color: #555;"> ${escapeHtml(caronaDesc)}</span>
+                </div>
+                <p style="color: #888; font-size: 13px; margin-top: 20px;">
+                    Acesse o aplicativo para ver os detalhes e entrar em contato com o motorista.
+                </p>
+            </div>
+        `
+    });
+}
+
+module.exports = { gerarOtp, hashOtp, enviarOtp, enviarEmailReset, enviarRespostaSolicitacao, escapeHtml };

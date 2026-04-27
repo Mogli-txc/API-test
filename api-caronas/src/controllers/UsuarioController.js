@@ -650,6 +650,74 @@ class UsuarioController {
     }
 
     /**
+     * MÉTODO: atualizarEndereco
+     * Atualiza o endereço do usuário e regeocodifica as coordenadas via Nominatim.
+     * Apenas o próprio usuário ou Desenvolvedor pode atualizar o endereço.
+     *
+     * Tabela: USUARIOS (UPDATE usu_endereco, usu_lat, usu_lon)
+     * Parâmetro: id (usu_id via URL)
+     * Campos obrigatórios no body: usu_endereco
+     */
+    atualizarEndereco = async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { usu_endereco } = req.body;
+
+            if (!id || isNaN(id)) {
+                return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+            if (!usu_endereco || !usu_endereco.trim()) {
+                return res.status(400).json({ error: "Campo obrigatório: usu_endereco." });
+            }
+            if (!await checkDevOrOwner(req.user.id, id)) {
+                return res.status(403).json({ error: "Sem permissão para alterar este usuário." });
+            }
+
+            const endereco_limpo = stripHtml(usu_endereco.trim());
+
+            // PASSO 1: Atualiza o endereço descritivo e zera coords até a geocodificação completar
+            await db.query(
+                'UPDATE USUARIOS SET usu_endereco = ?, usu_lat = NULL, usu_lon = NULL WHERE usu_id = ?',
+                [endereco_limpo, id]
+            );
+
+            // PASSO 2: Geocodifica o novo endereço via Nominatim (best-effort)
+            let usu_lat = null;
+            let usu_lon = null;
+            try {
+                const coords = await geocodificarEndereco(endereco_limpo);
+                if (coords) {
+                    usu_lat = coords.lat;
+                    usu_lon = coords.lon;
+                    await db.query(
+                        'UPDATE USUARIOS SET usu_lat = ?, usu_lon = ? WHERE usu_id = ?',
+                        [usu_lat, usu_lon, id]
+                    );
+                }
+            } catch (geoErr) {
+                console.warn('[GEOCODING] Falha ao regeocodificar endereço do usuário:', geoErr.message);
+            }
+
+            await db.query(
+                'UPDATE USUARIOS_REGISTROS SET usu_atualizado_em = NOW() WHERE usu_id = ?',
+                [id]
+            );
+
+            return res.status(200).json({
+                message:     "Endereço atualizado com sucesso!",
+                usu_endereco: endereco_limpo,
+                usu_lat,
+                usu_lon,
+                geocodificado: usu_lat !== null
+            });
+
+        } catch (error) {
+            console.error("[ERRO] atualizarEndereco:", error);
+            return res.status(500).json({ error: "Erro ao atualizar endereço." });
+        }
+    }
+
+    /**
      * MÉTODO: atualizarFoto
      * Recebe o upload da foto de perfil via multipart/form-data e
      * salva o nome do arquivo na coluna usu_foto de USUARIOS.
@@ -877,7 +945,8 @@ class UsuarioController {
 
             await db.query(
                 `UPDATE USUARIOS
-                 SET usu_status = 0, usu_refresh_hash = NULL, usu_refresh_expira = NULL
+                 SET usu_status = 0, usu_deletado_em = NOW(),
+                     usu_refresh_hash = NULL, usu_refresh_expira = NULL
                  WHERE usu_id = ?`,
                 [id]
             );

@@ -140,7 +140,7 @@ describe('29/03 — Usuário de teste (criado pelo globalSetup)', () => {
 
 });
 
-// Fecha o pool ao final para não travar o Jest
+// Fecha o pool ao final (workerTeardown pode já ter fechado — ignora se já estiver encerrado)
 afterAll(async () => {
-    await pool.end();
+    try { await pool.end(); } catch (_) {}
 });

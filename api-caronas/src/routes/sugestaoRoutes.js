@@ -3,10 +3,14 @@
  *
  * Endpoints:
  * - POST   /api/sugestoes/                  → Registra nova sugestão ou denúncia
- * - GET    /api/sugestoes/                  → Lista todas as sugestões/denúncias
+ * - GET    /api/sugestoes/minhas            → Lista submissões do próprio usuário autenticado
+ * - GET    /api/sugestoes/                  → Lista todas as sugestões/denúncias (Admin/Dev)
  * - GET    /api/sugestoes/:sug_id           → Detalhes de uma sugestão/denúncia
  * - PUT    /api/sugestoes/:sug_id/responder → Admin responde e fecha o registro
- * - DELETE /api/sugestoes/:sug_id           → Remove permanentemente
+ * - DELETE /api/sugestoes/:sug_id           → Remove permanentemente (Dev only)
+ *
+ * IMPORTANTE: /minhas deve ser declarado ANTES de /:sug_id para que o Express
+ * não confunda "minhas" com um valor numérico de parâmetro.
  */
 
 const express    = require('express');
@@ -18,11 +22,18 @@ const checkRole  = require('../middlewares/roleMiddleware');
 // Registra nova sugestão ou denúncia — qualquer usuário autenticado (PROTEGIDO)
 router.post('/', auth, controller.criar.bind(controller));
 
+// Lista submissões do próprio usuário — qualquer usuário autenticado
+// Deve vir ANTES de /:sug_id para não capturar "minhas" como parâmetro numérico
+router.get('/minhas', auth, controller.listarMinhas.bind(controller));
+
 // Lista sugestões/denúncias — Admin vê apenas sua escola, Dev vê tudo (ADMIN/DEV)
 router.get('/', auth, checkRole([1, 2]), controller.listar.bind(controller));
 
 // Detalhes de uma sugestão/denúncia — qualquer usuário autenticado (PROTEGIDO)
 router.get('/:sug_id', auth, controller.obterPorId.bind(controller));
+
+// Marca como "Em análise" — Admin (escopo escola) ou Dev (ADMIN/DEV)
+router.put('/:sug_id/analisar', auth, checkRole([1, 2]), controller.marcarEmAnalise.bind(controller));
 
 // Responde e fecha o registro — Admin (escopo escola) ou Dev (ADMIN/DEV)
 router.put('/:sug_id/responder', auth, checkRole([1, 2]), controller.responder.bind(controller));

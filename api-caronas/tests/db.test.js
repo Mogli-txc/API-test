@@ -173,7 +173,7 @@ describe('SELECT com JOIN — consultas reais da API', () => {
 
 // ========== FECHAMENTO ==========
 
-// Fecha o pool após todos os testes para o Jest não ficar travado aguardando conexões abertas
+// Fecha o pool após todos os testes (workerTeardown pode já ter fechado — ignora se já estiver encerrado)
 afterAll(async () => {
-    await pool.end();
+    try { await pool.end(); } catch (_) {}
 });

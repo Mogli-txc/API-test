@@ -27,6 +27,7 @@ const { Server: SocketIOServer } = require('socket.io');
 require('dotenv').config(); // Carrega variáveis de ambiente do arquivo .env
 
 const { registrarMensagensSocket } = require('./sockets/mensagensSocket');
+const db = require('./config/database'); // Pool MySQL — usado no health check
 
 // Importação das rotas
 const usuarioRoutes      = require('./routes/usuarioRoutes');
@@ -137,6 +138,7 @@ app.use('/api/usuarios/verificar-email', authLimiter);
 app.use('/api/usuarios/reenviar-otp', authLimiter);
 app.use('/api/usuarios/forgot-password', authLimiter);
 app.use('/api/usuarios/reset-password', authLimiter);
+app.use('/api/usuarios/refresh', authLimiter);
 
 /**
  * Middleware 2c: Rate Limiting para endpoints de escrita autenticados
@@ -201,6 +203,28 @@ if (process.env.LOG_REQUESTS === 'true') {
         next();
     });
 }
+
+// ========== HEALTH CHECK ==========
+
+/**
+ * GET /health — Verificação de saúde do servidor
+ * Verifica uptime, ambiente e conectividade com o banco de dados.
+ * Retorna 200 (ok) ou 503 (banco inacessível). Não exige autenticação.
+ * Usado por load balancers, Docker healthcheck e monitoramento externo.
+ */
+app.get('/health', async (_req, res) => {
+    const base = {
+        uptime: Math.floor(process.uptime()),
+        env:    process.env.NODE_ENV || 'development',
+        ts:     new Date().toISOString()
+    };
+    try {
+        await db.query('SELECT 1');
+        return res.status(200).json({ status: 'ok', db: 'ok', ...base });
+    } catch {
+        return res.status(503).json({ status: 'error', db: 'unreachable', ...base });
+    }
+});
 
 // ========== ROTEAMENTO ==========
 

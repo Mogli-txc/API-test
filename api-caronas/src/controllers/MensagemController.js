@@ -9,7 +9,8 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
-const { stripHtml } = require('../utils/sanitize');
+const { stripHtml }            = require('../utils/sanitize');
+const { isParticipanteCarona } = require('../utils/authHelper');
 
 class MensagemController {
 
@@ -62,47 +63,22 @@ class MensagemController {
                 return res.status(400).json({ error: "Não é possível enviar mensagem para si mesmo." });
             }
 
-            // PASSO 6: Verifica se o remetente é participante da carona (motorista ou passageiro aceito)
+            // PASSO 6: Verifica se a carona existe e se o remetente é participante
             const [infoCarona] = await db.query(
-                `SELECT cu.usu_id AS motorista_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE c.car_id = ?`,
+                'SELECT car_id FROM CARONAS WHERE car_id = ?',
                 [car_id]
             );
             if (infoCarona.length === 0) {
                 return res.status(404).json({ error: "Carona não encontrada." });
             }
-            const motoristaId = infoCarona[0].motorista_id;
-            const ehRemetenteMotorista = motoristaId === usu_id_remetente;
-            const ehDestinatarioMotorista = motoristaId === parseInt(usu_id_destinatario);
 
-            if (!ehRemetenteMotorista) {
-                const [remPassageiro] = await db.query(
-                    `SELECT 1 FROM CARONA_PESSOAS
-                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
-                     UNION
-                     SELECT 1 FROM SOLICITACOES_CARONA
-                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
-                    [car_id, usu_id_remetente, car_id, usu_id_remetente]
-                );
-                if (remPassageiro.length === 0) {
-                    return res.status(403).json({ error: "Você não é participante desta carona." });
-                }
+            if (!await isParticipanteCarona(car_id, usu_id_remetente)) {
+                return res.status(403).json({ error: "Você não é participante desta carona." });
             }
 
             // PASSO 7: Verifica se o destinatário também é participante da mesma carona
-            if (!ehDestinatarioMotorista) {
-                const [destPassageiro] = await db.query(
-                    `SELECT 1 FROM CARONA_PESSOAS
-                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
-                     UNION
-                     SELECT 1 FROM SOLICITACOES_CARONA
-                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
-                    [car_id, usu_id_destinatario, car_id, usu_id_destinatario]
-                );
-                if (destPassageiro.length === 0) {
-                    return res.status(403).json({ error: "O destinatário não é participante desta carona." });
-                }
+            if (!await isParticipanteCarona(car_id, parseInt(usu_id_destinatario))) {
+                return res.status(403).json({ error: "O destinatário não é participante desta carona." });
             }
 
             // PASSO 8: Inserção da mensagem no banco (usa o texto já trimado)
@@ -146,33 +122,17 @@ class MensagemController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 3: Verifica se o usuário autenticado é participante desta carona
-            // (motorista ou passageiro confirmado), para não expor conversas de outros
-            const [participante] = await db.query(
-                `SELECT cu.usu_id AS motorista_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE c.car_id = ?`,
+            // PASSO 3: Verifica se a carona existe e se o usuário autenticado é participante
+            const [infoCaronaConversa] = await db.query(
+                'SELECT car_id FROM CARONAS WHERE car_id = ?',
                 [car_id]
             );
-            if (participante.length === 0) {
+            if (infoCaronaConversa.length === 0) {
                 return res.status(404).json({ error: "Carona não encontrada." });
             }
-            const ehMotorista = participante[0].motorista_id === req.user.id;
-            if (!ehMotorista) {
-                // Permite acesso se:
-                // - está em CARONA_PESSOAS (confirmado pelo motorista), OU
-                // - tem solicitação aceita (sol_status=2) — já é passageiro, mas pode ainda não ter sido adicionado em CARONA_PESSOAS
-                const [passageiro] = await db.query(
-                    `SELECT 1 FROM CARONA_PESSOAS
-                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
-                     UNION
-                     SELECT 1 FROM SOLICITACOES_CARONA
-                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
-                    [car_id, req.user.id, car_id, req.user.id]
-                );
-                if (passageiro.length === 0) {
-                    return res.status(403).json({ error: "Sem permissão para visualizar esta conversa." });
-                }
+
+            if (!await isParticipanteCarona(car_id, req.user.id)) {
+                return res.status(403).json({ error: "Sem permissão para visualizar esta conversa." });
             }
 
             // PASSO 4: Parâmetros de paginação
@@ -220,6 +180,53 @@ class MensagemController {
         } catch (error) {
             console.error("[ERRO] Listar conversa:", error);
             return res.status(500).json({ error: "Erro ao recuperar conversa." });
+        }
+    }
+
+    /**
+     * MÉTODO: marcarLida
+     * Marca uma mensagem como lida (men_status = 3) pelo destinatário.
+     * Apenas o destinatário pode marcar como lida — o remetente já sabe que enviou.
+     *
+     * Tabela: MENSAGENS (UPDATE men_status)
+     * Parâmetro: men_id (via URL)
+     */
+    async marcarLida(req, res) {
+        try {
+            // PASSO 1: Valida o ID
+            const { men_id } = req.params;
+            if (!men_id || isNaN(men_id)) {
+                return res.status(400).json({ error: "ID de mensagem inválido." });
+            }
+
+            // PASSO 2: Verifica se a mensagem existe e se o usuário é o destinatário
+            const [mensagem] = await db.query(
+                `SELECT men_id, men_status
+                 FROM MENSAGENS
+                 WHERE men_id = ? AND usu_id_destinatario = ? AND men_deletado_em IS NULL`,
+                [men_id, req.user.id]
+            );
+            if (mensagem.length === 0) {
+                return res.status(404).json({ error: "Mensagem não encontrada ou sem permissão." });
+            }
+            if (mensagem[0].men_status === 3) {
+                return res.status(409).json({ error: "Mensagem já está marcada como lida." });
+            }
+
+            // PASSO 3: Atualiza para men_status = 3 (Lida)
+            await db.query(
+                'UPDATE MENSAGENS SET men_status = 3 WHERE men_id = ?',
+                [men_id]
+            );
+
+            return res.status(200).json({
+                message:  "Mensagem marcada como lida.",
+                mensagem: { men_id: parseInt(men_id), men_status: 3 }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] Marcar mensagem como lida:", error);
+            return res.status(500).json({ error: "Erro ao marcar mensagem como lida." });
         }
     }
 

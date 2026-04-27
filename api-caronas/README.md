@@ -22,7 +22,7 @@ API REST para sistema de compartilhamento de caronas entre alunos de instituiç�
 | pdf-to-img          | Renderização de página PDF como PNG para o Tesseract         |
 | socket.io           | WebSocket para mensagens em tempo real                       |
 | nodemailer          | Envio de email (OTP, reset de senha)                         |
-| jest + supertest    | Testes (266 + 34 testes de geocodificação)                   |
+| jest + supertest    | Testes (413 testes, 14 suites)                               |
 | fetch (Node nativo) | Requisições HTTP ao Nominatim (geocodificação OpenStreetMap) |
 
 ---
@@ -84,6 +84,8 @@ Servidor disponível em `http://localhost:3000`.
 cd api-caronas
 NODE_ENV=test npx jest --forceExit
 ```
+
+> **413 testes** em 14 suites (após Auditoria 5 — 2026-04-27).
 
 ---
 
@@ -200,6 +202,15 @@ Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no
 | `entrou_carona`           | `{ car_id }`                                                                            | Confirmação de entrada na sala    |
 | `erro`                    | `{ message }`                                                                           | Erro de validação ou permissão    |
 
+### Documentos de Verificação — `/api/documentos`
+
+| Método | Rota              | Auth      | Descrição                                                          |
+|--------|-------------------|-----------|--------------------------------------------------------------------|
+| POST   | `/comprovante`    | JWT       | Envia comprovante de matrícula (PDF, OCR automático) — 5→1 ou 6→2 |
+| POST   | `/cnh`            | JWT       | Envia CNH (PDF, OCR automático) — 1→2 se tiver veículo ativo      |
+| GET    | `/historico`      | JWT       | Histórico de documentos enviados pelo próprio usuário              |
+| GET    | `/admin`          | ADMIN/DEV | Lista todos os documentos para revisão manual (`?doc_tipo=`, `?doc_status=`) |
+
 ### Veículos — `/api/veiculos`
 
 | Método | Rota               | Auth | Descrição                                                      |
@@ -216,16 +227,21 @@ Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no
 | GET    | `/geocode`        | JWT  | Autocomplete de endereços via Nominatim (`?q=<texto>&limite=<n>`)         |
 | POST   | `/`               | JWT  | Cadastra ponto de encontro (`pon_endereco_geom` opcional — geocodificado) |
 | GET    | `/carona/:car_id` | JWT  | Lista pontos de encontro de uma carona (inclui `pon_lat` e `pon_lon`)    |
+| DELETE | `/:pon_id`        | JWT  | Desativa ponto de encontro (`pon_status = 0`) — apenas o motorista        |
 
 ### Sugestões e Denúncias — `/api/sugestoes`
 
-| Método | Rota                 | Auth      | Descrição                                          |
-|--------|----------------------|-----------|----------------------------------------------------|
-| POST   | `/`                  | JWT       | Registra sugestão ou denúncia                      |
-| GET    | `/`                  | ADMIN/DEV | Lista registros (Admin: só escola; Dev: todos)     |
-| GET    | `/:sug_id`           | JWT       | Detalhes de um registro                            |
-| PUT    | `/:sug_id/responder` | ADMIN/DEV | Admin responde e fecha o registro                  |
-| DELETE | `/:sug_id`           | DEV       | Remove permanentemente (apenas Desenvolvedor)      |
+| Método | Rota                  | Auth      | Descrição                                                              |
+|--------|-----------------------|-----------|--------------------------------------------------------------------|
+| POST   | `/`                   | JWT       | Registra sugestão ou denúncia                                          |
+| GET    | `/minhas`             | JWT       | Lista submissões do próprio usuário (`?tipo=0/1`, `?page=`, `?limit=`) |
+| GET    | `/`                   | ADMIN/DEV | Lista todos os registros (Admin: só escola; Dev: todos)                |
+| GET    | `/:sug_id`            | JWT       | Detalhes de um registro                                                |
+| PUT    | `/:sug_id/analisar`   | ADMIN/DEV | Muda status para **Em análise** (`sug_status = 3`)                     |
+| PUT    | `/:sug_id/responder`  | ADMIN/DEV | Admin responde e fecha o registro (`sug_status = 0`)                   |
+| DELETE | `/:sug_id`            | DEV       | Remove permanentemente (apenas Desenvolvedor)                          |
+
+**Fluxo de status:** `1=Aberto` → `3=Em análise` → `0=Fechado`.
 
 ### Matrículas — `/api/matriculas`
 
@@ -238,22 +254,44 @@ Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no
 
 ### Infraestrutura — `/api/infra`
 
-Rota **pública** (sem autenticação). Expõe escolas e cursos disponíveis no sistema.
+Rota **pública** (sem autenticação). Expõe escolas e cursos disponíveis — necessário na tela de cadastro, antes de o usuário ter token.
+
+| Método | Rota                        | Auth | Descrição                                                                          |
+|--------|-----------------------------|------|------------------------------------------------------------------------------------|
+| GET    | `/escolas`                  | —    | Lista escolas com paginação (`?page=`, `?limit=`, `?q=`). Expõe `esc_lat`/`esc_lon` |
+| GET    | `/escolas/:esc_id/cursos`   | —    | Lista cursos de uma escola específica                                              |
+
+### Saúde do servidor
+
+| Método | Rota      | Auth | Descrição                                                                       |
+|--------|-----------|------|---------------------------------------------------------------------------------|
+| GET    | `/health` | —    | Retorna `{ status, db, uptime, env, ts }` — verifica conectividade com o banco  |
+
+Resposta `200` quando banco está acessível (`db: 'ok'`). Resposta `503` quando banco está inacessível (`db: 'unreachable'`). Usado por load balancers e Docker healthcheck.
 
 ### Admin — `/api/admin`
 
 Exige JWT + papel Admin (1) ou Desenvolvedor (2).
 
-| Método   | Rota                                    | Descrição                                                        |
-|----------|-----------------------------------------|------------------------------------------------------------------|
-| GET      | `/stats/usuarios`                       | Totais de usuários por status e verificação (inclui suspensos)   |
-| GET      | `/stats/caronas`                        | Totais de caronas por status                                     |
-| GET      | `/stats/sugestoes`                      | Totais de sugestões/denúncias por tipo e status                  |
-| GET      | `/stats/sistema`                        | Resumo consolidado de todos os módulos (Dev apenas)              |
-| GET      | `/usuarios`                             | Lista usuários (Admin: escola; Dev: todos, `?esc_id=` opcional)  |
-| GET      | `/usuarios/:usu_id/penalidades`         | Histórico de penalidades de um usuário (`?ativas=1` = vigentes)  |
-| POST     | `/usuarios/:usu_id/penalidades`         | Aplica penalidade a um usuário                                   |
-| DELETE   | `/penalidades/:pen_id`                  | Remove/desativa uma penalidade                                   |
+| Método | Rota                                    | Descrição                                                                |
+|--------|-----------------------------------------|--------------------------------------------------------------------------|
+| GET    | `/stats/usuarios`                       | Totais de usuários por status e verificação (inclui suspensos)           |
+| GET    | `/stats/caronas`                        | Totais de caronas por status                                             |
+| GET    | `/stats/sugestoes`                      | Totais de sugestões/denúncias por tipo e status                          |
+| GET    | `/stats/sistema`                        | Resumo consolidado de todos os módulos (Dev apenas)                      |
+| GET    | `/usuarios`                             | Lista usuários com busca (`?q=`) e cursor (`?cursor=`, `?esc_id=` opcional) |
+| GET    | `/usuarios/:usu_id`                     | Dados completos de um usuário (Admin: só escola; Dev: qualquer)          |
+| PUT    | `/usuarios/:usu_id/perfil`              | Atualiza papel e escola do usuário (Dev only) — promoção a Admin         |
+| GET    | `/usuarios/:usu_id/penalidades`         | Histórico de penalidades de um usuário (`?ativas=1` = vigentes)          |
+| POST   | `/usuarios/:usu_id/penalidades`         | Aplica penalidade a um usuário                                           |
+| DELETE | `/penalidades/:pen_id`                  | Remove/desativa uma penalidade                                           |
+| GET    | `/logs`                                 | Leitura do AUDIT_LOG com filtros (Dev only — `?acao=`, `?tabela=`, `?usu_id=`) |
+| POST   | `/escolas`                              | Cria nova escola (Dev only)                                                     |
+| PUT    | `/escolas/:esc_id`                      | Atualiza dados de uma escola (Dev only)                                         |
+| DELETE | `/escolas/:esc_id`                      | Remove escola sem cursos (Dev only)                                             |
+| POST   | `/escolas/:esc_id/cursos`               | Cria curso em uma escola (Dev only)                                             |
+| PUT    | `/cursos/:cur_id`                       | Atualiza dados de um curso (Dev only)                                           |
+| DELETE | `/cursos/:cur_id`                       | Remove curso sem matrículas (Dev only)                                          |
 
 **Tipos de penalidade (`pen_tipo`):**
 
@@ -327,7 +365,7 @@ ALLOWED_ORIGINS=http://localhost:5173  # URL do frontend (Vite)
 
 | Endpoint | Limite | Código retornado |
 |----------|--------|-----------------|
-| Login, cadastro, OTP, reset senha | 10 req / 15 min por IP | `429` |
+| Login, cadastro, OTP, reset senha, **refresh** | 10 req / 15 min por IP | `429` |
 | Oferecer carona, solicitar, enviar mensagem | 30 req / min por IP | `429` |
 | Autocomplete de endereços (`/pontos/geocode`) | 20 req / min por IP | `429` |
 | Todos os outros | 100 req / 15 min por IP | `429` |
@@ -372,7 +410,8 @@ socket.on('erro', ({ message }) => { /* exibe alerta */ });
 - **Senhas** — bcrypt
 - **OTP** — HMAC-SHA256 com expiração e bloqueio por excesso de tentativas
 - **Refresh token** — hash HMAC-SHA256 armazenado no banco, rotacionado a cada uso
-- **Soft-delete** — dados nunca apagados fisicamente em USUARIOS, CARONAS e MENSAGENS
+- **Soft-delete** — dados nunca apagados fisicamente; timestamps `usu_deletado_em`, `car_deletado_em`, `vei_apagado_em` preenchidos automaticamente
+- **Audit log** — todas as ações sensíveis registradas em `AUDIT_LOG` (incluindo penalidades). Consultável via `GET /api/admin/logs` (Dev only)
 
 ---
 
@@ -530,8 +569,10 @@ Níveis de `usu_verificacao`:
 
 Gerencia o envio de comprovante de matrícula e CNH com **validação e promoção automáticas**:
 
-- **`enviarComprovante`** — aceita upload do comprovante (campo `comprovante`, PDF, via `uploadDocument`). O middleware `ocrValidator('comprovante')` extrai o texto e avalia critérios antes de chegar aqui. Se aprovado, promove: `5 → 1` ou `6 → 2` (+6 meses), em transação atômica. Se reprovado, salva o documento com `doc_status = 2` para auditoria e retorna 422 com `detalhes` dos critérios identificados. Rejeita com 409 se o usuário já estiver nos níveis 1 ou 2.
-- **`enviarCNH`** — aceita upload da CNH (campo `cnh`, PDF). Após validação OCR, se o usuário estiver no nível 1 e tiver veículo ativo, promove para `2` (+6 meses). Se não tiver veículo, armazena a CNH e mantém nível 1.
+- **`enviarComprovante`** — aceita upload do comprovante (campo `comprovante`, PDF, via `uploadDocument`). O middleware `ocrValidator('comprovante')` extrai o texto e avalia critérios antes de chegar aqui. Se aprovado, promove: `5 → 1` ou `6 → 2` (+6 meses), em transação atômica. Registra `COMPROVANTE_APROVADO` no AUDIT_LOG. Se reprovado, salva o documento com `doc_status = 2` para auditoria e retorna 422 com `detalhes` dos critérios identificados. Rejeita com 409 se o usuário já estiver nos níveis 1 ou 2.
+- **`enviarCNH`** — aceita upload da CNH (campo `cnh`, PDF). Após validação OCR, se o usuário estiver no nível 1 e tiver veículo ativo, promove para `2` (+6 meses). Registra `CNH_APROVADA` no AUDIT_LOG. Se não tiver veículo, armazena a CNH e mantém nível 1.
+- **`listarHistorico`** — `GET /api/documentos/historico` — retorna o histórico paginado de documentos enviados pelo próprio usuário. Mostra `doc_status` (0=aprovado, 2=reprovado) de cada envio.
+- **`listarAdmin`** — `GET /api/documentos/admin` — restrito a Admin/Dev. Lista todos os documentos do sistema com JOIN em `USUARIOS`. Aceita `?doc_tipo=` (0=comprovante, 1=CNH) e `?doc_status=` (0=aprovado, 2=reprovado) como filtros.
 
 A resposta de sucesso inclui o resultado do OCR: `ocr.confianca`, `ocr.criteriosAtingidos`, `ocr.criteriosTotal` e `ocr.origem` (`'texto-nativo'` ou `'ocr-tesseract'`). Ambos os métodos limpam o arquivo do disco em caso de erro antes de retornar a resposta.
 
@@ -541,8 +582,8 @@ A resposta de sucesso inclui o resultado do OCR: `ocr.confianca`, `ocr.criterios
   - **Placa** (`vei_placa`): obrigatória, formato antigo `ABC-1234` ou Mercosul `ABC1D23` (validado por `PLACA_REGEX`). Placa única no sistema — banco rejeita duplicata com `ER_DUP_ENTRY` → 409.
   - **Tipo** (`vei_tipo`): `0` = Moto | `1` = Carro.
   - **Vagas** (`vei_vagas`): Moto aceita exatamente 1 passageiro; Carro aceita 1–4 vagas.
-  - Após o INSERT, promove automaticamente `usu_verificacao 5 → 6` para usuários temporários (mantém o `usu_verificacao_expira` original).
-- **`desativarVeiculo`** — seta `vei_status = 0`. Bloqueia se houver carona ativa (`car_status IN (1,2)`) vinculada ao veículo. Após desativar, se não restam veículos ativos, rebaixa `usu_verificacao` via `CASE`: `2→1` e `6→5`.
+  - Após o INSERT, promove automaticamente `usu_verificacao 5 → 6` para usuários temporários (mantém o `usu_verificacao_expira` original). Registra `VEICULO_CADASTRAR` no AUDIT_LOG.
+- **`desativarVeiculo`** — seta `vei_status = 0`. Bloqueia se houver carona ativa (`car_status IN (1,2)`) vinculada ao veículo. Após desativar, se não restam veículos ativos, rebaixa `usu_verificacao` via `CASE`: `2→1` e `6→5`. Registra `VEICULO_DESATIVAR` no AUDIT_LOG.
 - **`listarPorUsuario`** — lista veículos ativos (`vei_status = 1`) do usuário. Retorna `totalGeral` e paginação.
 
 #### `CaronaController.js`
@@ -569,7 +610,7 @@ Controla o fluxo de pedidos de vaga:
   4. Passageiro não pode estar vinculado a outra carona ativa (`sol_status = 2` + `car_status IN (1, 2)`).
   5. Não pode solicitar a mesma carona duas vezes (UNIQUE KEY no banco).
   6. **Restrição por tipo de veículo** (via JOIN com `VEICULOS`): moto (`vei_tipo = 0`) permite no máximo 1 passageiro; carro não pode exceder as vagas disponíveis (`car_vagas_dispo`). O campo `vei_tipo` é comparado com `Number()` para tratar corretamente o retorno BIT(1) do MySQL.
-- **`responderSolicitacao`** — motorista aceita (`sol_status = 2`) ou recusa (`sol_status = 3`) em **transação atômica** com `SELECT ... FOR UPDATE`. A verificação de vínculo do passageiro é feita dentro da transação (elimina race condition de dois motoristas aceitarem o mesmo passageiro simultaneamente). Registra audit log.
+- **`responderSolicitacao`** — motorista aceita (`sol_status = 2`) ou recusa (`sol_status = 3`) em **transação atômica** com `SELECT ... FOR UPDATE`. A verificação de vínculo do passageiro é feita dentro da transação (elimina race condition de dois motoristas aceitarem o mesmo passageiro simultaneamente). Registra `SOL_ACEITAR` ou `SOL_RECUSAR` no AUDIT_LOG após o commit — rastreabilidade da ação mais crítica do sistema.
 - **`cancelarSolicitacao`** — passageiro cancela solicitação própria. Retorna `409` se a solicitação já estava cancelada (`sol_status = 0`). Se estava aceita (`sol_status = 2`), devolve a vaga à carona em transação atômica.
 - **`deletarSolicitacao`** — soft delete pelo motorista. Devolve vaga se a solicitação estava aceita.
 
@@ -599,7 +640,7 @@ Avaliações mútuas pós-carona:
 
 Gerencia a lista `CARONA_PESSOAS` de passageiros confirmados:
 
-- **`adicionar`** — apenas o motorista pode confirmar passageiros; a carona deve estar `car_status IN (1, 2)`. Verifica vínculo ativo do passageiro em outra carona antes de inserir. Executa em **transação atômica** com `SELECT car_vagas_dispo FOR UPDATE` para prevenir overbooking concorrente; decrementa `car_vagas_dispo` no mesmo commit.
+- **`adicionar`** — apenas o motorista pode confirmar passageiros; a carona deve estar `car_status IN (1, 2)`. Valida `usu_verificacao` do passageiro (bloqueia `0`=não verificado e `9`=suspenso com 403). Verifica vínculo ativo do passageiro em outra carona antes de inserir. Executa em **transação atômica** com `SELECT car_vagas_dispo FOR UPDATE` para prevenir overbooking concorrente; decrementa `car_vagas_dispo` no mesmo commit.
 - **`listarPorCarona`** — lista passageiros com JOIN para trazer o nome. Retorna `totalGeral` (contagem total independente da paginação).
 - **`atualizarStatus`** — motorista altera o status de um passageiro (`0`=Cancelado, `1`=Aceito, `2`=Negado) em transação. Ajusta `car_vagas_dispo` automaticamente: `1→0` ou `1→2` devolve a vaga; `0→1` ou `2→1` consome uma vaga (com verificação de disponibilidade via `FOR UPDATE`).
 - **`remover`** — apenas Admin ou Desenvolvedor. Devolve a vaga se o passageiro estava aceito (`car_pes_status = 1`). Executa em transação atômica.
@@ -695,7 +736,7 @@ Handler Socket.io para chat em tempo real por carona. Estrutura de salas: cada c
 
 Registra ações sensíveis na tabela `AUDIT_LOG` com campos `tabela`, `registro_id`, `acao`, `dados_anteriores` (JSON), `dados_novos` (JSON), `usu_id` e `ip`. A função `registrarAudit` **nunca lança exceção** — uma falha de escrita no log é tratada silenciosamente com `console.warn` para não interromper a operação principal.
 
-Ações registradas: `LOGIN`, `LOGIN_FALHA`, `CADASTRO`, `OTP_FALHA`, `OTP_BLOQUEIO`, `SENHA_RESET`, `DELETAR_USU`, `CARONA_CRIAR`, `CARONA_CANCEL`, `SOL_ACEITAR`, `SOL_RECUSAR`.
+Ações registradas: `LOGIN`, `LOGIN_FALHA`, `CADASTRO`, `OTP_FALHA`, `OTP_BLOQUEIO`, `SENHA_RESET`, `DELETAR_USU`, `CARONA_CRIAR`, `CARONA_CANCEL`, `SOL_ACEITAR`, `SOL_RECUSAR`, `VEICULO_CADASTRAR`, `VEICULO_DESATIVAR`, `COMPROVANTE_APROVADO`, `CNH_APROVADA`, `PENALIDADE_APLICAR`, `PENALIDADE_SUSPENSAO`, `PENALIDADE_REMOVER`, `PERFIL_ATUALIZAR`, `ESCOLA_CRIAR`, `ESCOLA_ATUALIZAR`, `ESCOLA_DELETAR`, `CURSO_CRIAR`, `CURSO_ATUALIZAR`, `CURSO_DELETAR`.
 
 #### `authHelper.js`
 
@@ -810,6 +851,8 @@ Suite de testes automatizados com Jest + Supertest. Cada suite cria seus própri
 | `simulacao.test.js` | Fluxo completo de ponta a ponta: cadastro → OTP → matrícula → oferecer carona → solicitar → aceitar → avaliar |
 | `cobertura_avancada.test.js` | Casos de borda: validações de campos, respostas de erro, paginação cursor |
 | `cobertura_complementar.test.js` | Cobertura complementar de rotas de menor acesso: admin stats, passageiros, sugestões |
+| `auditoria4.test.js` | BIT(1) bugs, GET veículo, PUT ponto, PATCH ler, GET passageiro, PUT endereço, admin escolas/cursos |
+| `auditoria5.test.js` | Audit log (A1–A4), passageiro suspenso bloqueado (A5), GET /documentos/historico, GET /documentos/admin, infra paginação, caronas/minhas?status= |
 | `test2903.test.js` | Testes adicionais pontuais |
 | `db.test.js` | Verificação de conectividade com o banco de dados |
 
@@ -1013,9 +1056,7 @@ Nenhuma outra alteração é necessária.
 
 ## Auditoria de Código
 
-Auditoria completa realizada em **2026-04-25**. Abaixo o resumo dos apontamentos encontrados e correções aplicadas.
-
-### Problemas corrigidos
+### Auditoria 1 — **2026-04-25**
 
 | Arquivo | Categoria | Descrição |
 |---|---|---|
@@ -1030,6 +1071,84 @@ Auditoria completa realizada em **2026-04-25**. Abaixo o resumo dos apontamentos
 | `src/controllers/MensagemController.js` | Nomenclatura | `ehRemMetorista` e `ehDestMotorista` — abreviações ambíguas. Renomeados para `ehRemetenteMotorista` e `ehDestinatarioMotorista`. |
 | `README.md` + `documentacao.md` | Documentação faltante | Endpoint `GET /api/admin/usuarios` existia no código e nas rotas mas não estava documentado. Adicionado. |
 
+### Auditoria 3 — **2026-04-26 (sessão 2)**
+
+| Arquivo | Categoria | Descrição |
+|---|---|---|
+| `src/controllers/AdminController.js` | Documentação | Docblock da classe listava apenas 7 rotas; atualizado com todas as 18 rotas atuais. |
+| `src/utils/authHelper.js` | Helper novo | `checkAdminOrOwner()` criado para padrão `per_tipo >= 1` (Admin + Dev). Evita duplicação do padrão. |
+| `src/utils/authHelper.js` | Semântica | `isParticipanteCarona()` agora retorna `null` (carona inexistente) além de `true`/`false`. Permite distinguir 404 de 403. |
+| `src/controllers/AvaliacaoController.js` | Correção 404 | `listarPorCarona()` atualizado para retornar 404 quando carona não existe, em vez de 403. |
+| `src/server.js` | Melhoria | `GET /health` agora faz `SELECT 1` no pool MySQL; retorna `{ db: 'ok' }` ou 503 `{ db: 'unreachable' }`. |
+| `src/controllers/SugestaoDenunciaController.js` | Feature | Método `marcarEmAnalise()` implementado — muda `sug_status = 3`. |
+| `src/routes/sugestaoRoutes.js` | Feature | Rota `PUT /:sug_id/analisar` adicionada para Admin/Dev. |
+| `src/controllers/AdminController.js` | Feature | `listarUsuarios()` estendido com busca `?q=` (nome/email) e paginação cursor `?cursor=`. |
+| `src/utils/mailer.js` | Feature | `enviarRespostaSolicitacao()` adicionado — template HTML para notificar passageiro. |
+| `src/utils/emailQueue.js` | Feature | Novo tipo `solicitacao_resposta` no dispatcher da fila de emails. |
+| `src/controllers/SolicitacaoController.js` | Feature | `responderSolicitacao()` enfileira email ao passageiro após aceitar/recusar. |
+| `src/controllers/AdminController.js` | Feature | CRUD completo de Escolas: `criarEscola`, `atualizarEscola`, `deletarEscola`. |
+| `src/controllers/AdminController.js` | Feature | CRUD completo de Cursos: `criarCurso`, `atualizarCurso`, `deletarCurso`. |
+| `src/routes/adminRoutes.js` | Feature | 6 novas rotas CRUD para Escolas e Cursos (Dev only). |
+| `tests/novos_endpoints.test.js` | Testes | 36 novos testes cobrindo todos os endpoints adicionados. |
+
+### Auditoria 2 — **2026-04-26**
+
+| Arquivo | Categoria | Descrição |
+|---|---|---|
+| `src/controllers/UsuarioController.js` | Soft delete incompleto | `deletar()` não preenchia `usu_deletado_em`. Corrigido: `SET usu_deletado_em = NOW()`. |
+| `src/controllers/CaronaController.js` | Soft delete incompleto | `deletar()` não preenchia `car_deletado_em`. Corrigido: `SET car_deletado_em = NOW()`. |
+| `src/controllers/VeiculoController.js` | Soft delete incompleto | `desativarVeiculo()` não preenchia `vei_apagado_em`. Corrigido. |
+| `src/controllers/AdminController.js` | Auditoria ausente | `aplicarPenalidade()` e `removerPenalidade()` não chamavam `registrarAudit()`. Corrigido. |
+| `src/controllers/AdminController.js` | Importação faltante | `registrarAudit` não era importado. Adicionado. |
+| `src/server.js` | Segurança | `POST /api/usuarios/refresh` sem rate limiter específico. Adicionado ao `authLimiter`. |
+| `src/utils/authHelper.js` | DRY | Verificação "é participante da carona?" duplicada 4× em dois controllers. Extraída como `isParticipanteCarona()`. |
+| `src/controllers/AvaliacaoController.js` | Refatoração | Substituídas 2 verificações inline de participante por `isParticipanteCarona()`. |
+| `src/controllers/MensagemController.js` | Refatoração | Substituídas 2 verificações inline de participante por `isParticipanteCarona()`. |
+| `src/controllers/SugestaoDenunciaController.js` | Inconsistência | `obterPorId()` verificava permissão com query manual ao PERFIL em vez de usar `checkDevOrOwner`. Corrigido. |
+| `src/routes/infraRoutes.js` | Padrão MVC | Lógica SQL embutida diretamente no arquivo de rotas. Extraída para `InfraController.js`. |
+
+### Novos endpoints adicionados — 2026-04-26
+
+| Endpoint | Controller | Descrição |
+|---|---|---|
+| `DELETE /api/pontos/:pon_id` | `PontoEncontroController.desativar` | Desativa ponto de encontro — único módulo sem rota de remoção |
+| `GET /api/sugestoes/minhas` | `SugestaoDenunciaController.listarMinhas` | Usuário lista suas próprias submissões |
+| `GET /api/admin/usuarios/:usu_id` | `AdminController.obterUsuario` | Detalhes completos de usuário individual |
+| `PUT /api/admin/usuarios/:usu_id/perfil` | `AdminController.atualizarPerfil` | Promoção a Admin / atribuição de escola (Dev only) |
+| `GET /api/admin/logs` | `AdminController.listarLogs` | Leitura do AUDIT_LOG com filtros (Dev only) |
+| `GET /health` | inline em `server.js` | Health check para monitoramento/deploy |
+
+### Auditoria 5 — **2026-04-27**
+
+#### Correções importantes
+
+| Arquivo | Categoria | Descrição |
+|---|---|---|
+| `src/controllers/AdminController.js` | Bug de rastreabilidade | `registrarAudit()` era chamado com `dadosNovos`/`dadosAnteriores` em vez de `novo`/`anterior` (parâmetros da assinatura). `dados_novos` ficava sempre `NULL` no AUDIT_LOG para penalidades e perfil. Corrigido em 3 pontos: `aplicarPenalidade`, `removerPenalidade` e `atualizarPerfil`. |
+| `src/controllers/SolicitacaoController.js` | Auditoria ausente | `responderSolicitacao()` não registrava audit log. Ação mais crítica do sistema (aceitar/recusar carona). Adicionado `registrarAudit('SOL_ACEITAR'/'SOL_RECUSAR')` após o commit, com `.catch()` para não bloquear o fluxo. |
+| `src/controllers/VeiculoController.js` | Auditoria ausente | Nenhuma operação de veículo era rastreada. Adicionado `registrarAudit('VEICULO_CADASTRAR')` em `cadastrarVeiculo()` e `registrarAudit('VEICULO_DESATIVAR')` em `desativarVeiculo()`. |
+| `src/controllers/DocumentoController.js` | Auditoria ausente | Promoção de nível por comprovante e CNH não gerava rastro. Adicionado `registrarAudit('COMPROVANTE_APROVADO')` e `registrarAudit('CNH_APROVADA')` após commits bem-sucedidos. |
+| `src/controllers/CaronaPessoasController.js` | Segurança | `adicionar()` não verificava `usu_verificacao` do passageiro. Motorista podia adicionar usuários suspensos (nível 9) ou não verificados (nível 0). Adicionada verificação entre `checkMotorista` e `checkJaExiste` — retorna 403 para níveis diferentes de `[1, 2, 5, 6]`. |
+
+#### Novos endpoints
+
+| Endpoint | Controller | Descrição |
+|---|---|---|
+| `GET /api/documentos/historico` | `DocumentoController.listarHistorico` | Usuário vê histórico dos próprios documentos enviados (`doc_status`: 0=aprovado, 2=reprovado). |
+| `GET /api/documentos/admin` | `DocumentoController.listarAdmin` | Admin/Dev lista todos os documentos. Filtros: `?doc_tipo=` (0/1), `?doc_status=` (0/2). |
+
+#### Melhorias em endpoints existentes
+
+| Endpoint | Melhoria |
+|---|---|
+| `GET /api/infra/escolas` | Adicionada paginação (`?page=`, `?limit=`, `?q=`). Resposta inclui `totalGeral`, `page`, `limit` e campos `esc_lat`/`esc_lon` (úteis para mapa no cadastro). |
+
+#### Testes adicionados
+
+| Arquivo | Testes | Cobertura |
+|---|---|---|
+| `tests/auditoria5.test.js` | 27 | Audit log correto (A1–A4), passageiro suspenso bloqueado (A5), GET /documentos/historico e /admin (M1-M2), infra paginação + coords (M3), GET /caronas/minhas?status= (M4) |
+
 ### Apontamentos não corrigidos (decisão de design)
 
 | Arquivo | Categoria | Descrição |
@@ -1037,3 +1156,53 @@ Auditoria completa realizada em **2026-04-25**. Abaixo o resumo dos apontamentos
 | `src/controllers/CaronaController.js` | Performance | `totalGeral` exige query separada de COUNT. Troca por cursor-only pagination eliminaria a query, mas mudaria a API pública. |
 | `src/services/geocodingService.js` | Performance | Fila FIFO usa `Array.shift()` (O(n)). Impacto prático nulo no volume esperado; substituir por linked-list seria over-engineering. |
 | `src/utils/sanitize.js` | Segurança (baixo risco) | `stripHtml` usa regex simples. A API retorna JSON (não HTML renderizado), portanto o risco de XSS armazenado é baixo. Substituir por `sanitize-html` seria recomendado caso o front-end renderize o conteúdo sem escape. |
+
+---
+
+### Auditoria 4 — **2026-04-26 (sessão 3)**
+
+#### Correções críticas (BIT(1))
+
+| Arquivo | Categoria | Descrição |
+|---|---|---|
+| `src/controllers/VeiculoController.js` | Bug crítico | `vei_status` e `vei_tipo` são `BIT(1)` — `mysql2` devolve `Buffer`, não inteiro. `atualizarVeiculo()` e `desativarVeiculo()` usavam `=== 0` sem `CAST`, o que sempre falha. Corrigido com `CAST(... AS UNSIGNED)` nos `SELECT`. |
+| `src/controllers/SolicitacaoController.js` | Bug crítico | `vei_tipo BIT(1)` sem `CAST` em `solicitarCarona()`: a checagem de moto (`vei_tipo === 0`) sempre retornava `false`, permitindo >1 passageiro em moto. Corrigido com `CAST(v.vei_tipo AS UNSIGNED)`. |
+
+#### Correções importantes
+
+| Arquivo | Categoria | Descrição |
+|---|---|---|
+| `src/controllers/AdminController.js` | Feature | `criarEscola()` e `atualizarEscola()` agora chamam `geocodificarEndereco()` e preenchem `esc_lat`/`esc_lon` (colunas v10 que ficavam sempre NULL). |
+| `src/controllers/AdminController.js` | Limpeza | `require('../utils/penaltyHelper')` movido do corpo de `aplicarPenalidade()` para o topo do arquivo. |
+| `src/controllers/CaronaController.js` | Auditoria | `atualizar()` agora chama `registrarAudit('CARONA_CANCEL')` quando `car_status = 0` via PUT (caminho sem auditoria antes). |
+| `src/controllers/SolicitacaoController.js` | Segurança | `listarPorUsuario()` agora permite Admin (`per_tipo ≥ 1`) ver solicitações de qualquer usuário (antes bloqueava com 403 independente do papel). |
+| `jest.config.js` + `tests/workerTeardown.js` | Testes | Adicionado `setupFilesAfterEnv` com teardown de pool MySQL em cada worker. Elimina o aviso "worker process failed to exit gracefully". |
+
+#### Novos endpoints
+
+| Endpoint | Controller | Descrição |
+|---|---|---|
+| `GET  /api/admin/escolas` | `AdminController.listarEscolas` | Lista escolas — Admin vê a própria; Dev vê todas. `?q=` busca por nome. |
+| `GET  /api/admin/escolas/:esc_id` | `AdminController.obterEscola` | Dados completos da escola + cursos vinculados. |
+| `GET  /api/admin/cursos` | `AdminController.listarCursos` | Lista cursos — Admin filtra pela própria escola; Dev filtra com `?esc_id=`. |
+| `GET  /api/veiculos/:vei_id` | `VeiculoController.obterPorId` | Detalhes de veículo específico — dono ou Dev. |
+| `PUT  /api/pontos/:pon_id` | `PontoEncontroController.atualizar` | Edita `pon_nome` e/ou `pon_ordem` — apenas motorista dono. |
+| `PATCH /api/mensagens/:men_id/ler` | `MensagemController.marcarLida` | Destinatário marca mensagem como lida (`men_status = 3`). |
+| `GET  /api/caronas/passageiro` | `CaronaController.listarCaronasComoPassageiro` | Lista caronas onde o usuário é passageiro confirmado (SOLICITACOES + CARONA_PESSOAS). |
+| `PUT  /api/usuarios/:id/endereco` | `UsuarioController.atualizarEndereco` | Atualiza `usu_endereco` e regeocodifica `usu_lat`/`usu_lon` via Nominatim. |
+
+#### Melhorias em endpoints existentes
+
+| Endpoint | Melhoria |
+|---|---|
+| `GET /api/passageiros/:car_id` | Adicionado filtro `?status=` (0/1/2). Padrão alterado para retornar apenas aceitos (`car_pes_status = 1`). |
+| `GET /api/solicitacoes/usuario/:usu_id` | Admin e Dev agora podem ver solicítações de qualquer usuário (antes: apenas dono). |
+
+#### Testes adicionados
+
+| Arquivo | Testes | Cobertura |
+|---|---|---|
+| `tests/auditoria4.test.js` | 30 | BIT(1) bugs, GET veículo, PUT ponto, PATCH ler, GET passageiro, PUT endereço, admin escolas/cursos, I5 |
+| `tests/db.test.js` | — | try-catch no afterAll para compatibilidade com workerTeardown |
+| `tests/test2903.test.js` | — | try-catch no afterAll para compatibilidade com workerTeardown |
+| `tests/endpoints.test.js` | — | Teste de solicitações atualizado para refletir novo comportamento Dev (200 em vez de 403) |

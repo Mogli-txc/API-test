@@ -16,8 +16,11 @@ const auth              = require('../middlewares/authMiddleware');
 // Cadastra veículo — apenas usuários autenticados podem registrar veículos
 router.post('/', auth, VeiculoController.cadastrarVeiculo);
 
-// Lista veículos do usuário — apenas usuários autenticados
+// Lista veículos do usuário — deve vir ANTES de /:vei_id para não capturar "usuario" como ID
 router.get('/usuario/:usu_id', auth, VeiculoController.listarPorUsuario);
+
+// Detalhes de um veículo específico — apenas dono ou Desenvolvedor
+router.get('/:vei_id', auth, VeiculoController.obterPorId);
 
 // Atualiza dados do veículo — apenas o próprio dono pode editar
 router.put('/:vei_id', auth, VeiculoController.atualizarVeiculo);

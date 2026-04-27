@@ -2,12 +2,13 @@
  * ROTAS DE PONTOS DE ENCONTRO
  *
  * Endpoints:
- * - GET  /api/pontos/geocode         → Autocomplete de endereços via Nominatim (PROTEGIDO)  [v10]
- * - POST /api/pontos/                → Cadastra ponto de encontro (PROTEGIDO)
- * - GET  /api/pontos/carona/:car_id  → Lista pontos de uma carona (PROTEGIDO)
+ * - GET    /api/pontos/geocode         → Autocomplete de endereços via Nominatim (PROTEGIDO)  [v10]
+ * - POST   /api/pontos/                → Cadastra ponto de encontro (PROTEGIDO)
+ * - GET    /api/pontos/carona/:car_id  → Lista pontos de uma carona (PROTEGIDO)
+ * - DELETE /api/pontos/:pon_id         → Desativa ponto de encontro (PROTEGIDO — apenas o motorista)
  *
- * IMPORTANTE: /geocode deve ser declarado ANTES de /carona/:car_id para que o Express
- * não confunda "geocode" com um valor de parâmetro :car_id.
+ * IMPORTANTE: /geocode deve ser declarado ANTES de /:pon_id para que o Express
+ * não confunda "geocode" com um valor de parâmetro :pon_id.
  */
 
 const express                 = require('express');
@@ -27,5 +28,11 @@ router.post('/', auth, PontoEncontroController.criar);
 // Lista pontos de uma carona — apenas usuários autenticados
 // Resposta inclui pon_lat e pon_lon para renderização no mapa  [v10]
 router.get('/carona/:car_id', auth, PontoEncontroController.listarPorCarona);
+
+// Atualiza pon_nome e/ou pon_ordem — apenas o motorista da carona vinculada
+router.put('/:pon_id', auth, PontoEncontroController.atualizar);
+
+// Desativa ponto de encontro — apenas o motorista da carona vinculada
+router.delete('/:pon_id', auth, PontoEncontroController.desativar);
 
 module.exports = router;

@@ -78,6 +78,69 @@ class SugestaoDenunciaController {
     }
 
     /**
+     * MÉTODO: listarMinhas
+     * Lista as sugestões e denúncias enviadas pelo próprio usuário autenticado.
+     * Qualquer usuário autenticado pode listar as suas próprias submissões.
+     *
+     * Tabela: SUGESTAO_DENUNCIA (SELECT com filtro por usu_id)
+     * Query params: ?page=, ?limit=, ?tipo= (0=Denúncia, 1=Sugestão)
+     */
+    async listarMinhas(req, res) {
+        try {
+            const usu_id = req.user.id;
+
+            // PASSO 1: Parâmetros de paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // Filtro opcional por tipo (0=Denúncia, 1=Sugestão)
+            let filtroTipo = '';
+            const params = [usu_id];
+            if (req.query.tipo !== undefined) {
+                const tipoFiltro = parseInt(req.query.tipo);
+                if (isNaN(tipoFiltro) || ![0, 1].includes(tipoFiltro)) {
+                    return res.status(400).json({ error: "tipo inválido. Use 0 (Denúncia) ou 1 (Sugestão)." });
+                }
+                filtroTipo = ' AND sug_tipo = ?';
+                params.push(tipoFiltro);
+            }
+
+            // PASSO 2: Busca as submissões do próprio usuário
+            const [sugestoes] = await db.query(
+                `SELECT sug_id, sug_texto, sug_data, sug_status, sug_tipo, sug_resposta
+                 FROM SUGESTAO_DENUNCIA
+                 WHERE usu_id = ? AND sug_deletado_em IS NULL${filtroTipo}
+                 ORDER BY sug_id DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral
+                 FROM SUGESTAO_DENUNCIA
+                 WHERE usu_id = ? AND sug_deletado_em IS NULL${filtroTipo}`,
+                params
+            );
+
+            // PASSO 3: Resposta de sucesso
+            return res.status(200).json({
+                message:    "Suas sugestões/denúncias listadas.",
+                totalGeral,
+                total:      sugestoes.length,
+                page,
+                limit,
+                ...(req.query.tipo !== undefined && { tipo: parseInt(req.query.tipo) }),
+                sugestoes
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarMinhas sugestões:", error);
+            return res.status(500).json({ error: "Erro ao listar suas sugestões/denúncias." });
+        }
+    }
+
+    /**
      * MÉTODO: listar
      * Lista sugestões e denúncias com escopo por papel do usuário.
      *
@@ -190,8 +253,10 @@ class SugestaoDenunciaController {
                 return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
             }
 
-            // PASSO 4: Verifica se o requester é o autor ou admin/dev
-            // Usuários comuns só podem ver as próprias sugestões/denúncias
+            // PASSO 4: Verifica se o requester é o autor, Admin ou Dev
+            // Usuários comuns (per_tipo=0) só podem ver as próprias sugestões/denúncias.
+            // Admins (per_tipo=1) e Devs (per_tipo=2) podem ver qualquer registro.
+            // checkDevOrOwner cobre apenas Dev+dono; verificamos admin separadamente via per_tipo.
             if (rows[0].usu_id !== req.user.id) {
                 const [perfil] = await db.query(
                     'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
@@ -291,6 +356,74 @@ class SugestaoDenunciaController {
         } catch (error) {
             console.error("[ERRO] responder sugestão:", error);
             return res.status(500).json({ error: "Erro ao responder sugestão/denúncia." });
+        }
+    }
+
+    /**
+     * MÉTODO: marcarEmAnalise
+     * Muda o status de uma sugestão/denúncia para 3 (Em análise).
+     * Indica que o Admin/Dev está analisando o registro antes de fechar.
+     * Não é possível marcar como "em análise" um registro já fechado (sug_status=0).
+     *
+     * Tabela: SUGESTAO_DENUNCIA (UPDATE sug_status = 3)
+     * Parâmetro: sug_id (via URL)
+     */
+    async marcarEmAnalise(req, res) {
+        try {
+            // PASSO 1: Extrai o ID
+            const { sug_id } = req.params;
+            const { per_tipo, per_escola_id } = req.user;
+
+            // PASSO 2: Valida o ID
+            if (!sug_id || isNaN(sug_id)) {
+                return res.status(400).json({ error: "ID inválido." });
+            }
+
+            // PASSO 3: Administrador só pode marcar sugestões da sua escola
+            if (per_tipo === 1) {
+                const [pertence] = await db.query(
+                    `SELECT s.sug_id FROM SUGESTAO_DENUNCIA s
+                     INNER JOIN USUARIOS u         ON s.usu_id  = u.usu_id
+                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                     INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                     WHERE s.sug_id = ? AND c.esc_id = ?
+                     LIMIT 1`,
+                    [sug_id, per_escola_id]
+                );
+                if (pertence.length === 0) {
+                    return res.status(403).json({ error: "Sem permissão para alterar esta sugestão/denúncia." });
+                }
+            }
+
+            // PASSO 4: Verifica existência e status atual
+            const [atual] = await db.query(
+                'SELECT sug_status FROM SUGESTAO_DENUNCIA WHERE sug_id = ? AND sug_deletado_em IS NULL',
+                [sug_id]
+            );
+            if (atual.length === 0) {
+                return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
+            }
+            if (atual[0].sug_status === 0) {
+                return res.status(409).json({ error: "Não é possível alterar uma sugestão/denúncia já fechada." });
+            }
+            if (atual[0].sug_status === 3) {
+                return res.status(409).json({ error: "Sugestão/Denúncia já está em análise." });
+            }
+
+            // PASSO 5: Muda para sug_status = 3 (Em análise)
+            await db.query(
+                'UPDATE SUGESTAO_DENUNCIA SET sug_status = 3 WHERE sug_id = ?',
+                [sug_id]
+            );
+
+            return res.status(200).json({
+                message:  "Sugestão/Denúncia marcada como Em análise.",
+                sugestao: { sug_id: parseInt(sug_id), sug_status: 3 }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] marcarEmAnalise:", error);
+            return res.status(500).json({ error: "Erro ao atualizar status da sugestão/denúncia." });
         }
     }
 

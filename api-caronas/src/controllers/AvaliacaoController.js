@@ -14,7 +14,8 @@
  */
 
 const db = require('../config/database');
-const { stripHtml } = require('../utils/sanitize');
+const { stripHtml }             = require('../utils/sanitize');
+const { isParticipanteCarona }  = require('../utils/authHelper');
 
 class AvaliacaoController {
 
@@ -65,45 +66,14 @@ class AvaliacaoController {
                 return res.status(403).json({ error: "Avaliações só são permitidas após a carona ser finalizada." });
             }
 
-            // PASSO 6: Verifica se o avaliador é motorista ou passageiro confirmado desta carona.
-            // Usa UNION entre CARONA_PESSOAS (adicionado diretamente) e SOLICITACOES_CARONA (aceito via solicitação)
-            // para cobrir ambos os caminhos de participação.
-            const [motorista] = await db.query(
-                `SELECT cu.usu_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE c.car_id = ?`,
-                [car_id]
-            );
-            const ehMotorista = motorista.length > 0 && motorista[0].usu_id === usu_id_avaliador;
-
-            if (!ehMotorista) {
-                const [passageiro] = await db.query(
-                    `SELECT 1 FROM CARONA_PESSOAS
-                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
-                     UNION
-                     SELECT 1 FROM SOLICITACOES_CARONA
-                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
-                    [car_id, usu_id_avaliador, car_id, usu_id_avaliador]
-                );
-                if (passageiro.length === 0) {
-                    return res.status(403).json({ error: "Apenas participantes confirmados da carona podem avaliar." });
-                }
+            // PASSO 6: Verifica se o avaliador é participante desta carona (motorista ou passageiro confirmado)
+            if (!await isParticipanteCarona(car_id, usu_id_avaliador)) {
+                return res.status(403).json({ error: "Apenas participantes confirmados da carona podem avaliar." });
             }
 
-            // PASSO 7: Verifica se o avaliado também era participante (mesmo padrão UNION)
-            const ehMotoristaAvaliado = motorista.length > 0 && motorista[0].usu_id === parseInt(usu_id_avaliado);
-            if (!ehMotoristaAvaliado) {
-                const [passageiroAvaliado] = await db.query(
-                    `SELECT 1 FROM CARONA_PESSOAS
-                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
-                     UNION
-                     SELECT 1 FROM SOLICITACOES_CARONA
-                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
-                    [car_id, usu_id_avaliado, car_id, usu_id_avaliado]
-                );
-                if (passageiroAvaliado.length === 0) {
-                    return res.status(403).json({ error: "O usuário avaliado não participou desta carona." });
-                }
+            // PASSO 7: Verifica se o avaliado também é participante desta carona
+            if (!await isParticipanteCarona(car_id, parseInt(usu_id_avaliado))) {
+                return res.status(403).json({ error: "O usuário avaliado não participou desta carona." });
             }
 
             // PASSO 8: Sanitiza comentário opcional
@@ -211,28 +181,14 @@ class AvaliacaoController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            // PASSO 1: Verifica se o usuário autenticado é motorista ou passageiro desta carona.
-            // Avaliações revelam quem participou da carona — dado sensível, restrito a participantes.
-            const [motorista] = await db.query(
-                `SELECT cu.usu_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE c.car_id = ?`,
-                [car_id]
-            );
-            const ehMotorista = motorista.length > 0 && motorista[0].usu_id === req.user.id;
-
-            if (!ehMotorista) {
-                const [participacao] = await db.query(
-                    `SELECT 1 FROM CARONA_PESSOAS
-                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
-                     UNION
-                     SELECT 1 FROM SOLICITACOES_CARONA
-                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
-                    [car_id, req.user.id, car_id, req.user.id]
-                );
-                if (participacao.length === 0) {
-                    return res.status(403).json({ error: "Apenas participantes da carona podem visualizar suas avaliações." });
-                }
+            // PASSO 1: Verifica existência da carona e se o usuário é participante.
+            // isParticipanteCarona retorna: null=carona inexistente | false=não participante | true=participante
+            const participacaoAvaliacao = await isParticipanteCarona(car_id, req.user.id);
+            if (participacaoAvaliacao === null) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            if (!participacaoAvaliacao) {
+                return res.status(403).json({ error: "Apenas participantes da carona podem visualizar suas avaliações." });
             }
 
             const page   = Math.max(1, parseInt(req.query.page)  || 1);

@@ -224,12 +224,12 @@ describe('Solicitações', () => {
         expect(res.status).toBe(403);
     });
 
-    it('GET /api/solicitacoes/usuario/:id — deve retornar 403 para ID que não é o próprio', async () => {
-        // tokenTeste é admin — admin não é o usuário 1, deve ser bloqueado
+    it('GET /api/solicitacoes/usuario/:id — Dev pode ver solicitações de qualquer usuário', async () => {
+        // tokenTeste é Desenvolvedor (per_tipo=2) — agora tem acesso a qualquer usuário (I5)
         const res = await request(app)
             .get('/api/solicitacoes/usuario/1')
             .set('Authorization', `Bearer ${tokenTeste}`);
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(200);
     });
 
 });

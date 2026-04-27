@@ -18,6 +18,7 @@
 
 const db  = require('../config/database');
 const fsp = require('fs').promises;
+const { registrarAudit } = require('../utils/auditLog');
 
 const SEIS_MESES_MS = 180 * 24 * 60 * 60 * 1000;
 
@@ -140,6 +141,13 @@ class DocumentoController {
             } finally {
                 conn.release();
             }
+
+            registrarAudit({
+                tabela: 'DOCUMENTOS_VERIFICACAO', registroId: usu_id,
+                acao: 'COMPROVANTE_APROVADO',
+                novo: { novoNivel, doc_arquivo: req.file.filename },
+                usuId: usu_id, ip: req.ip
+            }).catch(err => console.warn('[AUDIT] Falha ao registrar comprovante aprovado:', err.message));
 
             // PASSO 7: Resposta de sucesso
             return res.status(200).json({
@@ -275,6 +283,13 @@ class DocumentoController {
                 conn.release();
             }
 
+            registrarAudit({
+                tabela: 'DOCUMENTOS_VERIFICACAO', registroId: usu_id,
+                acao: 'CNH_APROVADA',
+                novo: { promovido: temVeiculo, doc_arquivo: req.file.filename },
+                usuId: usu_id, ip: req.ip
+            }).catch(err => console.warn('[AUDIT] Falha ao registrar CNH aprovada:', err.message));
+
             // PASSO 7: Resposta de sucesso — mensagem varia conforme o resultado da promoção
             const message = temVeiculo
                 ? "CNH recebida. Verificação completa — você já pode oferecer caronas!"
@@ -295,6 +310,115 @@ class DocumentoController {
         } catch (error) {
             console.error("[ERRO] enviarCNH:", error);
             return res.status(500).json({ error: "Erro ao processar CNH." });
+        }
+    }
+    /**
+     * MÉTODO: listarHistorico
+     * Retorna o histórico de documentos enviados pelo próprio usuário autenticado.
+     *
+     * GET /api/documentos/historico
+     * Query params: ?page=, ?limit=
+     */
+    async listarHistorico(req, res) {
+        try {
+            const usu_id = req.user.id;
+
+            // PASSO 1: Paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+            const offset = (page - 1) * limit;
+
+            // PASSO 2: Busca os documentos do usuário
+            const [docs] = await db.query(
+                `SELECT doc_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em
+                 FROM DOCUMENTOS_VERIFICACAO
+                 WHERE usu_id = ?
+                 ORDER BY doc_enviado_em DESC
+                 LIMIT ? OFFSET ?`,
+                [usu_id, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                'SELECT COUNT(*) AS totalGeral FROM DOCUMENTOS_VERIFICACAO WHERE usu_id = ?',
+                [usu_id]
+            );
+
+            return res.status(200).json({
+                message: "Histórico de documentos recuperado.",
+                totalGeral, total: docs.length, page, limit,
+                documentos: docs
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarHistorico:", error);
+            return res.status(500).json({ error: "Erro ao recuperar histórico de documentos." });
+        }
+    }
+
+    /**
+     * MÉTODO: listarAdmin
+     * Lista documentos de todos os usuários. Restrito a Admin (per_tipo >= 1).
+     *
+     * GET /api/documentos/admin
+     * Query params: ?doc_tipo= (0=comprovante, 1=cnh), ?doc_status= (0=aprovado, 2=reprovado), ?page=, ?limit=
+     */
+    async listarAdmin(req, res) {
+        try {
+            // PASSO 1: Paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 2: Filtros opcionais
+            const filtros = [];
+            const params  = [];
+
+            if (req.query.doc_tipo !== undefined) {
+                const tipoFiltro = parseInt(req.query.doc_tipo);
+                if (isNaN(tipoFiltro) || ![0, 1].includes(tipoFiltro)) {
+                    return res.status(400).json({ error: "doc_tipo inválido. Use 0 (comprovante) ou 1 (CNH)." });
+                }
+                filtros.push('d.doc_tipo = ?');
+                params.push(tipoFiltro);
+            }
+
+            if (req.query.doc_status !== undefined) {
+                const statusFiltro = parseInt(req.query.doc_status);
+                if (isNaN(statusFiltro) || ![0, 2].includes(statusFiltro)) {
+                    return res.status(400).json({ error: "doc_status inválido. Use 0 (aprovado) ou 2 (reprovado)." });
+                }
+                filtros.push('d.doc_status = ?');
+                params.push(statusFiltro);
+            }
+
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            // PASSO 3: Busca documentos com dados do usuário via JOIN
+            const [docs] = await db.query(
+                `SELECT d.doc_id, d.usu_id, u.usu_nome, u.usu_email,
+                        d.doc_tipo, d.doc_arquivo, d.doc_ocr_confianca, d.doc_status, d.doc_enviado_em
+                 FROM DOCUMENTOS_VERIFICACAO d
+                 INNER JOIN USUARIOS u ON d.usu_id = u.usu_id
+                 ${where}
+                 ORDER BY d.doc_enviado_em DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral FROM DOCUMENTOS_VERIFICACAO d ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Documentos listados.",
+                totalGeral, total: docs.length, page, limit,
+                documentos: docs
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarAdmin:", error);
+            return res.status(500).json({ error: "Erro ao listar documentos." });
         }
     }
 }

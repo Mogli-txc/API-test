@@ -127,6 +127,16 @@ router.get('/perfil/:id', authMiddleware, UsuarioController.perfil);
 router.put('/:id', authMiddleware, UsuarioController.atualizar);
 
 /**
+ * ROTA: PUT /api/usuarios/:id/endereco
+ * Descrição: Atualiza o endereço do usuário e regeocodifica via Nominatim
+ * Acesso: PROTEGIDO - Apenas o próprio usuário ou Desenvolvedor
+ * Parâmetro: id (usu_id via URL)
+ * Campo obrigatório: usu_endereco
+ * Retorno: Status 200 com endereço e coordenadas atualizadas
+ */
+router.put('/:id/endereco', authMiddleware, UsuarioController.atualizarEndereco);
+
+/**
  * ROTA: PUT /api/usuarios/:id/foto
  * Descrição: Atualiza a foto de perfil do usuário
  * Acesso: PROTEGIDO - Apenas o próprio usuário pode atualizar sua foto

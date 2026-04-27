@@ -9,8 +9,10 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
-const { getMotoristaId } = require('../utils/authHelper');
-const { checkPenalidade } = require('../utils/penaltyHelper');
+const { getMotoristaId }           = require('../utils/authHelper');
+const { checkPenalidade }          = require('../utils/penaltyHelper');
+const { enqueue: enqueueEmail }    = require('../utils/emailQueue');
+const { registrarAudit }           = require('../utils/auditLog');
 
 class SolicitacaoController {
 
@@ -123,8 +125,9 @@ class SolicitacaoController {
             }
 
             // Verifica as vagas disponíveis da carona e o tipo do veículo
+            // CAST garante retorno numérico — vei_tipo BIT(1) é devolvido como Buffer pelo mysql2
             const [carona] = await db.query(
-                `SELECT c.car_vagas_dispo, v.vei_tipo
+                `SELECT c.car_vagas_dispo, CAST(v.vei_tipo AS UNSIGNED) AS vei_tipo
                  FROM CARONAS c
                  INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ? AND c.car_status = 1`,
@@ -341,9 +344,16 @@ class SolicitacaoController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
-            // Apenas o próprio usuário pode listar suas solicitações
+            // Usuário comum só pode ver as próprias solicitações; Admin e Dev podem ver de qualquer usuário
             if (req.user.id !== parseInt(usu_id)) {
-                return res.status(403).json({ error: "Sem permissão para visualizar solicitações deste usuário." });
+                const [perfil] = await db.query(
+                    'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+                    [req.user.id]
+                );
+                const isAdminOuDev = perfil.length > 0 && perfil[0].per_tipo >= 1;
+                if (!isAdminOuDev) {
+                    return res.status(403).json({ error: "Sem permissão para visualizar solicitações deste usuário." });
+                }
             }
 
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
@@ -488,6 +498,35 @@ class SolicitacaoController {
             }
 
             await conn.commit();
+
+            // Registra auditoria — ação mais crítica do sistema: aceite/recusa de carona
+            registrarAudit({
+                tabela: 'SOLICITACOES_CARONA', registroId: parseInt(sol_id),
+                acao:   statusCodigo === 2 ? 'SOL_ACEITAR' : 'SOL_RECUSAR',
+                usuId:  req.user.id, ip: req.ip
+            }).catch(err => console.warn('[AUDIT] Falha ao registrar audit de solicitação:', err.message));
+
+            // Notifica o passageiro por email (não-crítico, executado após commit)
+            // Busca dados do passageiro e da carona para montar a mensagem
+            db.query(
+                `SELECT u.usu_email, u.usu_nome, c.car_desc, c.car_data
+                 FROM USUARIOS u
+                 INNER JOIN CARONAS c ON c.car_id = ?
+                 WHERE u.usu_id = ?`,
+                [sol[0].car_id, sol[0].usu_id_passageiro]
+            ).then(([rows]) => {
+                if (rows.length > 0) {
+                    const { usu_email, usu_nome, car_desc, car_data } = rows[0];
+                    const dataFormatada = new Date(car_data).toLocaleDateString('pt-BR');
+                    enqueueEmail({
+                        type:       'solicitacao_resposta',
+                        email:      usu_email,
+                        nome:       usu_nome || 'Passageiro',
+                        caronaDesc: `${car_desc} (${dataFormatada})`,
+                        aceito:     statusCodigo === 2
+                    });
+                }
+            }).catch(err => console.warn('[EMAIL] Falha ao buscar dados para notificação:', err.message));
 
             return res.status(200).json({
                 message: `Solicitação ${novo_status.toLowerCase()} com sucesso!`,

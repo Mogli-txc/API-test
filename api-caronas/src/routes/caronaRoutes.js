@@ -25,6 +25,15 @@ router.get('/', authMiddleware, CaronaController.listarTodas);
 router.get('/minhas', authMiddleware, CaronaController.listarMinhasCaronas);
 
 /**
+ * ROTA: GET /api/caronas/passageiro
+ * Descrição: Lista as caronas onde o usuário autenticado é passageiro confirmado.
+ *   Considera SOLICITACOES_CARONA (sol_status=2) e CARONA_PESSOAS (car_pes_status=1).
+ * Acesso: PROTEGIDO - Requer Token JWT
+ * Query: ?status= filtra por car_status (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
+ */
+router.get('/passageiro', authMiddleware, CaronaController.listarCaronasComoPassageiro);
+
+/**
  * ROTA: POST /api/caronas/oferecer
  * Descrição: Cria uma nova carona (oferecida por um condutor)
  * Acesso: PROTEGIDO - Requer Token JWT válido no header Authorization

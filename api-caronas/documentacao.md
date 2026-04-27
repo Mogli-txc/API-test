@@ -987,6 +987,161 @@ paths:
   # ────────────────────────────────────────────────────────────────────────────
   # DOCUMENTOS — /api/documentos
   # ────────────────────────────────────────────────────────────────────────────
+  /api/documentos/historico:
+    get:
+      tags: [Documentos de Verificação]
+      summary: Histórico de documentos do próprio usuário
+      description: |
+        Retorna todos os documentos enviados pelo usuário autenticado, com paginação.
+        Permite ao usuário verificar se seus documentos foram aprovados ou reprovados.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+      responses:
+        '200':
+          description: Histórico de documentos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Histórico de documentos recuperado.
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  documentos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        doc_id:
+                          type: integer
+                        doc_tipo:
+                          type: integer
+                          enum: [0, 1]
+                          description: "0=comprovante, 1=CNH"
+                        doc_arquivo:
+                          type: string
+                        doc_ocr_confianca:
+                          type: integer
+                          nullable: true
+                        doc_status:
+                          type: integer
+                          enum: [0, 2]
+                          description: "0=aprovado, 2=reprovado"
+                        doc_enviado_em:
+                          type: string
+                          format: date-time
+        '401':
+          description: Não autenticado
+
+  /api/documentos/admin:
+    get:
+      tags: [Documentos de Verificação]
+      summary: Listar todos os documentos (Admin/Dev)
+      description: |
+        Lista todos os documentos enviados no sistema para revisão manual.
+        Restrito a Admin (per_tipo=1) e Desenvolvedor (per_tipo=2).
+
+        Inclui dados do usuário via JOIN. Ordenado por `doc_enviado_em DESC`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: doc_tipo
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1]
+          description: "0=comprovante, 1=CNH"
+        - name: doc_status
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 2]
+          description: "0=aprovado, 2=reprovado"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Lista de documentos com dados do usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  documentos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        doc_id:
+                          type: integer
+                        usu_id:
+                          type: integer
+                        usu_nome:
+                          type: string
+                        usu_email:
+                          type: string
+                        doc_tipo:
+                          type: integer
+                          enum: [0, 1]
+                        doc_arquivo:
+                          type: string
+                        doc_ocr_confianca:
+                          type: integer
+                          nullable: true
+                        doc_status:
+                          type: integer
+                          enum: [0, 2]
+                        doc_enviado_em:
+                          type: string
+                          format: date-time
+        '400':
+          description: doc_tipo ou doc_status inválido
+        '401':
+          description: Não autenticado
+        '403':
+          description: Requer papel Admin ou Dev
+
   /api/documentos/comprovante:
     post:
       tags: [Documentos de Verificação]
@@ -2195,6 +2350,35 @@ paths:
         '401':
           description: Não autenticado
 
+  /api/pontos/{pon_id}:
+    delete:
+      tags: [Pontos de Encontro]
+      summary: Desativar ponto de encontro
+      description: |
+        Marca o ponto como inativo (`pon_status = 0`). Apenas o motorista da carona
+        vinculada pode desativar seus próprios pontos.
+        Retorna `409` se o ponto já estiver desativado.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: pon_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '204':
+          description: Ponto desativado com sucesso
+        '403':
+          description: Apenas o motorista da carona pode remover pontos
+        '404':
+          description: Ponto de encontro não encontrado
+        '409':
+          description: Ponto já está desativado
+        '401':
+          description: Não autenticado
+
   /api/pontos/carona/{car_id}:
     get:
       tags: [Pontos de Encontro]
@@ -2454,6 +2638,69 @@ paths:
         '403':
           description: Requer papel Admin ou Dev
 
+  /api/sugestoes/minhas:
+    get:
+      tags: [Sugestões e Denúncias]
+      summary: Listar submissões do próprio usuário
+      description: |
+        Retorna apenas os registros enviados pelo usuário autenticado.
+        Não requer papel elevado — qualquer usuário autenticado pode consultar suas próprias submissões.
+        Filtro opcional: `?tipo=0` (Denúncias) ou `?tipo=1` (Sugestões).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tipo
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1]
+          description: "0 = Denúncias | 1 = Sugestões"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista de sugestões/denúncias do usuário autenticado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  sugestoes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sug_id:
+                          type: integer
+                        sug_texto:
+                          type: string
+                        sug_status:
+                          type: integer
+                        sug_tipo:
+                          type: integer
+                        sug_resposta:
+                          type: string
+                          nullable: true
+        '400':
+          description: tipo inválido
+        '401':
+          description: Não autenticado
+
   /api/sugestoes/{sug_id}:
     get:
       tags: [Sugestões e Denúncias]
@@ -2491,6 +2738,48 @@ paths:
           description: Deletado
         '403':
           description: Apenas Dev pode deletar
+
+  /api/sugestoes/{sug_id}/analisar:
+    put:
+      tags: [Sugestões e Denúncias]
+      summary: Marcar como Em análise
+      description: |
+        Muda o status para **3 (Em análise)**, indicando que o Admin/Dev está avaliando o registro.
+        Não é possível marcar como Em análise um registro já fechado (`sug_status=0`).
+        Admin só pode alterar registros da sua escola.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sug_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Status atualizado para Em análise
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  sugestao:
+                    type: object
+                    properties:
+                      sug_id:
+                        type: integer
+                      sug_status:
+                        type: integer
+                        example: 3
+        '403':
+          description: Sem permissão ou registro de outra escola
+        '404':
+          description: Registro não encontrado
+        '409':
+          description: Já está Em análise ou já foi fechado
 
   /api/sugestoes/{sug_id}/responder:
     put:
@@ -2644,11 +2933,33 @@ paths:
   /api/infra/escolas:
     get:
       tags: [Infraestrutura]
-      summary: Listar todas as escolas
-      description: Rota pública — não requer autenticação.
+      summary: Listar escolas com paginação
+      description: |
+        Rota pública — não requer autenticação.
+        Suporta paginação (`?page=`, `?limit=`) e busca por nome (`?q=`).
+        Expõe `esc_lat` e `esc_lon` para renderização de mapa durante o cadastro.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Busca parcial por nome da escola (case-insensitive)
+          schema:
+            type: string
+          example: USP
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
       responses:
         '200':
-          description: Lista de escolas
+          description: Lista paginada de escolas
           content:
             application/json:
               schema:
@@ -2657,9 +2968,18 @@ paths:
                   message:
                     type: string
                     example: Lista de escolas recuperada com sucesso.
+                  totalGeral:
+                    type: integer
+                    example: 3
                   total:
                     type: integer
                     example: 3
+                  page:
+                    type: integer
+                    example: 1
+                  limit:
+                    type: integer
+                    example: 50
                   escolas:
                     type: array
                     items:
@@ -2674,6 +2994,22 @@ paths:
                         esc_endereco:
                           type: string
                           example: Av. Prof. Luciano Gualberto, 315
+                        esc_dominio:
+                          type: string
+                          nullable: true
+                          example: usp.br
+                        esc_lat:
+                          type: number
+                          format: float
+                          nullable: true
+                          description: Latitude geocodificada via Nominatim (NULL se não geocodificado)
+                          example: -23.5614
+                        esc_lon:
+                          type: number
+                          format: float
+                          nullable: true
+                          description: Longitude geocodificada via Nominatim
+                          example: -46.7215
 
   /api/infra/escolas/{esc_id}/cursos:
     get:
@@ -2867,6 +3203,199 @@ paths:
         '403':
           description: Requer papel Admin ou Dev
 
+  /api/admin/usuarios/{usu_id}:
+    get:
+      tags: [Admin]
+      summary: Dados completos de um usuário
+      description: |
+        Retorna dados detalhados de um usuário específico, incluindo perfil, registros de
+        acesso e datas de criação/atualização.
+        Admin só pode consultar usuários da sua escola; Dev pode consultar qualquer usuário.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: usu_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 5
+      responses:
+        '200':
+          description: Dados completos do usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  usuario:
+                    $ref: '#/components/schemas/Usuario'
+        '403':
+          description: Sem permissão ou usuário de outra escola
+        '404':
+          description: Usuário não encontrado
+
+  /api/admin/usuarios/{usu_id}/perfil:
+    put:
+      tags: [Admin]
+      summary: Atualizar papel e escola do usuário
+      description: |
+        Atualiza `per_tipo` e/ou `per_escola_id` de um usuário. Permite promover ou
+        rebaixar entre os papéis disponíveis.
+
+        **Requer papel Dev (per_tipo=2).** Administradores não podem alterar papéis —
+        previne escalada de privilégio horizontal.
+
+        **Regras:**
+        - `per_tipo = 1` (Admin): `per_escola_id` é **obrigatório**.
+        - `per_tipo = 0` ou `2`: `per_escola_id` deve ser omitido (é setado para `NULL`).
+        - `per_habilitado`: habilita (`1`) ou desabilita (`0`) a conta sem alterar o papel.
+
+        A ação é registrada no `AUDIT_LOG` com ação `PERFIL_ATUALIZAR`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: usu_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                per_tipo:
+                  type: integer
+                  enum: [0, 1, 2]
+                  description: "0=Usuário comum, 1=Administrador (requer per_escola_id), 2=Desenvolvedor"
+                  example: 1
+                per_escola_id:
+                  type: integer
+                  nullable: true
+                  description: "Obrigatório quando per_tipo=1. Omitir ou null para outros papéis."
+                  example: 1
+                per_habilitado:
+                  type: integer
+                  enum: [0, 1]
+                  description: "0=desabilitar, 1=habilitar. Opcional."
+                  example: 1
+      responses:
+        '200':
+          description: Perfil atualizado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SucessoSimples'
+        '400':
+          description: per_tipo inválido, per_escola_id ausente para Admin, ou nenhum campo fornecido
+        '403':
+          description: Apenas Desenvolvedores podem alterar papéis
+        '404':
+          description: Usuário não encontrado ou inativo
+
+  /api/admin/logs:
+    get:
+      tags: [Admin]
+      summary: Ler AUDIT_LOG
+      description: |
+        Retorna registros do log de auditoria com paginação e filtros opcionais.
+        Requer papel **Dev** (per_tipo=2) — dados sensíveis de todas as ações do sistema.
+
+        **Filtros disponíveis:**
+        - `?acao=LOGIN` — filtra por código de ação (ex: LOGIN, CADASTRO, CARONA_CRIAR, PENALIDADE_SUSPENSAO...)
+        - `?tabela=USUARIOS` — filtra por tabela afetada
+        - `?usu_id=5` — filtra por usuário que realizou a ação
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: acao
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Código de ação (case-insensitive). Ex: LOGIN, CADASTRO, CARONA_CRIAR"
+          example: LOGIN
+        - name: tabela
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Nome da tabela afetada (case-insensitive). Ex: USUARIOS, CARONAS"
+          example: USUARIOS
+        - name: usu_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: "ID do usuário que realizou a ação"
+          example: 5
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        '200':
+          description: Registros do AUDIT_LOG
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        audit_id:
+                          type: integer
+                        tabela:
+                          type: string
+                        registro_id:
+                          type: integer
+                        acao:
+                          type: string
+                        dados_anteriores:
+                          type: object
+                          nullable: true
+                        dados_novos:
+                          type: object
+                          nullable: true
+                        usu_id:
+                          type: integer
+                          nullable: true
+                        ip:
+                          type: string
+                        criado_em:
+                          type: string
+                          format: date-time
+        '400':
+          description: usu_id não é um número inteiro
+        '403':
+          description: Apenas Desenvolvedores podem acessar o audit log
+
   /api/admin/usuarios/{usu_id}/penalidades:
     get:
       tags: [Admin]
@@ -2982,6 +3511,210 @@ paths:
         '409':
           description: Usuário já possui penalidade ativa do mesmo tipo
 
+  # ────────────────────────────────────────────────────────────────────────────
+  # ADMIN — CRUD DE ESCOLAS E CURSOS (Dev only)
+  # ────────────────────────────────────────────────────────────────────────────
+  /api/admin/escolas:
+    post:
+      tags: [Admin]
+      summary: Criar nova escola
+      description: Requer papel **Dev** (per_tipo=2). Registra escola com domínio e cota opcionais.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [esc_nome, esc_endereco]
+              properties:
+                esc_nome:
+                  type: string
+                  example: Faculdade de Engenharia
+                esc_endereco:
+                  type: string
+                  example: Av. Principal, 500, São Paulo
+                esc_dominio:
+                  type: string
+                  nullable: true
+                  description: "Domínio de e-mail institucional (ex: usp.br). NULL = sem restrição."
+                  example: eng.br
+                esc_max_usuarios:
+                  type: integer
+                  nullable: true
+                  description: "Cota de usuários ativos. NULL = sem limite."
+                  example: 500
+      responses:
+        '201':
+          description: Escola criada
+        '400':
+          description: Campos obrigatórios ausentes ou esc_max_usuarios inválido
+        '403':
+          description: Apenas Dev
+
+  /api/admin/escolas/{esc_id}:
+    put:
+      tags: [Admin]
+      summary: Atualizar escola
+      description: Requer papel **Dev** (per_tipo=2). Atualiza qualquer campo da escola.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: esc_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                esc_nome:
+                  type: string
+                esc_endereco:
+                  type: string
+                esc_dominio:
+                  type: string
+                  nullable: true
+                esc_max_usuarios:
+                  type: integer
+                  nullable: true
+      responses:
+        '200':
+          description: Escola atualizada
+        '403':
+          description: Apenas Dev
+        '404':
+          description: Escola não encontrada
+
+    delete:
+      tags: [Admin]
+      summary: Remover escola
+      description: |
+        Requer papel **Dev** (per_tipo=2). Remove escola apenas se não houver cursos vinculados.
+        Retorna `409` se houver cursos — remova-os primeiro.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: esc_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '204':
+          description: Escola removida
+        '403':
+          description: Apenas Dev
+        '404':
+          description: Escola não encontrada
+        '409':
+          description: Escola tem cursos vinculados
+
+  /api/admin/escolas/{esc_id}/cursos:
+    post:
+      tags: [Admin]
+      summary: Criar curso em uma escola
+      description: Requer papel **Dev** (per_tipo=2).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: esc_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cur_nome, cur_semestre]
+              properties:
+                cur_nome:
+                  type: string
+                  example: Ciência da Computação
+                cur_semestre:
+                  type: integer
+                  minimum: 1
+                  example: 1
+      responses:
+        '201':
+          description: Curso criado
+        '400':
+          description: Campos ausentes ou cur_semestre inválido
+        '403':
+          description: Apenas Dev
+        '404':
+          description: Escola não encontrada
+
+  /api/admin/cursos/{cur_id}:
+    put:
+      tags: [Admin]
+      summary: Atualizar curso
+      description: Requer papel **Dev** (per_tipo=2).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cur_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cur_nome:
+                  type: string
+                cur_semestre:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Curso atualizado
+        '403':
+          description: Apenas Dev
+        '404':
+          description: Curso não encontrado
+
+    delete:
+      tags: [Admin]
+      summary: Remover curso
+      description: |
+        Requer papel **Dev** (per_tipo=2). Remove curso apenas se não houver matrículas.
+        Retorna `409` se houver matrículas ativas.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cur_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '204':
+          description: Curso removido
+        '403':
+          description: Apenas Dev
+        '404':
+          description: Curso não encontrado
+        '409':
+          description: Curso tem matrículas ativas
+
   /api/admin/penalidades/{pen_id}:
     delete:
       tags: [Admin]
@@ -3020,6 +3753,40 @@ paths:
         '409':
           description: Penalidade já foi removida
 
+  # ────────────────────────────────────────────────────────────────────────────
+  # HEALTH CHECK
+  # ────────────────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Infraestrutura]
+      summary: Verificação de saúde do servidor
+      description: |
+        Rota pública — não requer autenticação.
+        Retorna o estado atual do servidor: status, uptime em segundos, ambiente e timestamp.
+        Usado por load balancers, Docker healthcheck e sistemas de monitoramento externos.
+      responses:
+        '200':
+          description: Servidor operacional
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  uptime:
+                    type: integer
+                    description: Tempo em segundos desde o início do processo
+                    example: 3600
+                  env:
+                    type: string
+                    example: production
+                  ts:
+                    type: string
+                    format: date-time
+                    example: "2026-04-26T12:00:00.000Z"
+
 tags:
   - name: Usuários
     description: Cadastro, autenticação e gerenciamento de perfil
@@ -3047,4 +3814,231 @@ tags:
     description: Dados estáticos de escolas e cursos (rotas públicas)
   - name: Admin
     description: Estatísticas do sistema e gestão de penalidades — acesso restrito a Admin e Dev
+```
+
+---
+
+## Auditoria 4 — Novos Endpoints (2026-04-26)
+
+Endpoints adicionados na sessão 3. Ver `README.md` para changelog completo.
+
+```yaml
+paths:
+
+  /api/admin/escolas:
+    get:
+      summary: Lista escolas do sistema
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Busca parcial por nome da escola
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Lista de escolas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  escolas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        esc_id: { type: integer }
+                        esc_nome: { type: string }
+                        esc_endereco: { type: string }
+                        esc_dominio: { type: string, nullable: true }
+                        esc_max_usuarios: { type: integer, nullable: true }
+                        esc_lat: { type: number, nullable: true }
+                        esc_lon: { type: number, nullable: true }
+
+  /api/admin/escolas/{esc_id}:
+    get:
+      summary: Dados completos de uma escola com cursos vinculados
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Dados da escola com array de cursos
+        '403':
+          description: Admin tentando ver escola de outra instituição
+        '404':
+          description: Escola não encontrada
+
+  /api/admin/cursos:
+    get:
+      summary: Lista cursos do sistema
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+          description: Filtra por escola (Dev only — Admin já é restrito à própria escola)
+      responses:
+        '200':
+          description: Lista de cursos com nome da escola
+
+  /api/veiculos/{vei_id}:
+    get:
+      summary: Detalhes de um veículo específico
+      tags: [Veículos]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: vei_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Dados do veículo com CAST em vei_tipo e vei_status (números, não Buffer)
+        '403':
+          description: Usuário não é dono nem Desenvolvedor
+        '404':
+          description: Veículo não encontrado
+
+  /api/pontos/{pon_id}:
+    put:
+      summary: Edita nome e/ou ordem de um ponto de encontro
+      tags: [Pontos de Encontro]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: pon_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pon_nome:
+                  type: string
+                  maxLength: 25
+                  description: Novo nome descritivo do ponto (opcional)
+                pon_ordem:
+                  type: integer
+                  minimum: 1
+                  nullable: true
+                  description: Nova ordem na rota — null remove a ordem (opcional)
+      responses:
+        '200':
+          description: Ponto atualizado com sucesso
+        '400':
+          description: Nenhum campo fornecido ou pon_nome/pon_ordem inválidos
+        '403':
+          description: Usuário não é o motorista dono da carona
+        '404':
+          description: Ponto não encontrado
+        '409':
+          description: Ponto está desativado
+
+  /api/mensagens/{men_id}/ler:
+    patch:
+      summary: Marca mensagem como lida (men_status = 3)
+      tags: [Mensagens]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: men_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Mensagem marcada como lida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensagem:
+                    type: object
+                    properties:
+                      men_id: { type: integer }
+                      men_status: { type: integer, example: 3 }
+        '404':
+          description: Mensagem não encontrada ou usuário não é o destinatário
+        '409':
+          description: Mensagem já estava marcada como lida
+
+  /api/caronas/passageiro:
+    get:
+      summary: Lista caronas onde o usuário autenticado é passageiro confirmado
+      tags: [Caronas]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Considera duas fontes de vínculo:
+        - SOLICITACOES_CARONA onde sol_status = 2 (aceito)
+        - CARONA_PESSOAS onde car_pes_status = 1 (aceito diretamente pelo motorista)
+        UNION elimina duplicatas caso o passageiro apareça em ambas para a mesma carona.
+      parameters:
+        - in: query
+          name: status
+          schema: { type: integer, enum: [0, 1, 2, 3] }
+          description: Filtra por car_status da carona (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Lista de caronas como passageiro
+        '400':
+          description: status inválido
+
+  /api/usuarios/{id}/endereco:
+    put:
+      summary: Atualiza endereço do usuário e regeocodifica coordenadas
+      tags: [Usuários]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_endereco]
+              properties:
+                usu_endereco:
+                  type: string
+                  description: Endereço em linguagem natural (ex. "Av. Paulista, 1000, São Paulo, SP")
+      responses:
+        '200':
+          description: Endereço atualizado com coordenadas geocodificadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usu_endereco: { type: string }
+                  usu_lat: { type: number, nullable: true }
+                  usu_lon: { type: number, nullable: true }
+                  geocodificado: { type: boolean }
+        '400':
+          description: usu_endereco ausente
+        '403':
+          description: Sem permissão (não é dono nem Dev)
 ```

@@ -20,7 +20,7 @@
  *   enqueue({ type: 'reset', email: 'user@exemplo.com', resetUrl: 'https://...' });
  */
 
-const { enviarOtp, enviarEmailReset } = require('./mailer');
+const { enviarOtp, enviarEmailReset, enviarRespostaSolicitacao } = require('./mailer');
 
 // ── Configuração de retry ────────────────────────────────────────────────────
 const MAX_TENTATIVAS = 3;
@@ -51,6 +51,10 @@ async function despachar(job) {
             break;
         case 'reset':
             await enviarEmailReset(job.email, job.resetUrl);
+            break;
+        case 'solicitacao_resposta':
+            // job: { email, nome, caronaDesc, aceito }
+            await enviarRespostaSolicitacao(job.email, job.nome, job.caronaDesc, job.aceito);
             break;
         default:
             throw new Error(`Tipo de email desconhecido: ${job.type}`);

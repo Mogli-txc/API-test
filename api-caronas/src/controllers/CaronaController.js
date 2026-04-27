@@ -563,12 +563,13 @@ class CaronaController {
                 valores
             );
 
-            // Quando a carona é cancelada via PUT, cancela também as solicitações ativas
+            // Quando a carona é cancelada via PUT, cancela também as solicitações ativas e registra auditoria
             if (parseInt(car_status) === 0) {
                 await db.query(
                     'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE car_id = ? AND sol_status IN (1, 2)',
                     [car_id]
                 );
+                await registrarAudit({ tabela: 'CARONAS', registroId: parseInt(car_id), acao: 'CARONA_CANCEL', usuId: req.user.id, ip: req.ip });
             }
 
             return res.status(200).json({ message: "Carona atualizada com sucesso!" });
@@ -642,6 +643,84 @@ class CaronaController {
         } catch (error) {
             console.error("[ERRO] listarMinhasCaronas:", error);
             return res.status(500).json({ error: "Erro ao listar suas caronas." });
+        }
+    }
+
+    /**
+     * MÉTODO: listarCaronasComoPassageiro
+     * Lista as caronas onde o usuário autenticado é passageiro confirmado
+     * (sol_status = 2 em SOLICITACOES_CARONA ou car_pes_status = 1 em CARONA_PESSOAS).
+     * Retorna caronas de qualquer status para histórico completo.
+     * Query param opcional: ?status= filtra por car_status da carona.
+     */
+    async listarCaronasComoPassageiro(req, res) {
+        try {
+            const usu_id = req.user.id;
+
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            let filtroStatus = '';
+            const params = [usu_id, usu_id];
+            if (req.query.status !== undefined) {
+                const statusFiltro = parseInt(req.query.status);
+                if (isNaN(statusFiltro) || ![0, 1, 2, 3].includes(statusFiltro)) {
+                    return res.status(400).json({ error: "status inválido. Use 0, 1, 2 ou 3." });
+                }
+                filtroStatus = ' AND c.car_status = ?';
+                params.push(statusFiltro);
+            }
+
+            // PASSO 1: Caronas via SOLICITACOES_CARONA (aceitas) UNION CARONA_PESSOAS
+            // UNION elimina duplicatas caso o passageiro esteja em ambas as tabelas na mesma carona
+            const [caronas] = await db.query(
+                `SELECT DISTINCT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
+                        c.car_vagas_dispo, c.car_status,
+                        v.vei_marca_modelo AS veiculo,
+                        u.usu_nome         AS motorista
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS        v  ON c.vei_id     = v.vei_id
+                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
+                 WHERE c.car_id IN (
+                     SELECT sc.car_id FROM SOLICITACOES_CARONA sc
+                     WHERE sc.usu_id_passageiro = ? AND sc.sol_status = 2
+                     UNION
+                     SELECT cp.car_id FROM CARONA_PESSOAS cp
+                     WHERE cp.usu_id = ? AND cp.car_pes_status = 1
+                 )${filtroStatus}
+                 ORDER BY c.car_id DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(DISTINCT c.car_id) AS totalGeral
+                 FROM CARONAS c
+                 WHERE c.car_id IN (
+                     SELECT sc.car_id FROM SOLICITACOES_CARONA sc
+                     WHERE sc.usu_id_passageiro = ? AND sc.sol_status = 2
+                     UNION
+                     SELECT cp.car_id FROM CARONA_PESSOAS cp
+                     WHERE cp.usu_id = ? AND cp.car_pes_status = 1
+                 )${filtroStatus}`,
+                params
+            );
+
+            return res.status(200).json({
+                message:    "Caronas como passageiro listadas.",
+                totalGeral,
+                total:      caronas.length,
+                page,
+                limit,
+                ...(req.query.status !== undefined && { status: parseInt(req.query.status) }),
+                caronas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarCaronasComoPassageiro:", error);
+            return res.status(500).json({ error: "Erro ao listar caronas como passageiro." });
         }
     }
 
@@ -757,7 +836,7 @@ class CaronaController {
             await conn.beginTransaction();
 
             await conn.query(
-                'UPDATE CARONAS SET car_status = 0 WHERE car_id = ?',
+                'UPDATE CARONAS SET car_status = 0, car_deletado_em = NOW() WHERE car_id = ?',
                 [car_id]
             );
             // Cancela solicitações pendentes (1) e aceitas (2) — libera passageiros para novas caronas

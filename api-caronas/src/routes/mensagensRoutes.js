@@ -53,6 +53,14 @@ router.get('/carona/:car_id', authMiddleware, MensagemController.listarConversa)
 router.delete('/:men_id', authMiddleware, MensagemController.deletarMensagem);
 
 /**
+ * ROTA: PATCH /api/mensagens/:men_id/ler
+ * Descrição: Marca uma mensagem como lida (men_status = 3) — apenas o destinatário
+ * Acesso: PROTEGIDO
+ * Retorno: Status 200
+ */
+router.patch('/:men_id/ler', authMiddleware, MensagemController.marcarLida);
+
+/**
  * ROTA: PUT /api/mensagens/:men_id
  * Descrição: Edita uma mensagem já enviada (apenas o remetente)
  * Acesso: PROTEGIDO

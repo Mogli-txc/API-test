@@ -58,7 +58,22 @@ class CaronaPessoasController {
                 return res.status(403).json({ error: "Sem permissão para adicionar passageiros nesta carona." });
             }
 
-            // PASSO 4: Verifica se o passageiro já está nesta carona
+            // PASSO 4: Verifica se o passageiro tem nível de verificação adequado
+            // Bloqueados: 0 (não verificado), 9 (suspenso). Permitidos: 1, 2, 5, 6
+            const [passageiro] = await db.query(
+                'SELECT usu_verificacao FROM USUARIOS WHERE usu_id = ? AND usu_status = 1',
+                [usu_id]
+            );
+            if (passageiro.length === 0) {
+                return res.status(404).json({ error: "Passageiro não encontrado ou inativo." });
+            }
+            if (![1, 2, 5, 6].includes(passageiro[0].usu_verificacao)) {
+                return res.status(403).json({
+                    error: "Passageiro não possui verificação suficiente para participar de caronas."
+                });
+            }
+
+            // PASSO 5: Verifica se o passageiro já está nesta carona
             const [existente] = await db.query(
                 'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ?',
                 [car_id, usu_id]
@@ -67,7 +82,7 @@ class CaronaPessoasController {
                 return res.status(409).json({ error: "Passageiro já está nesta carona." });
             }
 
-            // PASSO 5: Verifica se o passageiro já está vinculado a OUTRA carona ativa
+            // PASSO 6: Verifica se o passageiro já está vinculado a OUTRA carona ativa
             // Vínculo = sol_status = 2 (Aceito) em carona com car_status IN (1, 2)
             // Exclui a carona atual para permitir adicionar passageiro já aceito via solicitação
             const [jaVinculado] = await db.query(
@@ -82,7 +97,7 @@ class CaronaPessoasController {
                 });
             }
 
-            // PASSO 6: Insere passageiro e decrementa vagas em transação atômica.
+            // PASSO 7: Insere passageiro e decrementa vagas em transação atômica.
             // SELECT ... FOR UPDATE bloqueia a linha da carona e re-lê vagas — previne race condition de overbooking.
             conn = await db.getConnection();
             await conn.beginTransaction();
@@ -110,7 +125,7 @@ class CaronaPessoasController {
 
             await conn.commit();
 
-            // PASSO 7: Resposta de sucesso
+            // PASSO 8: Resposta de sucesso
             return res.status(201).json({
                 message: "Passageiro adicionado à carona com sucesso!",
                 passageiro: {
@@ -168,10 +183,23 @@ class CaronaPessoasController {
                 }
             }
 
-            // PASSO 4: Parâmetros de paginação
+            // PASSO 4: Parâmetros de paginação e filtro opcional de status
             const page   = Math.max(1, parseInt(req.query.page)  || 1);
             const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
+
+            // ?status= filtra por car_pes_status: 0=Cancelado, 1=Aceito, 2=Negado
+            // Sem o parâmetro, retorna apenas Aceitos (1) por padrão para evitar poluição de tela
+            let filtroStatus = ' AND cp.car_pes_status = 1'; // padrão: apenas aceitos
+            const statusParams = [car_id];
+            if (req.query.status !== undefined) {
+                const statusFiltro = parseInt(req.query.status);
+                if (isNaN(statusFiltro) || ![0, 1, 2].includes(statusFiltro)) {
+                    return res.status(400).json({ error: "status inválido. Use 0 (Cancelado), 1 (Aceito) ou 2 (Negado)." });
+                }
+                filtroStatus = ' AND cp.car_pes_status = ?';
+                statusParams.push(statusFiltro);
+            }
 
             // PASSO 5: Busca passageiros com nome do usuário via JOIN (sem expor e-mail)
             const [passageiros] = await db.query(
@@ -179,15 +207,15 @@ class CaronaPessoasController {
                         u.usu_nome AS passageiro
                  FROM CARONA_PESSOAS cp
                  INNER JOIN USUARIOS u ON cp.usu_id = u.usu_id
-                 WHERE cp.car_id = ?
+                 WHERE cp.car_id = ?${filtroStatus}
                  ORDER BY cp.car_pes_id ASC
                  LIMIT ? OFFSET ?`,
-                [car_id, limit, offset]
+                [...statusParams, limit, offset]
             );
 
             const [[{ totalGeral }]] = await db.query(
-                'SELECT COUNT(*) AS totalGeral FROM CARONA_PESSOAS WHERE car_id = ?',
-                [car_id]
+                `SELECT COUNT(*) AS totalGeral FROM CARONA_PESSOAS cp WHERE cp.car_id = ?${filtroStatus}`,
+                statusParams
             );
 
             // PASSO 6: Resposta de sucesso
@@ -198,6 +226,7 @@ class CaronaPessoasController {
                 page,
                 limit,
                 car_id:      parseInt(car_id),
+                ...(req.query.status !== undefined && { status: parseInt(req.query.status) }),
                 passageiros
             });
 

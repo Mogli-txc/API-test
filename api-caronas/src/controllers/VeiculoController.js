@@ -20,7 +20,8 @@ const db = require('../config/database'); // Pool de conexão MySQL
 
 const LIMITE_MAX_PAGINACAO = 100;
 const { checkDevOrOwner } = require('../utils/authHelper');
-const { stripHtml } = require('../utils/sanitize');
+const { stripHtml }       = require('../utils/sanitize');
+const { registrarAudit }  = require('../utils/auditLog');
 
 class VeiculoController {
 
@@ -95,6 +96,13 @@ class VeiculoController {
                 [usu_id]
             );
 
+            await registrarAudit({
+                tabela: 'VEICULOS', registroId: resultado.insertId,
+                acao: 'VEICULO_CADASTRAR',
+                novo: { vei_placa: placa_limpa, vei_tipo: tipoNum, vei_vagas: vagasNum },
+                usuId: usu_id, ip: req.ip
+            });
+
             return res.status(201).json({
                 message: "Veículo registrado com sucesso!",
                 veiculo: {
@@ -140,8 +148,12 @@ class VeiculoController {
             }
 
             // PASSO 2: Verifica existência, propriedade e status ativo
+            // CAST garante retorno numérico — BIT(1) é devolvido como Buffer pelo mysql2
             const [veiculo] = await db.query(
-                'SELECT vei_tipo, vei_vagas, vei_status FROM VEICULOS WHERE vei_id = ? AND usu_id = ?',
+                `SELECT CAST(vei_tipo AS UNSIGNED) AS vei_tipo,
+                        vei_vagas,
+                        CAST(vei_status AS UNSIGNED) AS vei_status
+                 FROM VEICULOS WHERE vei_id = ? AND usu_id = ?`,
                 [vei_id, usu_id]
             );
             if (veiculo.length === 0) {
@@ -220,8 +232,9 @@ class VeiculoController {
             }
 
             // PASSO 1: Verifica existência e propriedade
+            // CAST garante retorno numérico — BIT(1) é devolvido como Buffer pelo mysql2
             const [veiculo] = await db.query(
-                'SELECT vei_status FROM VEICULOS WHERE vei_id = ? AND usu_id = ?',
+                'SELECT CAST(vei_status AS UNSIGNED) AS vei_status FROM VEICULOS WHERE vei_id = ? AND usu_id = ?',
                 [vei_id, usu_id]
             );
             if (veiculo.length === 0) {
@@ -244,7 +257,7 @@ class VeiculoController {
 
             // PASSO 3: Desativa o veículo
             await db.query(
-                'UPDATE VEICULOS SET vei_status = 0 WHERE vei_id = ?',
+                'UPDATE VEICULOS SET vei_status = 0, vei_apagado_em = NOW() WHERE vei_id = ?',
                 [vei_id]
             );
 
@@ -268,11 +281,65 @@ class VeiculoController {
                 );
             }
 
+            await registrarAudit({
+                tabela: 'VEICULOS', registroId: parseInt(vei_id),
+                acao: 'VEICULO_DESATIVAR',
+                usuId: usu_id, ip: req.ip
+            });
+
             return res.status(200).json({ message: "Veículo desativado com sucesso." });
 
         } catch (error) {
             console.error("[ERRO] desativarVeiculo:", error);
             return res.status(500).json({ error: "Erro ao desativar veículo." });
+        }
+    }
+
+    /**
+     * MÉTODO: obterPorId
+     * Retorna os dados de um veículo específico.
+     * Apenas o dono ou Desenvolvedor pode visualizar.
+     *
+     * Tabela: VEICULOS (SELECT)
+     * Parâmetro: vei_id (via URL)
+     */
+    async obterPorId(req, res) {
+        try {
+            const { vei_id } = req.params;
+
+            if (!vei_id || isNaN(vei_id)) {
+                return res.status(400).json({ error: "ID de veículo inválido." });
+            }
+
+            // PASSO 1: Busca o veículo (inclui usu_id para checar ownership)
+            const [rows] = await db.query(
+                `SELECT vei_id, usu_id,
+                        vei_placa, vei_marca_modelo,
+                        CAST(vei_tipo AS UNSIGNED)   AS vei_tipo,
+                        vei_cor, vei_vagas,
+                        CAST(vei_status AS UNSIGNED) AS vei_status,
+                        vei_criado_em, vei_atualizado_em
+                 FROM VEICULOS WHERE vei_id = ?`,
+                [vei_id]
+            );
+
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "Veículo não encontrado." });
+            }
+
+            // PASSO 2: Apenas dono ou Desenvolvedor podem ver
+            if (!await checkDevOrOwner(req.user.id, rows[0].usu_id)) {
+                return res.status(403).json({ error: "Sem permissão para visualizar este veículo." });
+            }
+
+            return res.status(200).json({
+                message: `Veículo ${vei_id} recuperado.`,
+                veiculo: rows[0]
+            });
+
+        } catch (error) {
+            console.error("[ERRO] obterPorId (veículo):", error);
+            return res.status(500).json({ error: "Erro ao recuperar veículo." });
         }
     }
 
