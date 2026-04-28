@@ -112,22 +112,33 @@ INSERT INTO CURSOS (cur_semestre, cur_nome, esc_id) VALUES
 --                             → testa bloqueio de login via per_habilitado (C2)
 --   - usu_id=10 (TempVei):   Temporário com veículo (verificacao=6) — OTP confirmado + veículo
 --                             cadastrado, acesso por 5 dias para pedir e oferecer caronas
+--
+-- CONTAS DE TESTE DE ACESSO (passam por todos os níveis de segurança de login):
+--   - usu_id=6  (Admin Sistema): Desenvolvedor (per_tipo=2) — acesso total; e-mail: admin@sistema.inova.br
+--   - usu_id=11 (Admin Escola):  Administrador (per_tipo=1, per_escola_id=1) — escopo Escola Inova;
+--                                 e-mail: admin.escola@inova.edu.br
+--                                 Requisitos verificados: usu_status=1, verificacao=1, per_habilitado=1, sem penalidade ativa
 -- =====================================================
 -- usu_lat/usu_lon: coordenadas extraídas de usu_endereco_geom nos dados seed  [v10].
 -- Em produção, são preenchidas automaticamente pelo UsuarioController.cadastrar()
 -- chamando geocodingService.geocodificarEndereco(usu_endereco) após a transação principal.
 -- NULL para cadastros temporários (7, 8, 10) que não possuem endereço.
+-- Senhas de teste (bcrypt custo 12):
+--   usu_id=6  (Admin Sistema / Desenvolvedor): Dev@1234
+--   usu_id=11 (Admin Escola):                 Admin@123
+--   Todos os demais:                           Senha@123
 INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_verificacao, usu_verificacao_expira, usu_status, usu_email, usu_descricao, usu_endereco, usu_endereco_geom, usu_horario_habitual, usu_lat, usu_lon) VALUES
-    ('Carlos Silva',   '11999991111', 'MAT2023001',  'hash_carlos_1',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',   'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP', '-23.5505,-46.6333', '07:30:00', -23.5505, -46.6333),  -- usu_id=1
-    ('Mariana Souza',  '11988882222', 'MAT2023002',  'hash_mariana_2', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'mariana.souza@aluno.inova.br',  'Passageira tranquila, nunca me atraso.',            'Av. Brasil, 456, Jardins, São Paulo - SP',     '-23.5599,-46.6400', '07:45:00', -23.5599, -46.6400),  -- usu_id=2
-    ('Pedro Santos',   '19977773333', 'MAT2022099',  'hash_pedro_3',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'pedro.santos@uni.saber.br',     'Moto rápida, somente 1 passageiro.',               'Rua da Paz, 88, Vila Nova, Campinas - SP',     '-22.9056,-47.0608', '18:30:00', -22.9056, -47.0608),  -- usu_id=3
-    ('Ana Oliveira',   '11966664444', 'MAT2024001',  'hash_ana_4',     0, NULL,                              0, 'ana.oliveira@aluno.inova.br',   NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL,        -23.5000, -46.6000),  -- usu_id=4 (inativa)
-    ('Lucas Pereira',  '11955553333', 'MAT2023050',  'hash_lucas_5',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'lucas.pereira@aluno.inova.br',  NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL,        -23.5678, -46.6890),  -- usu_id=5
-    ('Admin Sistema',  '11900000001', 'ADMIN000001', 'hash_admin_6',   1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin@sistema.inova.br',        'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560),  -- usu_id=6
-    (NULL,             NULL,          NULL,           'hash_novo_7',   5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',     NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=7:  Temporário sem endereço
-    (NULL,             NULL,          NULL,           'hash_pend_8',   0, NULL,                              1, 'pendente.otp@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=8:  Aguardando OTP
-    ('Fábio Suspenso', '11900000009', 'MAT2023099',  'hash_fabio_9',  1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                               'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL,        -23.5000, -46.6500),  -- usu_id=9
-    (NULL,             NULL,          NULL,           'hash_tempv_10', 6, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'temp.veiculo@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL);           -- usu_id=10: Temporário com veículo
+    ('Carlos Silva',   '11999991111', 'MAT2023001',  '$2b$12$Piwxr050DVwdiJv/0.IRZOtoxsLcraeGCp0jN50PMyh0zNa8iptO2', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'carlos.silva@aluno.inova.br',   'Motorista pontual, adoro ouvir música na estrada!', 'Rua das Flores, 123, Centro, São Paulo - SP', '-23.5505,-46.6333', '07:30:00', -23.5505, -46.6333),  -- usu_id=1  senha: Senha@123
+    ('Mariana Souza',  '11988882222', 'MAT2023002',  '$2b$12$jBsMkmXJWT0ThU3LOFnqUOIzXE3s0t1m3vKNKkbufji0k3cAMJPly', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'mariana.souza@aluno.inova.br',  'Passageira tranquila, nunca me atraso.',            'Av. Brasil, 456, Jardins, São Paulo - SP',     '-23.5599,-46.6400', '07:45:00', -23.5599, -46.6400),  -- usu_id=2  senha: Senha@123
+    ('Pedro Santos',   '19977773333', 'MAT2022099',  '$2b$12$EuoBESyJeSBB93LC3AYTsOFv2FmPdKnYQ52yqZbK8wffEJO980Rm6', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'pedro.santos@uni.saber.br',     'Moto rápida, somente 1 passageiro.',               'Rua da Paz, 88, Vila Nova, Campinas - SP',     '-22.9056,-47.0608', '18:30:00', -22.9056, -47.0608),  -- usu_id=3  senha: Senha@123
+    ('Ana Oliveira',   '11966664444', 'MAT2024001',  '$2b$12$.PwFc8to5aMeaGoyh./R1ef/Xc5/ya8HbP2E1qFVT.43jaZBONilS', 0, NULL,                              0, 'ana.oliveira@aluno.inova.br',   NULL,                                               'Rua Torta, 10, Bairro Fim, São Paulo - SP',    '-23.5000,-46.6000', NULL,        -23.5000, -46.6000),  -- usu_id=4  (inativa) senha: Senha@123
+    ('Lucas Pereira',  '11955553333', 'MAT2023050',  '$2b$12$S2PDkn7DOxsxcPx740H.YeldX40gEfHQDLGh7esE61mTKByE8L1tK', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'lucas.pereira@aluno.inova.br',  NULL,                                               'Rua Nova, 200, Pinheiros, São Paulo - SP',     '-23.5678,-46.6890', NULL,        -23.5678, -46.6890),  -- usu_id=5  senha: Senha@123
+    ('Admin Sistema',  '11900000001', 'ADMIN000001', '$2b$12$q3F3dPiovQZcP.Ng5Wvlye/2hVN1p8/0luKbNOYlQYg79hgPNaoqC', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin@sistema.inova.br',        'Administrador do sistema.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560),  -- usu_id=6  senha: Dev@1234
+    (NULL,             NULL,          NULL,           '$2b$12$SApYB26Nzyp.RFaBSQRgFefA0vrvUbwzTLoxE6nhMPmPUP2AwrXEK', 5, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'novo.aluno@aluno.inova.br',     NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=7  senha: Senha@123
+    (NULL,             NULL,          NULL,           '$2b$12$btvRPk.B5l74/9Jp4.JIouE4dgUSGhaB4Zt5iSkgxcNWXvyOFOGAu', 0, NULL,                              1, 'pendente.otp@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=8  senha: Senha@123
+    ('Fábio Suspenso', '11900000009', 'MAT2023099',  '$2b$12$WvlgrZZgujOfqmsbsdELWuMuMS9njS/t6k.nDixdZSB48miKvJPza', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                               'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL,        -23.5000, -46.6500),  -- usu_id=9  senha: Senha@123
+    (NULL,             NULL,          NULL,           '$2b$12$bpICjGCMprMLEOh7IPDpxuzQhKjOsOWg3.EJQqc.wLjMdsFUk/lNm', 6, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'temp.veiculo@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=10 senha: Senha@123
+    ('Admin Escola',   '11900000011', 'ADESC000011', '$2b$12$IG1G1Al0Qd/ndqaJgrySNOLrLG69gXpaaCdGDsqRrdTf/H3s0UjTO', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin.escola@inova.edu.br',     'Administrador da Faculdade Tecnológica Inova.',    'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560);  -- usu_id=11 senha: Admin@123
 
 
 -- =====================================================
@@ -156,7 +167,8 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
     (7,  NULL,                       NOW(),                 NULL),                    -- temporário sem veículo: nunca logou ainda
     (8,  NULL,                       NOW(),                 NULL),                    -- OTP pendente: nunca logou (bloqueado até verificar)
     (9,  NULL,                       NOW(),                 NULL),                    -- Fábio: conta ativa e verificada, mas suspenso pelo admin
-    (10, NULL,                       NOW(),                 NULL);                    -- temporário com veículo: nunca logou ainda
+    (10, NULL,                       NOW(),                 NULL),                    -- temporário com veículo: nunca logou ainda
+    (11, NULL,                       NOW(),                 NULL);                    -- Admin Escola: conta nova, ainda não logou
 
 
 -- =====================================================
@@ -174,6 +186,7 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
 --   - Novo (usu_id=7):    Temporário sem veículo (verificacao=5) — per_habilitado=1 após OTP
 --   - Fábio (usu_id=9):   Conta ativa e verificada, desabilitada pelo admin (per_habilitado=0) — testa C2
 --   - TempVei (usu_id=10): Temporário com veículo (verificacao=6) — per_habilitado=1 após OTP + veículo
+--   - Admin Escola (usu_id=11): Administrador (per_tipo=1, per_escola_id=1) — escopo restrito à Escola Inova
 -- =====================================================
 -- per_tipo: 0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)
 -- per_escola_id: NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador
@@ -187,7 +200,8 @@ INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_es
     (7,  NULL,             NOW(), 0, 1, NULL),  -- usu_id=7:  Novo     → temporário sem veículo, per_habilitado=1 após OTP
     (8,  NULL,             NOW(), 0, 0, NULL),  -- usu_id=8:  Pendente → OTP não confirmado (per_habilitado=0 correto)
     (9,  'Fábio Suspenso', NOW(), 0, 0, NULL),  -- usu_id=9:  Suspenso → usu_status=1 + verificacao=1, mas per_habilitado=0 → testa C2
-    (10, NULL,             NOW(), 0, 1, NULL);  -- usu_id=10: TempVei  → temporário com veículo, per_habilitado=1
+    (10, NULL,             NOW(), 0, 1, NULL),  -- usu_id=10: TempVei     → temporário com veículo, per_habilitado=1
+    (11, 'Admin Escola',  NOW(), 1, 1, 1);    -- usu_id=11: Admin Escola → Administrador escopo esc_id=1 (Inova)
 
 
 -- =====================================================
