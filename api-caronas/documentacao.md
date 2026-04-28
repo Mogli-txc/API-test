@@ -36,7 +36,7 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.1.0
+  version: 1.2.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -4041,4 +4041,399 @@ paths:
           description: usu_endereco ausente
         '403':
           description: Sem permissão (não é dono nem Dev)
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # CARONAS — buscar (filtros avançados)
+  # ────────────────────────────────────────────────────────────────────────────
+  /api/caronas/buscar:
+    get:
+      summary: Busca caronas com filtros avançados
+      tags: [Caronas]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Diferente de `GET /api/caronas` (somente abertas, paginação cursor), este endpoint
+        aceita qualquer `car_status` e filtro por data. Sem filtro de status, retorna apenas
+        `car_status = 1` (abertas) por padrão.
+      parameters:
+        - in: query
+          name: car_status
+          schema: { type: integer, enum: [0, 1, 2, 3] }
+          description: "0=Cancelada, 1=Aberta (padrão), 2=Em espera, 3=Finalizada"
+        - in: query
+          name: data
+          schema: { type: string, format: date }
+          description: "YYYY-MM-DD — filtra por data da carona"
+          example: "2026-05-10"
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+        - in: query
+          name: cur_id
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Resultado da busca com dados de veículo, motorista, curso e escola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  totalGeral: { type: integer }
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  caronas:
+                    type: array
+                    items: { $ref: '#/components/schemas/Carona' }
+        '400':
+          description: Parâmetro inválido (car_status, data, esc_id ou cur_id)
+        '401':
+          description: Não autenticado
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # ADMIN — novos endpoints (2026-04-28)
+  # ────────────────────────────────────────────────────────────────────────────
+  /api/admin/cadastrar:
+    post:
+      summary: Cria conta de Administrador ou Desenvolvedor (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Cria a conta sem fluxo de OTP. A conta nasce com `usu_verificacao = 1` e
+        `per_habilitado = 1` — login imediato com email + senha.
+        Apenas `per_tipo = 1` (Admin) ou `2` (Dev) são aceitos.
+        Admin exige `per_escola_id` válido.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_email, usu_senha, per_tipo]
+              properties:
+                usu_email: { type: string, format: email }
+                usu_senha: { type: string, minLength: 8 }
+                usu_nome:  { type: string }
+                per_tipo:
+                  type: integer
+                  enum: [1, 2]
+                  description: "1=Administrador, 2=Desenvolvedor"
+                per_escola_id:
+                  type: integer
+                  description: Obrigatório quando per_tipo=1
+      responses:
+        '201':
+          description: Conta criada com sucesso
+        '400':
+          description: Campos inválidos ou per_escola_id ausente para Admin
+        '403':
+          description: Apenas Desenvolvedor pode criar contas administrativas
+        '404':
+          description: Escola não encontrada (per_tipo=1)
+        '409':
+          description: E-mail já cadastrado
+
+  /api/admin/usuarios/{usu_id}/redefinir-senha:
+    post:
+      summary: Redefine senha de conta Admin/Dev sem email (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: usu_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nova_senha]
+              properties:
+                nova_senha: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Senha redefinida — sessões ativas invalidadas
+        '400':
+          description: nova_senha ausente ou curta; tentativa de alterar própria senha
+        '403':
+          description: Conta alvo não é Admin/Dev ou sem permissão
+        '404':
+          description: Usuário não encontrado ou inativo
+
+  /api/admin/stats/documentos:
+    get:
+      summary: Estatísticas de documentos de verificação
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: Admin vê apenas docs de usuários da sua escola.
+      responses:
+        '200':
+          description: Totais por tipo e status OCR
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats:
+                    type: object
+                    properties:
+                      total:        { type: integer }
+                      comprovantes: { type: integer }
+                      cnhs:         { type: integer }
+                      aprovados:    { type: integer }
+                      reprovados:   { type: integer }
+
+  /api/admin/stats/contratos:
+    get:
+      summary: Estatísticas de contratos de escolas (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Resumo de contratos + lista de alertas de vencimento (90 dias)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats:
+                    type: object
+                    properties:
+                      total_escolas:   { type: integer }
+                      sem_contrato:    { type: integer }
+                      ativos:          { type: integer }
+                      expirados:       { type: integer }
+                      vencendo_90_dias: { type: integer }
+                  alertas_vencimento:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        esc_id:                  { type: integer }
+                        esc_nome:                { type: string }
+                        esc_contrato_duracao:    { type: string }
+                        esc_contrato_expira:     { type: string, format: date }
+                        dias_restantes:          { type: integer }
+        '403':
+          description: Apenas Desenvolvedor
+
+  /api/admin/usuarios/{usu_id}/status:
+    patch:
+      summary: Ativa ou inativa conta de usuário sem penalidade
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Altera `usu_status` (0=inativo, 1=ativo). Não opera sobre Admin ou Dev.
+        Admin só pode alterar usuários da sua escola.
+      parameters:
+        - in: path
+          name: usu_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_status]
+              properties:
+                usu_status:
+                  type: integer
+                  enum: [0, 1]
+      responses:
+        '200':
+          description: Status atualizado
+        '403':
+          description: Tentativa sobre Admin/Dev ou usuário de outra escola
+        '404':
+          description: Usuário não encontrado
+        '409':
+          description: Usuário já está no status informado
+
+  /api/admin/matriculas:
+    get:
+      summary: Lista matrículas do sistema
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+          description: Filtra por escola (Dev apenas)
+        - in: query
+          name: cur_id
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Lista de matrículas com dados de usuário, curso e escola
+
+  /api/admin/avaliacoes:
+    get:
+      summary: Lista avaliações com dados dos participantes
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: Escopo de escola aplica-se ao usuário avaliado.
+      parameters:
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+          description: Filtra por escola (Dev apenas — via avaliado)
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Lista de avaliações com nomes de avaliador e avaliado
+
+  /api/admin/veiculos:
+    get:
+      summary: Lista veículos com dados do proprietário
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+          description: Filtra por escola (Dev apenas)
+        - in: query
+          name: vei_status
+          schema: { type: integer, enum: [0, 1] }
+          description: "0=inativo, 1=ativo"
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Lista de veículos com usu_nome e usu_email do proprietário
+
+  /api/admin/logs/exportar:
+    get:
+      summary: Exporta AUDIT_LOG como CSV (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: Máximo de 10.000 registros por chamada.
+      parameters:
+        - in: query
+          name: acao
+          schema: { type: string }
+        - in: query
+          name: tabela
+          schema: { type: string }
+        - in: query
+          name: usu_id
+          schema: { type: integer }
+        - in: query
+          name: data_inicio
+          schema: { type: string, format: date }
+          description: "YYYY-MM-DD"
+        - in: query
+          name: data_fim
+          schema: { type: string, format: date }
+          description: "YYYY-MM-DD"
+      responses:
+        '200':
+          description: CSV com cabeçalho e registros do audit log
+          content:
+            text/csv:
+              schema:
+                type: string
+                description: "audit_id,tabela,registro_id,acao,dados_anteriores,dados_novos,usu_id,ip,criado_em"
+        '403':
+          description: Apenas Desenvolvedor
+
+  /api/admin/escolas/{esc_id}/contrato:
+    post:
+      summary: Define ou renova contrato da escola (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: |
+        A data de expiração é calculada no backend: `data_inicio + duracao`.
+        Se `data_inicio` for omitido, usa o dia atual.
+        Audit log: `CONTRATO_DEFINIR`.
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [duracao]
+              properties:
+                duracao:
+                  type: string
+                  enum: [1ano, 2anos, 5anos]
+                  description: Duração do contrato
+                data_inicio:
+                  type: string
+                  format: date
+                  description: "YYYY-MM-DD — padrão: dia atual"
+      responses:
+        '200':
+          description: Contrato definido com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  contrato:
+                    type: object
+                    properties:
+                      esc_id:                  { type: integer }
+                      esc_contrato_duracao:    { type: string }
+                      esc_contrato_inicio:     { type: string, format: date }
+                      esc_contrato_expira:     { type: string, format: date }
+        '400':
+          description: duracao inválida ou data_inicio mal formatada
+        '403':
+          description: Apenas Desenvolvedor
+        '404':
+          description: Escola não encontrada
+    delete:
+      summary: Cancela contrato da escola (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Define `esc_contrato_duracao`, `esc_contrato_inicio` e `esc_contrato_expira` como NULL.
+        Audit log: `CONTRATO_CANCELAR`.
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Contrato cancelado — campos de contrato redefinidos para NULL
+        '403':
+          description: Apenas Desenvolvedor
+        '404':
+          description: Escola não encontrada
+        '409':
+          description: Escola não possui contrato cadastrado
 ```

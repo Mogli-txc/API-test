@@ -66,6 +66,62 @@ SELECT e.esc_id, e.esc_nome
 FROM ESCOLAS e
 WHERE NOT EXISTS (SELECT 1 FROM CURSOS c WHERE c.esc_id = e.esc_id);
 
+-- ── Contratos  [v11] ─────────────────────────────────────────────────────────
+
+-- [C] TESTE: Visão completa de contratos (painel dev)
+SELECT
+    esc_id, esc_nome,
+    esc_contrato_duracao,
+    esc_contrato_inicio,
+    esc_contrato_expira,
+    CASE
+        WHEN esc_contrato_expira IS NULL                    THEN 'Sem contrato'
+        WHEN esc_contrato_expira > CURDATE()                THEN 'Ativo'
+        ELSE                                                     'Expirado'
+    END AS situacao_contrato,
+    DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes
+FROM ESCOLAS
+ORDER BY esc_contrato_expira ASC;
+
+-- [C] TESTE: Escolas com contrato ATIVO (expiração futura)
+SELECT esc_id, esc_nome, esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira,
+       DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes
+FROM ESCOLAS
+WHERE esc_contrato_expira > CURDATE()
+ORDER BY esc_contrato_expira ASC;
+
+-- [C] TESTE: Escolas com contrato EXPIRADO
+SELECT esc_id, esc_nome, esc_contrato_expira,
+       DATEDIFF(CURDATE(), esc_contrato_expira) AS dias_expirado
+FROM ESCOLAS
+WHERE esc_contrato_expira IS NOT NULL
+  AND esc_contrato_expira <= CURDATE()
+ORDER BY esc_contrato_expira DESC;
+
+-- [C] TESTE: Escolas SEM contrato cadastrado
+SELECT esc_id, esc_nome
+FROM ESCOLAS
+WHERE esc_contrato_duracao IS NULL;
+
+-- [C] TESTE: Contratos próximos do vencimento nos próximos 90 dias (alerta de renovação)
+SELECT esc_id, esc_nome, esc_contrato_duracao, esc_contrato_expira,
+       DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes
+FROM ESCOLAS
+WHERE esc_contrato_expira BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 90 DAY)
+ORDER BY esc_contrato_expira ASC;
+
+-- [C] TESTE: Resumo de contratos por situação (card do painel dev)
+SELECT
+    CASE
+        WHEN esc_contrato_expira IS NULL             THEN 'Sem contrato'
+        WHEN esc_contrato_expira > CURDATE()         THEN 'Ativo'
+        ELSE                                              'Expirado'
+    END AS situacao,
+    COUNT(*) AS total
+FROM ESCOLAS
+GROUP BY situacao
+ORDER BY situacao;
+
 
 -- =====================================================
 -- 2. CURSOS

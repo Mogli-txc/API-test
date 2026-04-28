@@ -124,4 +124,79 @@ async function isParticipanteCarona(caronaId, usuId) {
     return passageiro.length > 0; // true = passageiro confirmado | false = não participante
 }
 
-module.exports = { checkDevOrOwner, checkAdminOrOwner, getMotoristaId, isParticipanteCarona };
+/**
+ * Verifica se o contrato da escola do usuário está ativo.
+ * Bloqueia login e renovação de token quando o contrato expirou.
+ *
+ * Regras:
+ *   - Desenvolvedor (per_tipo=2): nunca bloqueado (gerencia os contratos)
+ *   - Administrador (per_tipo=1): bloqueado se o contrato da sua escola (per_escola_id) expirou
+ *   - Usuário comum (per_tipo=0): bloqueado se o email domínio bate com uma escola de contrato expirado
+ *
+ * Chamada em: UsuarioController.login() e UsuarioController.refreshToken()
+ *
+ * @param {number} usu_id    - ID do usuário a verificar
+ * @param {string} usu_email - Email do usuário (para checar domínio em usuários comuns)
+ * @returns {Promise<{bloqueado: boolean, mensagem?: string}>}
+ */
+async function verificarContratoEscola(usu_id, usu_email) {
+    try {
+        // PASSO 1: Busca o papel do usuário
+        const [perfil] = await db.query(
+            'SELECT per_tipo, per_escola_id FROM PERFIL WHERE usu_id = ?',
+            [usu_id]
+        );
+        if (perfil.length === 0) return { bloqueado: false };
+
+        const { per_tipo, per_escola_id } = perfil[0];
+
+        // Desenvolvedor nunca é bloqueado por contrato
+        if (per_tipo === 2) return { bloqueado: false };
+
+        // PASSO 2: Administrador — verifica o contrato da sua escola
+        if (per_tipo === 1 && per_escola_id) {
+            const [[escola]] = await db.query(
+                'SELECT esc_contrato_expira FROM ESCOLAS WHERE esc_id = ?',
+                [per_escola_id]
+            );
+            if (escola && escola.esc_contrato_expira &&
+                new Date(escola.esc_contrato_expira) <= new Date()) {
+                return {
+                    bloqueado: true,
+                    mensagem: 'O contrato da sua instituição está expirado. Entre em contato com o administrador do sistema para renovação.'
+                };
+            }
+            return { bloqueado: false };
+        }
+
+        // PASSO 3: Usuário comum — verifica se o domínio do email pertence a escola com contrato expirado
+        if (per_tipo === 0 && usu_email) {
+            const dominio = usu_email.split('@')[1];
+            if (dominio) {
+                const [escolas] = await db.query(
+                    `SELECT esc_contrato_expira FROM ESCOLAS
+                     WHERE esc_dominio = ? AND esc_contrato_expira IS NOT NULL`,
+                    [dominio]
+                );
+                if (escolas.length > 0 &&
+                    new Date(escolas[0].esc_contrato_expira) <= new Date()) {
+                    return {
+                        bloqueado: true,
+                        mensagem: 'O contrato da sua instituição está expirado. Entre em contato com o administrador da sua escola.'
+                    };
+                }
+            }
+        }
+
+        return { bloqueado: false };
+
+    } catch (err) {
+        // Degrada graciosamente se a migration v11 ainda não foi aplicada ao banco.
+        // ER_BAD_FIELD_ERROR ocorre quando esc_contrato_* ainda não existem.
+        // Após rodar create.sql (ou a migration v11), este catch nunca é acionado.
+        if (err.code === 'ER_BAD_FIELD_ERROR') return { bloqueado: false };
+        throw err;
+    }
+}
+
+module.exports = { checkDevOrOwner, checkAdminOrOwner, getMotoristaId, isParticipanteCarona, verificarContratoEscola };

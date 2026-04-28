@@ -18,6 +18,15 @@ const checkRole       = require('../middlewares/roleMiddleware');
 const adminGuard = [authMiddleware, checkRole([1, 2])];
 
 /**
+ * POST /api/admin/cadastrar
+ * Cria conta de Administrador (per_tipo=1) ou Desenvolvedor (per_tipo=2) sem fluxo de OTP.
+ * A conta nasce verificada (usu_verificacao=1) e habilitada (per_habilitado=1).
+ * Body: { usu_email, usu_senha, usu_nome?, per_tipo (1|2), per_escola_id? }
+ * Acesso: RESTRITO — apenas Desenvolvedor (verificação adicional no controller)
+ */
+router.post('/cadastrar', ...adminGuard, AdminController.cadastrarAdminDev);
+
+/**
  * GET /api/admin/stats/usuarios
  * Totais de usuários por status e nível de verificação.
  */
@@ -89,6 +98,88 @@ router.post('/usuarios/:usu_id/penalidades', ...adminGuard, AdminController.apli
  * Administrador: apenas penalidades de usuários da sua escola.
  */
 router.delete('/penalidades/:pen_id', ...adminGuard, AdminController.removerPenalidade);
+
+// ── Gestão de Senhas, Status e Listagens Avançadas ───────────────────────────
+
+/**
+ * POST /api/admin/usuarios/:usu_id/redefinir-senha
+ * Redefine a senha de uma conta Admin ou Dev sem fluxo de email.
+ * Invalida sessões ativas após a operação (force re-login).
+ * Body: { nova_senha }
+ * Acesso: RESTRITO — apenas Desenvolvedor
+ */
+router.post('/usuarios/:usu_id/redefinir-senha', ...adminGuard, AdminController.redefinirSenhaAdmin);
+
+/**
+ * GET /api/admin/stats/documentos
+ * Contagem de documentos de verificação por tipo e status de OCR.
+ * Admin: escopo da escola. Dev: sistema inteiro.
+ */
+router.get('/stats/documentos', ...adminGuard, AdminController.statsDocumentos);
+
+/**
+ * PATCH /api/admin/usuarios/:usu_id/status
+ * Ativa (usu_status=1) ou inativa (usu_status=0) um usuário sem penalidade.
+ * Não opera sobre Admin ou Desenvolvedor.
+ * Body: { usu_status: 0|1 }
+ */
+router.patch('/usuarios/:usu_id/status', ...adminGuard, AdminController.atualizarStatus);
+
+/**
+ * GET /api/admin/matriculas
+ * Lista matrículas com dados de usuário, curso e escola.
+ * Admin: escola; Dev: todos (?esc_id= e ?cur_id= opcionais).
+ */
+router.get('/matriculas', ...adminGuard, AdminController.listarMatriculas);
+
+/**
+ * GET /api/admin/avaliacoes
+ * Lista avaliações com nomes dos participantes.
+ * Escopo de escola aplica-se ao usuário avaliado.
+ * Admin: escola; Dev: todos (?esc_id= opcional).
+ */
+router.get('/avaliacoes', ...adminGuard, AdminController.listarAvaliacoes);
+
+/**
+ * GET /api/admin/veiculos
+ * Lista veículos cadastrados com dados do proprietário.
+ * Admin: escola; Dev: todos (?esc_id= e ?vei_status= opcionais).
+ */
+router.get('/veiculos', ...adminGuard, AdminController.listarVeiculos);
+
+/**
+ * GET /api/admin/logs/exportar
+ * Exporta o AUDIT_LOG como CSV (máx. 10.000 registros por chamada).
+ * Filtros: ?acao=, ?tabela=, ?usu_id=, ?data_inicio=, ?data_fim=
+ * Acesso: RESTRITO — apenas Desenvolvedor
+ */
+router.get('/logs/exportar', ...adminGuard, AdminController.exportarLogs);
+
+// ── Contratos de Escolas  [v11] ──────────────────────────────────────────────
+
+/**
+ * GET /api/admin/stats/contratos
+ * Resumo de contratos: ativos, expirados, sem contrato, vencendo em 90 dias.
+ * Inclui lista de escolas com alerta de vencimento próximo.
+ * Acesso: RESTRITO — apenas Desenvolvedor
+ */
+router.get('/stats/contratos', ...adminGuard, AdminController.statsContratos);
+
+/**
+ * POST /api/admin/escolas/:esc_id/contrato
+ * Define ou renova o contrato de uma escola.
+ * A expiração é calculada no backend: data_inicio + duracao.
+ * Body: { duracao: '1ano'|'2anos'|'5anos', data_inicio?: 'YYYY-MM-DD' (padrão: hoje) }
+ * Acesso: RESTRITO — apenas Desenvolvedor
+ */
+router.post('/escolas/:esc_id/contrato', ...adminGuard, AdminController.definirContrato);
+
+/**
+ * DELETE /api/admin/escolas/:esc_id/contrato
+ * Cancela o contrato de uma escola (define campos de contrato como NULL).
+ * Acesso: RESTRITO — apenas Desenvolvedor
+ */
+router.delete('/escolas/:esc_id/contrato', ...adminGuard, AdminController.cancelarContrato);
 
 // ── CRUD de Escolas ───────────────────────────────────────────────────────────
 

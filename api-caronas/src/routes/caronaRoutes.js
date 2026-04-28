@@ -42,6 +42,15 @@ router.get('/passageiro', authMiddleware, CaronaController.listarCaronasComoPass
  */
 router.post('/oferecer', authMiddleware, CaronaController.criar);
 
+/**
+ * ROTA: GET /api/caronas/buscar
+ * Descrição: Busca caronas com filtros avançados (status, data, escola, curso).
+ * Diferença do GET /: aceita qualquer car_status e filtro por data.
+ * Acesso: PROTEGIDO — Requer Token JWT
+ * Query: ?car_status=, ?data=YYYY-MM-DD, ?esc_id=, ?cur_id=, ?page=, ?limit=
+ */
+router.get('/buscar', authMiddleware, CaronaController.buscar);
+
 // Solicitações de carona: use POST /api/solicitacoes/criar (SolicitacaoController)
 
 /**

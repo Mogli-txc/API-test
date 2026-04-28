@@ -34,7 +34,7 @@ const db             = require('../config/database');
 const { gerarUrl }   = require('../utils/gerarUrl');
 const { gerarOtp, hashOtp } = require('../utils/mailer');
 const { enqueue: enqueueEmail } = require('../utils/emailQueue');
-const { checkDevOrOwner } = require('../utils/authHelper');
+const { checkDevOrOwner, verificarContratoEscola } = require('../utils/authHelper');
 const { registrarAudit } = require('../utils/auditLog');
 const { stripHtml } = require('../utils/sanitize');
 
@@ -429,6 +429,12 @@ class UsuarioController {
             if (!senhaValida) {
                 await registrarAudit({ tabela: 'USUARIOS', registroId: usuario.usu_id, acao: 'LOGIN_FALHA', ip: req.ip });
                 return res.status(401).json({ error: "E-mail ou senha inválidos." });
+            }
+
+            // Verifica contrato da escola — bloqueia admin/usuário se contrato expirou
+            const contrato = await verificarContratoEscola(usuario.usu_id, usuario.usu_email);
+            if (contrato.bloqueado) {
+                return res.status(403).json({ error: contrato.mensagem });
             }
 
             await db.query(
@@ -1027,6 +1033,14 @@ class UsuarioController {
                 // Invalida o token expirado
                 await db.query('UPDATE USUARIOS SET usu_refresh_hash = NULL, usu_refresh_expira = NULL WHERE usu_id = ?', [usuario.usu_id]);
                 return res.status(401).json({ error: "Refresh token expirado. Faça login novamente." });
+            }
+
+            // PASSO 3a: Verifica contrato da escola antes de emitir novo token
+            const contrato = await verificarContratoEscola(usuario.usu_id, usuario.usu_email);
+            if (contrato.bloqueado) {
+                // Invalida o refresh token — força novo login após renovação do contrato
+                await db.query('UPDATE USUARIOS SET usu_refresh_hash = NULL, usu_refresh_expira = NULL WHERE usu_id = ?', [usuario.usu_id]);
+                return res.status(403).json({ error: contrato.mensagem });
             }
 
             // PASSO 4: Emite novo access token

@@ -17,8 +17,11 @@
 --                   usu_reset_expira     (DATETIME NULL — expiração do token de recuperação; validade 15 min)
 -- PERFIL:           per_tipo        (0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total))
 --                   per_escola_id   (NULL para Usuário e Desenvolvedor; esc_id da escola para Administrador)
--- ESCOLAS:          esc_dominio     (NULL=sem restrição de domínio | 'usp.br'=apenas @usp.br)
---                   esc_max_usuarios(NULL=sem limite | N=máximo de usuários ativos por escola)
+-- ESCOLAS:          esc_dominio          (NULL=sem restrição de domínio | 'usp.br'=apenas @usp.br)
+--                   esc_max_usuarios     (NULL=sem limite | N=máximo de usuários ativos por escola)
+--                   esc_contrato_duracao (NULL=sem contrato | '1ano' | '2anos' | '5anos')  [v11]
+--                   esc_contrato_inicio  (DATE NULL — data início do contrato)              [v11]
+--                   esc_contrato_expira  (DATE NULL — expiração calculada pelo backend)     [v11]
 -- VEICULOS:         vei_tipo        (0=Moto (máx 1 vaga), 1=Carro (máx 4 vagas))
 --                   vei_placa       (UNIQUE — mesma placa não pode ser cadastrada duas vezes)
 --                   vei_status      (0=Inutilizado, 1=Ativo)
@@ -38,6 +41,20 @@
 
 
 -- =====================================================
+-- MIGRATION v11 — Contratos de Escolas
+-- Execute este bloco em bancos existentes (antes do create.sql completo).
+-- Não é necessário se o banco foi criado do zero com create.sql atualizado.
+-- =====================================================
+-- ALTER TABLE ESCOLAS
+--     ADD COLUMN esc_contrato_duracao ENUM('1ano','2anos','5anos') NULL DEFAULT NULL
+--         COMMENT 'Duração do contrato com a instituição  [v11]',
+--     ADD COLUMN esc_contrato_inicio DATE NULL DEFAULT NULL
+--         COMMENT 'Data de início do contrato  [v11]',
+--     ADD COLUMN esc_contrato_expira DATE NULL DEFAULT NULL
+--         COMMENT 'Data de expiração calculada (inicio + duracao)  [v11]';
+
+
+-- =====================================================
 -- 1. ESCOLAS
 -- =====================================================
 -- Para que serve no Back-end:
@@ -52,10 +69,14 @@
 -- =====================================================
 -- esc_lat/esc_lon: coordenadas reais obtidas via Nominatim para os endereços seed.
 -- Em produção, serão preenchidas automaticamente pelo AdminController ao criar/atualizar escola.
-INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon) VALUES
-    ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',  'inova.edu.br', 100, -23.5614, -46.6560),  -- esc_id=1: Av. Paulista, SP
-    ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP', 'saber.edu.br', 50,  -22.9056, -47.0608),  -- esc_id=2: Campinas, SP
-    ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP', NULL,           NULL,-21.2091, -50.4294);  -- esc_id=3: Araçatuba, SP
+-- esc_contrato_*: dados de contrato com a instituição  [v11]
+--   Escola 1 (Inova):  contrato de 2 anos iniciado em 2024-01-01, expira 2026-01-01
+--   Escola 2 (Saber):  contrato de 1 ano  iniciado em 2025-06-01, expira 2026-06-01
+--   Escola 3 (Oeste):  sem contrato cadastrado (NULL)
+INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon, esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira) VALUES
+    ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',  'inova.edu.br', 100, -23.5614, -46.6560, '2anos', '2024-01-01', '2026-01-01'),  -- esc_id=1
+    ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP', 'saber.edu.br', 50,  -22.9056, -47.0608, '1ano',  '2025-06-01', '2026-06-01'),  -- esc_id=2
+    ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP', NULL,           NULL,-21.2091, -50.4294, NULL,    NULL,         NULL);           -- esc_id=3: sem contrato
 
 
 -- =====================================================

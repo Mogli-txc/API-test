@@ -17,6 +17,8 @@
 --   v9   — migration-escola-quota.sql: esc_dominio + esc_max_usuarios em ESCOLAS; vei_placa UNIQUE em VEICULOS
 --   v10  — migration-nominatim.sql: esc_lat/esc_lon em ESCOLAS; usu_lat/usu_lon em USUARIOS;
 --           pon_lat/pon_lon + índice em PONTO_ENCONTROS; pon_endereco_geom passa a NULL (opcional)
+--   v11  — migration-contratos.sql: esc_contrato_duracao + esc_contrato_inicio + esc_contrato_expira em ESCOLAS
+--           Gerenciado exclusivamente por Desenvolvedores via POST /api/admin/escolas/:esc_id/contrato
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -39,6 +41,15 @@ CREATE TABLE ESCOLAS (
     -- NULL enquanto não houver geocodificação realizada.
     esc_lat          DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Latitude da escola (Nominatim)  [v10]',
     esc_lon          DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Longitude da escola (Nominatim)  [v10]',
+
+    -- Contrato com a instituição  [v11]
+    -- Gerenciado exclusivamente por Desenvolvedores via POST /api/admin/escolas/:esc_id/contrato.
+    -- NULL em todos os campos = escola sem contrato cadastrado.
+    -- esc_contrato_expira é calculada no backend (JS): esc_contrato_inicio + duracao.
+    -- Valores de esc_contrato_duracao: '1ano' (+1 ano), '2anos' (+2 anos), '5anos' (+5 anos).
+    esc_contrato_duracao ENUM('1ano','2anos','5anos') NULL DEFAULT NULL COMMENT 'Duração do contrato com a instituição (1, 2 ou 5 anos)  [v11]',
+    esc_contrato_inicio  DATE                         NULL DEFAULT NULL COMMENT 'Data de início do contrato  [v11]',
+    esc_contrato_expira  DATE                         NULL DEFAULT NULL COMMENT 'Data de expiração calculada (inicio + duracao)  [v11]',
 
     PRIMARY KEY (esc_id)
 ) ENGINE = InnoDB;

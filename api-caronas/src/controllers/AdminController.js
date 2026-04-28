@@ -31,11 +31,14 @@
  *   4 = Conta suspensa — todos os recursos bloqueados, login negado (permanente)
  */
 
+const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { stripHtml }           = require('../utils/sanitize');
 const { registrarAudit }      = require('../utils/auditLog');
 const { DURACAO_SQL }         = require('../utils/penaltyHelper');
 const { geocodificarEndereco } = require('../services/geocodingService');
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Calcula a data de expiração da penalidade em JS para evitar interpolação SQL
 function calcularExpiraPenalidade(pen_duracao) {
@@ -1439,6 +1442,129 @@ class AdminController {
     }
 
     /**
+     * MÉTODO: cadastrarAdminDev
+     * Cria uma conta de Administrador (per_tipo=1) ou Desenvolvedor (per_tipo=2) diretamente,
+     * sem fluxo de OTP. A conta já nasce verificada e habilitada.
+     * Apenas Desenvolvedor pode executar esta ação.
+     *
+     * Body: usu_email, usu_senha, usu_nome (opcional), per_tipo (1 ou 2),
+     *       per_escola_id (obrigatório quando per_tipo=1)
+     */
+    async cadastrarAdminDev(req, res) {
+        try {
+            // PASSO 1: Apenas Desenvolvedor pode criar contas administrativas
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem criar contas administrativas." });
+            }
+
+            const { usu_email, usu_senha, usu_nome, per_tipo, per_escola_id } = req.body;
+
+            // PASSO 2: Valida campos obrigatórios
+            if (!usu_email || !usu_senha) {
+                return res.status(400).json({ error: "Campos obrigatórios: usu_email, usu_senha." });
+            }
+            if (!EMAIL_REGEX.test(usu_email)) {
+                return res.status(400).json({ error: "Formato de email inválido." });
+            }
+            if (usu_senha.length < 8) {
+                return res.status(400).json({ error: "A senha deve ter no mínimo 8 caracteres." });
+            }
+
+            // PASSO 3: Valida per_tipo — este endpoint é exclusivo para admin e dev
+            const tipoNum = parseInt(per_tipo);
+            if (![1, 2].includes(tipoNum)) {
+                return res.status(400).json({ error: "per_tipo inválido. Use 1 (Administrador) ou 2 (Desenvolvedor)." });
+            }
+
+            // PASSO 4: Administrador exige escola associada e válida
+            const escolaId = tipoNum === 1 ? parseInt(per_escola_id) : null;
+            if (tipoNum === 1) {
+                if (!per_escola_id || isNaN(escolaId)) {
+                    return res.status(400).json({ error: "per_escola_id é obrigatório para o papel Administrador." });
+                }
+                const [[{ count }]] = await db.query(
+                    'SELECT COUNT(*) AS count FROM ESCOLAS WHERE esc_id = ?',
+                    [escolaId]
+                );
+                if (count === 0) {
+                    return res.status(404).json({ error: "Escola não encontrada." });
+                }
+            }
+
+            // PASSO 5: Verifica duplicidade de email
+            const [existente] = await db.query(
+                'SELECT usu_id FROM USUARIOS WHERE usu_email = ?',
+                [usu_email]
+            );
+            if (existente.length > 0) {
+                return res.status(409).json({ error: "E-mail já cadastrado." });
+            }
+
+            const senhaHash = await bcrypt.hash(usu_senha, 12);
+            const nomeLimpo = usu_nome ? stripHtml(usu_nome.trim()) : null;
+
+            // PASSO 6: Cria conta em transação atômica
+            // usu_verificacao = 1 (já verificado — sem necessidade de OTP)
+            // per_habilitado  = 1 (habilitado diretamente — acesso imediato com email+senha)
+            const conn = await db.getConnection();
+            let novoId;
+            try {
+                await conn.beginTransaction();
+
+                const [resultado] = await conn.query(
+                    `INSERT INTO USUARIOS
+                        (usu_nome, usu_email, usu_senha, usu_verificacao, usu_status)
+                     VALUES (?, ?, ?, 1, 1)`,
+                    [nomeLimpo, usu_email, senhaHash]
+                );
+                novoId = resultado.insertId;
+
+                await conn.query(
+                    'INSERT INTO USUARIOS_REGISTROS (usu_id, usu_criado_em) VALUES (?, NOW())',
+                    [novoId]
+                );
+
+                await conn.query(
+                    `INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_escola_id, per_habilitado)
+                     VALUES (?, ?, NOW(), ?, ?, 1)`,
+                    [novoId, nomeLimpo, tipoNum, escolaId]
+                );
+
+                await conn.commit();
+            } catch (err) {
+                await conn.rollback();
+                throw err;
+            } finally {
+                conn.release();
+            }
+
+            await registrarAudit({
+                tabela:    'USUARIOS',
+                registroId: novoId,
+                acao:      'ADMIN_CADASTRAR',
+                novo: { per_tipo: tipoNum, per_escola_id: escolaId },
+                usuId:     req.user.id,
+                ip:        req.ip
+            });
+
+            return res.status(201).json({
+                message: `Conta ${tipoNum === 2 ? 'Desenvolvedor' : 'Administrador'} criada com sucesso!`,
+                usuario: {
+                    usu_id:    novoId,
+                    usu_email,
+                    usu_nome:  nomeLimpo,
+                    per_tipo:  tipoNum,
+                    ...(tipoNum === 1 && { per_escola_id: escolaId })
+                }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] cadastrarAdminDev:", error);
+            return res.status(500).json({ error: "Erro ao cadastrar conta administrativa." });
+        }
+    }
+
+    /**
      * MÉTODO: deletarCurso
      * Remove um curso (apenas se não tiver alunos matriculados).
      * Parâmetro: cur_id (via URL)
@@ -1479,6 +1605,714 @@ class AdminController {
         } catch (error) {
             console.error("[ERRO] deletarCurso:", error);
             return res.status(500).json({ error: "Erro ao remover curso." });
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GESTÃO DE SENHAS, STATUS E LISTAGENS AVANÇADAS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * MÉTODO: redefinirSenhaAdmin
+     * Redefine a senha de uma conta de Administrador ou Desenvolvedor diretamente,
+     * sem fluxo de email. Invalida sessões ativas (force re-login).
+     * Apenas Desenvolvedor pode executar esta ação.
+     *
+     * Parâmetro: usu_id (via URL)
+     * Body: { nova_senha }
+     */
+    async redefinirSenhaAdmin(req, res) {
+        try {
+            // PASSO 1: Apenas Desenvolvedor pode redefinir senhas administrativas
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem redefinir senhas de contas administrativas." });
+            }
+
+            const { usu_id } = req.params;
+            const { nova_senha } = req.body;
+
+            // PASSO 2: Valida ID e nova senha
+            if (!usu_id || isNaN(usu_id)) {
+                return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+            if (!nova_senha || nova_senha.length < 8) {
+                return res.status(400).json({ error: "nova_senha é obrigatória e deve ter no mínimo 8 caracteres." });
+            }
+
+            // PASSO 3: Conta alvo deve ser Admin (1) ou Dev (2)
+            const [perfil] = await db.query(
+                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+                [usu_id]
+            );
+            if (perfil.length === 0) {
+                return res.status(404).json({ error: "Usuário não encontrado." });
+            }
+            if (perfil[0].per_tipo < 1) {
+                return res.status(403).json({ error: "Este endpoint é exclusivo para contas de Administrador ou Desenvolvedor." });
+            }
+
+            // PASSO 4: Impede redefinição da própria senha por aqui
+            if (parseInt(usu_id) === req.user.id) {
+                return res.status(400).json({ error: "Use PUT /api/usuarios/:id para alterar sua própria senha." });
+            }
+
+            const senhaHash = await bcrypt.hash(nova_senha, 12);
+
+            // PASSO 5: Atualiza senha e invalida todas as sessões ativas
+            const [result] = await db.query(
+                `UPDATE USUARIOS
+                 SET usu_senha = ?, usu_refresh_hash = NULL, usu_refresh_expira = NULL
+                 WHERE usu_id = ? AND usu_status = 1`,
+                [senhaHash, usu_id]
+            );
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: "Usuário não encontrado ou inativo." });
+            }
+
+            await registrarAudit({
+                tabela: 'USUARIOS', registroId: parseInt(usu_id),
+                acao: 'SENHA_RESET_ADMIN',
+                usuId: req.user.id, ip: req.ip
+            });
+
+            return res.status(200).json({
+                message: `Senha do usuário ${usu_id} redefinida com sucesso. Sessões ativas foram invalidadas.`
+            });
+
+        } catch (error) {
+            console.error("[ERRO] redefinirSenhaAdmin:", error);
+            return res.status(500).json({ error: "Erro ao redefinir senha." });
+        }
+    }
+
+    /**
+     * MÉTODO: statsDocumentos
+     * Retorna contagem de documentos por tipo e status de verificação.
+     * Administrador filtra pelos usuários da sua escola.
+     * Desenvolvedor vê tudo.
+     */
+    async statsDocumentos(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+
+            let rows;
+            if (per_tipo === 2) {
+                // PASSO 1: Desenvolvedor — visão global
+                [rows] = await db.query(
+                    `SELECT
+                        COUNT(*)                AS total,
+                        SUM(doc_tipo   = 0)     AS comprovantes,
+                        SUM(doc_tipo   = 1)     AS cnhs,
+                        SUM(doc_status = 0)     AS aprovados,
+                        SUM(doc_status = 2)     AS reprovados
+                     FROM DOCUMENTOS_VERIFICACAO`
+                );
+            } else {
+                // PASSO 2: Administrador — apenas documentos de usuários da sua escola
+                [rows] = await db.query(
+                    `SELECT
+                        COUNT(d.doc_id)         AS total,
+                        SUM(d.doc_tipo   = 0)   AS comprovantes,
+                        SUM(d.doc_tipo   = 1)   AS cnhs,
+                        SUM(d.doc_status = 0)   AS aprovados,
+                        SUM(d.doc_status = 2)   AS reprovados
+                     FROM DOCUMENTOS_VERIFICACAO d
+                     INNER JOIN USUARIOS        u  ON d.usu_id  = u.usu_id
+                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                     INNER JOIN CURSOS          c  ON cu.cur_id = c.cur_id
+                     WHERE c.esc_id = ?`,
+                    [per_escola_id]
+                );
+            }
+
+            return res.status(200).json({
+                message: "Estatísticas de documentos",
+                stats: rows[0]
+            });
+
+        } catch (error) {
+            console.error("[ERRO] statsDocumentos:", error);
+            return res.status(500).json({ error: "Erro ao recuperar estatísticas de documentos." });
+        }
+    }
+
+    /**
+     * MÉTODO: atualizarStatus
+     * Ativa (usu_status=1) ou inativa (usu_status=0) um usuário sem aplicar penalidade.
+     * Não opera sobre contas de Administrador ou Desenvolvedor (use atualizarPerfil).
+     * Administrador: apenas usuários da sua escola. Desenvolvedor: qualquer usuário.
+     *
+     * Parâmetro: usu_id (via URL)
+     * Body: { usu_status: 0|1 }
+     */
+    async atualizarStatus(req, res) {
+        try {
+            const { usu_id } = req.params;
+            const { usu_status } = req.body;
+            const { per_tipo, per_escola_id } = req.user;
+
+            // PASSO 1: Valida ID
+            if (!usu_id || isNaN(usu_id)) {
+                return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+
+            // PASSO 2: Valida usu_status
+            const statusNum = parseInt(usu_status);
+            if (![0, 1].includes(statusNum)) {
+                return res.status(400).json({ error: "usu_status inválido. Use 0 (inativar) ou 1 (ativar)." });
+            }
+
+            // PASSO 3: Impede ação sobre Administradores e Desenvolvedores
+            const [perfil] = await db.query('SELECT per_tipo FROM PERFIL WHERE usu_id = ?', [usu_id]);
+            if (perfil.length > 0 && perfil[0].per_tipo >= 1) {
+                return res.status(403).json({ error: "Use PUT /api/admin/usuarios/:usu_id/perfil para alterar status de Admin ou Desenvolvedor." });
+            }
+
+            // PASSO 4: Administrador só pode agir sobre usuários da sua escola
+            if (per_tipo === 1) {
+                const [vinculo] = await db.query(
+                    `SELECT cu.usu_id FROM CURSOS_USUARIOS cu
+                     INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
+                     WHERE cu.usu_id = ? AND c.esc_id = ?`,
+                    [usu_id, per_escola_id]
+                );
+                if (vinculo.length === 0) {
+                    return res.status(403).json({ error: "Sem permissão para alterar status de usuário de outra escola." });
+                }
+            }
+
+            // PASSO 5: Verifica estado atual e evita atualização redundante
+            const [usuario] = await db.query('SELECT usu_status FROM USUARIOS WHERE usu_id = ?', [usu_id]);
+            if (usuario.length === 0) {
+                return res.status(404).json({ error: "Usuário não encontrado." });
+            }
+            if (usuario[0].usu_status === statusNum) {
+                return res.status(409).json({ error: `Usuário já está ${statusNum === 1 ? 'ativo' : 'inativo'}.` });
+            }
+
+            await db.query('UPDATE USUARIOS SET usu_status = ? WHERE usu_id = ?', [statusNum, usu_id]);
+
+            await registrarAudit({
+                tabela: 'USUARIOS', registroId: parseInt(usu_id),
+                acao: statusNum === 1 ? 'USU_ATIVAR' : 'USU_INATIVAR',
+                usuId: req.user.id, ip: req.ip
+            });
+
+            return res.status(200).json({
+                message: `Usuário ${usu_id} ${statusNum === 1 ? 'ativado' : 'inativado'} com sucesso.`
+            });
+
+        } catch (error) {
+            console.error("[ERRO] atualizarStatus:", error);
+            return res.status(500).json({ error: "Erro ao atualizar status do usuário." });
+        }
+    }
+
+    /**
+     * MÉTODO: listarMatriculas
+     * Lista matrículas (CURSOS_USUARIOS) com dados do usuário e do curso.
+     * Administrador: apenas matrículas da sua escola. Desenvolvedor: todas (?esc_id= opcional).
+     *
+     * Query params: ?esc_id= (Dev), ?cur_id=, ?page=, ?limit=
+     */
+    async listarMatriculas(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+
+            // PASSO 1: Paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 2: Filtros
+            const filtros = [];
+            const params  = [];
+
+            if (per_tipo === 1) {
+                filtros.push('e.esc_id = ?');
+                params.push(per_escola_id);
+            } else if (req.query.esc_id !== undefined) {
+                const esc_id = parseInt(req.query.esc_id);
+                if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser um número inteiro." });
+                filtros.push('e.esc_id = ?');
+                params.push(esc_id);
+            }
+
+            if (req.query.cur_id !== undefined) {
+                const cur_id = parseInt(req.query.cur_id);
+                if (isNaN(cur_id)) return res.status(400).json({ error: "cur_id deve ser um número inteiro." });
+                filtros.push('cu.cur_id = ?');
+                params.push(cur_id);
+            }
+
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            // PASSO 3: Busca matrículas com dados de usuário, curso e escola
+            const [matriculas] = await db.query(
+                `SELECT cu.cur_usu_id, cu.usu_id, cu.cur_id, cu.cur_usu_dataFinal,
+                        u.usu_nome, u.usu_email, u.usu_verificacao,
+                        c.cur_nome, c.cur_semestre, e.esc_id, e.esc_nome
+                 FROM CURSOS_USUARIOS cu
+                 INNER JOIN USUARIOS u ON cu.usu_id  = u.usu_id
+                 INNER JOIN CURSOS   c ON cu.cur_id  = c.cur_id
+                 INNER JOIN ESCOLAS  e ON c.esc_id   = e.esc_id
+                 ${where}
+                 ORDER BY cu.cur_usu_id DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral
+                 FROM CURSOS_USUARIOS cu
+                 INNER JOIN CURSOS  c ON cu.cur_id = c.cur_id
+                 INNER JOIN ESCOLAS e ON c.esc_id  = e.esc_id
+                 ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Matrículas listadas.",
+                totalGeral, total: matriculas.length, page, limit, matriculas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarMatriculas:", error);
+            return res.status(500).json({ error: "Erro ao listar matrículas." });
+        }
+    }
+
+    /**
+     * MÉTODO: listarAvaliacoes
+     * Lista avaliações com dados de avaliador e avaliado.
+     * Escopo de escola é aplicado sobre o usuário avaliado.
+     * Administrador: apenas avaliações de usuários da sua escola (como avaliados).
+     * Desenvolvedor: todas (?esc_id= opcional).
+     *
+     * Query params: ?esc_id= (Dev), ?page=, ?limit=
+     */
+    async listarAvaliacoes(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+
+            // PASSO 1: Paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 2: Define se filtra por escola (via avaliado)
+            const filtros = [];
+            const params  = [];
+
+            if (per_tipo === 1) {
+                filtros.push('c.esc_id = ?');
+                params.push(per_escola_id);
+            } else if (req.query.esc_id !== undefined) {
+                const esc_id = parseInt(req.query.esc_id);
+                if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser um número inteiro." });
+                filtros.push('c.esc_id = ?');
+                params.push(esc_id);
+            }
+
+            // JOIN com escola apenas quando há filtro por esc_id
+            const joinEscola = filtros.length > 0
+                ? `INNER JOIN CURSOS_USUARIOS cu ON a.usu_id_avaliado = cu.usu_id
+                   INNER JOIN CURSOS          c  ON cu.cur_id          = c.cur_id`
+                : '';
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            // PASSO 3: Busca avaliações com nomes dos participantes
+            const [avaliacoes] = await db.query(
+                `SELECT DISTINCT a.ava_id, a.car_id, a.usu_id_avaliador, a.usu_id_avaliado,
+                        a.ava_nota, a.ava_comentario, a.ava_criado_em,
+                        u_av.usu_nome AS avaliador, u_ad.usu_nome AS avaliado
+                 FROM AVALIACOES a
+                 INNER JOIN USUARIOS u_av ON a.usu_id_avaliador = u_av.usu_id
+                 INNER JOIN USUARIOS u_ad ON a.usu_id_avaliado  = u_ad.usu_id
+                 ${joinEscola}
+                 ${where}
+                 ORDER BY a.ava_id DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(DISTINCT a.ava_id) AS totalGeral
+                 FROM AVALIACOES a
+                 ${joinEscola}
+                 ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Avaliações listadas.",
+                totalGeral, total: avaliacoes.length, page, limit, avaliacoes
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarAvaliacoes (admin):", error);
+            return res.status(500).json({ error: "Erro ao listar avaliações." });
+        }
+    }
+
+    /**
+     * MÉTODO: listarVeiculos
+     * Lista veículos cadastrados no sistema.
+     * Administrador: apenas veículos de usuários da sua escola.
+     * Desenvolvedor: todos (?esc_id= e ?vei_status= opcionais).
+     *
+     * Query params: ?esc_id= (Dev), ?vei_status= (0|1), ?page=, ?limit=
+     */
+    async listarVeiculos(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+
+            // PASSO 1: Paginação
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 2: Filtros
+            const filtros = [];
+            const params  = [];
+
+            if (per_tipo === 1) {
+                filtros.push('e.esc_id = ?');
+                params.push(per_escola_id);
+            } else if (req.query.esc_id !== undefined) {
+                const esc_id = parseInt(req.query.esc_id);
+                if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser um número inteiro." });
+                filtros.push('e.esc_id = ?');
+                params.push(esc_id);
+            }
+
+            if (req.query.vei_status !== undefined) {
+                const vst = parseInt(req.query.vei_status);
+                if (![0, 1].includes(vst)) return res.status(400).json({ error: "vei_status deve ser 0 (inativo) ou 1 (ativo)." });
+                filtros.push('v.vei_status = ?');
+                params.push(vst);
+            }
+
+            // JOIN com escola apenas quando há filtro por esc_id
+            const filtraEscola = filtros.some(f => f.includes('e.esc_id'));
+            const joinEscola = filtraEscola
+                ? `INNER JOIN CURSOS_USUARIOS cu ON v.usu_id  = cu.usu_id
+                   INNER JOIN CURSOS          c  ON cu.cur_id = c.cur_id
+                   INNER JOIN ESCOLAS         e  ON c.esc_id  = e.esc_id`
+                : '';
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            // PASSO 3: Busca veículos com dados do proprietário
+            const [veiculos] = await db.query(
+                `SELECT DISTINCT v.vei_id, v.usu_id, v.vei_placa, v.vei_tipo, v.vei_vagas, v.vei_status,
+                        u.usu_nome, u.usu_email
+                 FROM VEICULOS v
+                 INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
+                 ${joinEscola}
+                 ${where}
+                 ORDER BY v.vei_id DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(DISTINCT v.vei_id) AS totalGeral
+                 FROM VEICULOS v
+                 ${joinEscola}
+                 ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Veículos listados.",
+                totalGeral, total: veiculos.length, page, limit, veiculos
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarVeiculos (admin):", error);
+            return res.status(500).json({ error: "Erro ao listar veículos." });
+        }
+    }
+
+    /**
+     * MÉTODO: exportarLogs
+     * Exporta o AUDIT_LOG em formato CSV (máx. 10.000 registros por chamada).
+     * Apenas Desenvolvedor tem acesso.
+     *
+     * Query params: ?acao=, ?tabela=, ?usu_id=, ?data_inicio= (YYYY-MM-DD), ?data_fim= (YYYY-MM-DD)
+     */
+    async exportarLogs(req, res) {
+        try {
+            // PASSO 1: Apenas Desenvolvedor pode exportar o audit log
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem exportar o audit log." });
+            }
+
+            // PASSO 2: Filtros opcionais
+            const filtros = [];
+            const params  = [];
+
+            if (req.query.acao) {
+                filtros.push('acao = ?');
+                params.push(req.query.acao.toUpperCase());
+            }
+            if (req.query.tabela) {
+                filtros.push('tabela = ?');
+                params.push(req.query.tabela.toUpperCase());
+            }
+            if (req.query.usu_id !== undefined) {
+                const usuFiltro = parseInt(req.query.usu_id);
+                if (isNaN(usuFiltro)) return res.status(400).json({ error: "usu_id deve ser um número inteiro." });
+                filtros.push('usu_id = ?');
+                params.push(usuFiltro);
+            }
+            if (req.query.data_inicio) {
+                filtros.push('DATE(criado_em) >= ?');
+                params.push(req.query.data_inicio);
+            }
+            if (req.query.data_fim) {
+                filtros.push('DATE(criado_em) <= ?');
+                params.push(req.query.data_fim);
+            }
+
+            const whereClause = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            // PASSO 3: Busca até 10.000 registros (proteção contra dumps excessivos)
+            const [logs] = await db.query(
+                `SELECT audit_id, tabela, registro_id, acao,
+                        dados_anteriores, dados_novos, usu_id, ip, criado_em
+                 FROM AUDIT_LOG ${whereClause}
+                 ORDER BY audit_id ASC
+                 LIMIT 10000`,
+                params
+            );
+
+            // PASSO 4: Serializa para CSV com escape correto de campos com vírgulas/aspas
+            const escapeCsv = (val) => {
+                if (val === null || val === undefined) return '';
+                const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                    return `"${str.replace(/"/g, '""')}"`;
+                }
+                return str;
+            };
+
+            const cabecalho = 'audit_id,tabela,registro_id,acao,dados_anteriores,dados_novos,usu_id,ip,criado_em\n';
+            const linhas = logs.map(r =>
+                [r.audit_id, r.tabela, r.registro_id, r.acao,
+                 r.dados_anteriores, r.dados_novos,
+                 r.usu_id, r.ip, r.criado_em].map(escapeCsv).join(',')
+            ).join('\n');
+
+            const dataHoje = new Date().toISOString().slice(0, 10);
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="audit_log_${dataHoje}.csv"`);
+            return res.status(200).send(cabecalho + linhas);
+
+        } catch (error) {
+            console.error("[ERRO] exportarLogs:", error);
+            return res.status(500).json({ error: "Erro ao exportar audit log." });
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONTRATOS DE ESCOLAS — exclusivo para Desenvolvedor  [v11]
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * MÉTODO: definirContrato
+     * Define ou renova o contrato de uma escola.
+     * A data de expiração é calculada no backend: data_inicio + duracao.
+     * Apenas Desenvolvedor pode executar esta ação.
+     *
+     * Parâmetro: esc_id (via URL)
+     * Body: { duracao: '1ano'|'2anos'|'5anos', data_inicio? (YYYY-MM-DD, default: hoje) }
+     */
+    async definirContrato(req, res) {
+        try {
+            // PASSO 1: Apenas Desenvolvedor gerencia contratos
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem gerenciar contratos de escolas." });
+            }
+
+            const { esc_id } = req.params;
+            if (!esc_id || isNaN(esc_id)) {
+                return res.status(400).json({ error: "ID de escola inválido." });
+            }
+
+            const { duracao, data_inicio } = req.body;
+
+            // PASSO 2: Valida duração
+            const DURACOES_VALIDAS = ['1ano', '2anos', '5anos'];
+            if (!duracao || !DURACOES_VALIDAS.includes(duracao)) {
+                return res.status(400).json({
+                    error: "Campo obrigatório: duracao. Valores aceitos: '1ano', '2anos', '5anos'."
+                });
+            }
+
+            // PASSO 3: Valida e define data_inicio (padrão: hoje)
+            let dataInicio;
+            if (data_inicio) {
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(data_inicio)) {
+                    return res.status(400).json({ error: "data_inicio deve estar no formato YYYY-MM-DD." });
+                }
+                dataInicio = new Date(data_inicio + 'T00:00:00');
+                if (isNaN(dataInicio.getTime())) {
+                    return res.status(400).json({ error: "data_inicio inválida." });
+                }
+            } else {
+                dataInicio = new Date();
+                dataInicio.setHours(0, 0, 0, 0);
+            }
+
+            // PASSO 4: Calcula data de expiração em JS (evita interpolação SQL)
+            const dataExpira = new Date(dataInicio);
+            switch (duracao) {
+                case '1ano':  dataExpira.setFullYear(dataExpira.getFullYear() + 1); break;
+                case '2anos': dataExpira.setFullYear(dataExpira.getFullYear() + 2); break;
+                case '5anos': dataExpira.setFullYear(dataExpira.getFullYear() + 5); break;
+            }
+
+            const inicioStr  = dataInicio.toISOString().slice(0, 10);
+            const expiraStr  = dataExpira.toISOString().slice(0, 10);
+
+            // PASSO 5: Verifica se a escola existe e atualiza
+            const [result] = await db.query(
+                `UPDATE ESCOLAS
+                 SET esc_contrato_duracao = ?,
+                     esc_contrato_inicio  = ?,
+                     esc_contrato_expira  = ?
+                 WHERE esc_id = ?`,
+                [duracao, inicioStr, expiraStr, esc_id]
+            );
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: "Escola não encontrada." });
+            }
+
+            await registrarAudit({
+                tabela: 'ESCOLAS', registroId: parseInt(esc_id),
+                acao: 'CONTRATO_DEFINIR',
+                novo: { duracao, inicio: inicioStr, expira: expiraStr },
+                usuId: req.user.id, ip: req.ip
+            });
+
+            return res.status(200).json({
+                message: `Contrato da escola ${esc_id} definido com sucesso.`,
+                contrato: {
+                    esc_id:              parseInt(esc_id),
+                    esc_contrato_duracao: duracao,
+                    esc_contrato_inicio:  inicioStr,
+                    esc_contrato_expira:  expiraStr
+                }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] definirContrato:", error);
+            return res.status(500).json({ error: "Erro ao definir contrato da escola." });
+        }
+    }
+
+    /**
+     * MÉTODO: cancelarContrato
+     * Remove o contrato de uma escola (define todos os campos como NULL).
+     * Apenas Desenvolvedor pode executar esta ação.
+     *
+     * Parâmetro: esc_id (via URL)
+     */
+    async cancelarContrato(req, res) {
+        try {
+            // PASSO 1: Apenas Desenvolvedor gerencia contratos
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem gerenciar contratos de escolas." });
+            }
+
+            const { esc_id } = req.params;
+            if (!esc_id || isNaN(esc_id)) {
+                return res.status(400).json({ error: "ID de escola inválido." });
+            }
+
+            // PASSO 2: Verifica se a escola tem contrato e cancela
+            const [escolas] = await db.query(
+                'SELECT esc_id, esc_contrato_duracao FROM ESCOLAS WHERE esc_id = ?',
+                [esc_id]
+            );
+            if (escolas.length === 0) {
+                return res.status(404).json({ error: "Escola não encontrada." });
+            }
+            if (escolas[0].esc_contrato_duracao === null) {
+                return res.status(409).json({ error: "Escola não possui contrato cadastrado." });
+            }
+
+            await db.query(
+                `UPDATE ESCOLAS
+                 SET esc_contrato_duracao = NULL,
+                     esc_contrato_inicio  = NULL,
+                     esc_contrato_expira  = NULL
+                 WHERE esc_id = ?`,
+                [esc_id]
+            );
+
+            await registrarAudit({
+                tabela: 'ESCOLAS', registroId: parseInt(esc_id),
+                acao: 'CONTRATO_CANCELAR',
+                usuId: req.user.id, ip: req.ip
+            });
+
+            return res.status(200).json({
+                message: `Contrato da escola ${esc_id} cancelado. Campos de contrato redefinidos para NULL.`
+            });
+
+        } catch (error) {
+            console.error("[ERRO] cancelarContrato:", error);
+            return res.status(500).json({ error: "Erro ao cancelar contrato da escola." });
+        }
+    }
+
+    /**
+     * MÉTODO: statsContratos
+     * Retorna resumo dos contratos de todas as escolas:
+     * ativos, expirados, sem contrato, próximos do vencimento (90 dias).
+     * Apenas Desenvolvedor tem acesso (dados de todos os contratos).
+     */
+    async statsContratos(req, res) {
+        try {
+            // PASSO 1: Apenas Desenvolvedor acessa esta visão
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem acessar estatísticas de contratos." });
+            }
+
+            // PASSO 2: Resumo consolidado em uma única query
+            const [[stats]] = await db.query(
+                `SELECT
+                    COUNT(*)                                                        AS total_escolas,
+                    SUM(esc_contrato_expira IS NULL)                                AS sem_contrato,
+                    SUM(esc_contrato_expira > CURDATE())                            AS ativos,
+                    SUM(esc_contrato_expira IS NOT NULL
+                        AND esc_contrato_expira <= CURDATE())                       AS expirados,
+                    SUM(esc_contrato_expira BETWEEN CURDATE()
+                        AND DATE_ADD(CURDATE(), INTERVAL 90 DAY))                  AS vencendo_90_dias
+                 FROM ESCOLAS`
+            );
+
+            // PASSO 3: Lista escolas com contrato próximo do vencimento (alerta)
+            const [alertas] = await db.query(
+                `SELECT esc_id, esc_nome, esc_contrato_duracao, esc_contrato_expira,
+                        DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes
+                 FROM ESCOLAS
+                 WHERE esc_contrato_expira BETWEEN CURDATE()
+                       AND DATE_ADD(CURDATE(), INTERVAL 90 DAY)
+                 ORDER BY esc_contrato_expira ASC`
+            );
+
+            return res.status(200).json({
+                message: "Estatísticas de contratos de escolas.",
+                stats,
+                alertas_vencimento: alertas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] statsContratos:", error);
+            return res.status(500).json({ error: "Erro ao recuperar estatísticas de contratos." });
         }
     }
 }

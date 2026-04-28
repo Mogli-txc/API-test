@@ -860,6 +860,108 @@ class CaronaController {
         }
     }
 
+    /**
+     * MÉTODO: buscar
+     * Busca caronas com filtros avançados: status, data, escola e curso.
+     * Diferença do listarTodas: aceita qualquer car_status e filtro por data.
+     *
+     * Query params:
+     *   ?car_status= — 0=Cancelada, 1=Aberta (padrão), 2=Em espera, 3=Finalizada
+     *   ?data=       — YYYY-MM-DD — filtra por data da carona
+     *   ?esc_id=     — filtra por escola
+     *   ?cur_id=     — filtra por curso
+     *   ?page=, ?limit=
+     */
+    async buscar(req, res) {
+        try {
+            // PASSO 1: Paginação
+            const page   = Math.max(1, parseInt(req.query.page) || 1);
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 2: Filtros dinâmicos
+            const filtros = [];
+            const params  = [];
+
+            // Filtro por status (padrão: apenas abertas)
+            if (req.query.car_status !== undefined) {
+                const st = parseInt(req.query.car_status);
+                if (![0, 1, 2, 3].includes(st)) {
+                    return res.status(400).json({ error: 'car_status deve ser 0 (cancelada), 1 (aberta), 2 (em espera) ou 3 (finalizada).' });
+                }
+                filtros.push('c.car_status = ?');
+                params.push(st);
+            } else {
+                filtros.push('c.car_status = 1');
+            }
+
+            // Filtro por escola
+            if (req.query.esc_id !== undefined) {
+                const esc_id = parseInt(req.query.esc_id);
+                if (isNaN(esc_id)) return res.status(400).json({ error: 'esc_id deve ser um número inteiro.' });
+                filtros.push('e.esc_id = ?');
+                params.push(esc_id);
+            }
+
+            // Filtro por curso
+            if (req.query.cur_id !== undefined) {
+                const cur_id = parseInt(req.query.cur_id);
+                if (isNaN(cur_id)) return res.status(400).json({ error: 'cur_id deve ser um número inteiro.' });
+                filtros.push('cur.cur_id = ?');
+                params.push(cur_id);
+            }
+
+            // Filtro por data (YYYY-MM-DD)
+            if (req.query.data !== undefined) {
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(req.query.data)) {
+                    return res.status(400).json({ error: 'data deve estar no formato YYYY-MM-DD.' });
+                }
+                filtros.push('DATE(c.car_data) = ?');
+                params.push(req.query.data);
+            }
+
+            const where = 'WHERE ' + filtros.join(' AND ');
+
+            // PASSO 3: Busca caronas com dados de veículo, motorista, curso e escola
+            const [caronas] = await db.query(
+                `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
+                        c.car_vagas_dispo, c.car_status,
+                        u.usu_id, u.usu_nome, u.usu_foto,
+                        v.vei_tipo, v.vei_vagas,
+                        cur.cur_id, cur.cur_nome, e.esc_id, e.esc_nome
+                 FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id = cu_mot.cur_usu_id
+                 INNER JOIN USUARIOS        u      ON cu_mot.usu_id  = u.usu_id
+                 INNER JOIN VEICULOS        v      ON c.vei_id       = v.vei_id
+                 INNER JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
+                 INNER JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
+                 ${where}
+                 ORDER BY c.car_data ASC, c.car_hor_saida ASC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral
+                 FROM CARONAS c
+                 INNER JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id = cu_mot.cur_usu_id
+                 INNER JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
+                 INNER JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
+                 ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message:    "Resultado da busca.",
+                totalGeral, total: caronas.length, page, limit, caronas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] buscar caronas:", error);
+            return res.status(500).json({ error: "Erro ao buscar caronas." });
+        }
+    }
+
 }
 
 module.exports = new CaronaController();
