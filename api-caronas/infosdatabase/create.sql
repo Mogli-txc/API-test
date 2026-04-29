@@ -127,7 +127,7 @@ DROP TABLE IF EXISTS USUARIOS_REGISTROS;
 CREATE TABLE USUARIOS_REGISTROS (
     usu_id            INT      NOT NULL COMMENT 'Identificador do Usuário (PK e FK)',
     usu_data_login    DATETIME          COMMENT 'Data do Último Login (NULL)',
-    usu_criado_em     DATETIME NOT NULL COMMENT 'Data de Criação do Usuário',
+    usu_criado_em     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data de Criação do Usuário',
     usu_atualizado_em DATETIME          COMMENT 'Data de Última Atualização (NULL)',
     PRIMARY KEY (usu_id)
 ) ENGINE = InnoDB;
@@ -159,7 +159,8 @@ CREATE TABLE CURSOS_USUARIOS (
     cur_id            INT  NOT NULL               COMMENT 'Identificador do Curso (FK)',
     cur_usu_dataFinal DATE NOT NULL               COMMENT 'Data Final do Curso',
     PRIMARY KEY (cur_usu_id),
-    UNIQUE KEY UQ_CursoUsuario (usu_id, cur_id)   -- Impede inscrição duplicada no mesmo curso
+    UNIQUE KEY UQ_CursoUsuario (usu_id, cur_id),  -- Impede inscrição duplicada no mesmo curso
+    INDEX idx_cur_usu_cur_id   (cur_id)           -- cobre WHERE cur_id = ? (leftmost da UNIQUE é usu_id)
 ) ENGINE = InnoDB;
 
 
@@ -190,10 +191,10 @@ CREATE TABLE VEICULOS (
     usu_id            INT          NOT NULL               COMMENT 'Proprietário do Veículo (FK)',
     vei_placa         VARCHAR(10)  NOT NULL               COMMENT 'Placa do veículo (UNIQUE — impede duplicata global)  [v9]',
     vei_marca_modelo  VARCHAR(100) NOT NULL               COMMENT 'Descrição do veículo (marca e modelo)',
-    vei_tipo          BIT(1)       NOT NULL               COMMENT '0=Moto (máx 1 vaga), 1=Carro (máx 4 vagas)',
+    vei_tipo          TINYINT(1)   NOT NULL               COMMENT '0=Moto (máx 1 vaga), 1=Carro (máx 4 vagas)',
     vei_cor           VARCHAR(100) NOT NULL               COMMENT 'Cor do veículo',
     vei_vagas         TINYINT      NOT NULL               COMMENT 'Capacidade de passageiros: Moto=1, Carro=1-4  [v9]',
-    vei_status        BIT(1)       NOT NULL               COMMENT '1=Ativo, 0=Inutilizado',
+    vei_status        TINYINT(1)   NOT NULL               COMMENT '1=Ativo, 0=Inutilizado',
     vei_criado_em     DATE         NOT NULL               COMMENT 'Data de Cadastro',
     vei_atualizado_em DATETIME                            COMMENT 'Data de Atualização (NULL)',
     vei_apagado_em    DATETIME                            COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
@@ -221,7 +222,9 @@ CREATE TABLE CARONAS (
     car_deletado_em DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de cancelamento com timestamp (NULL = ativo); car_status=0 mantido para compatibilidade',
 
     PRIMARY KEY (car_id),
-    INDEX idx_car_deletado_em (car_deletado_em)         -- filtro de registros ativos  [v3]
+    INDEX idx_car_deletado_em (car_deletado_em),        -- filtro de registros ativos  [v3]
+    INDEX idx_car_status      (car_status),             -- filtro por status (listagem principal)
+    INDEX idx_car_data        (car_data)                -- filtro por data (/buscar?data=)
 ) ENGINE = InnoDB;
 
 
@@ -249,7 +252,7 @@ CREATE TABLE PONTO_ENCONTROS (
     pon_tipo          TINYINT       NOT NULL               COMMENT '0=Partida, 1=Destino',
     pon_nome          VARCHAR(25)   NOT NULL               COMMENT 'Descrição do ponto de encontro',
     pon_ordem         TINYINT                              COMMENT 'Ordem dos pontos na rota (NULL)',
-    pon_status        BIT(1)        NOT NULL               COMMENT '1=Usado, 0=Inativo',
+    pon_status        TINYINT(1)    NOT NULL               COMMENT '1=Usado, 0=Inativo',
     PRIMARY KEY (pon_id),
 
     -- Índice composto para bounding-box query no filtro de proximidade  [v10]
@@ -273,7 +276,8 @@ CREATE TABLE MENSAGENS (
     men_status          TINYINT      NOT NULL DEFAULT 1     COMMENT '0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida',
     men_deletado_em     DATETIME                            COMMENT 'Soft delete — data de remoção (NULL = ativo)',
     men_id_resposta     INT                                 COMMENT 'Mensagem respondida (auto-referência, NULL)',
-    PRIMARY KEY (men_id)
+    PRIMARY KEY (men_id),
+    INDEX idx_men_deletado_em (men_deletado_em)             -- filtro de soft-delete nas listagens
 ) ENGINE = InnoDB;
 
 

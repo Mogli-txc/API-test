@@ -36,7 +36,7 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.2.0
+  version: 1.3.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -4436,4 +4436,403 @@ paths:
           description: Escola não encontrada
         '409':
           description: Escola não possui contrato cadastrado
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PATHS adicionados em v1.3.0
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  /api/usuarios/{id}/endereco:
+    put:
+      summary: Atualiza endereço do usuário com regeocodificação
+      tags: [Usuários]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_endereco]
+              properties:
+                usu_endereco:
+                  type: string
+                  example: "Rua das Flores, 100, São Paulo - SP"
+      responses:
+        '200':
+          description: Endereço e coordenadas atualizadas
+          content:
+            application/json:
+              example:
+                message: "Endereço atualizado."
+                usu_endereco: "Rua das Flores, 100, São Paulo - SP"
+                usu_lat: -23.5614
+                usu_lon: -46.6560
+        '400': { description: Campo usu_endereco ausente }
+        '403': { description: Apenas o próprio usuário ou Desenvolvedor }
+
+  /api/veiculos/{vei_id}:
+    get:
+      summary: Detalhes de um veículo específico
+      tags: [Veículos]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: vei_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Dados do veículo
+          content:
+            application/json:
+              example:
+                vei_id: 1
+                usu_id: 3
+                vei_placa: "ABC1D23"
+                vei_marca_modelo: "Honda Civic"
+                vei_tipo: 1
+                vei_cor: "Preto"
+                vei_vagas: 4
+                vei_status: 1
+        '403': { description: Apenas o dono ou Desenvolvedor }
+        '404': { description: Veículo não encontrado }
+
+  /api/mensagens/{men_id}/ler:
+    patch:
+      summary: Marca mensagem como lida (men_status = 3)
+      tags: [Mensagens]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: men_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Mensagem marcada como lida
+          content:
+            application/json:
+              example:
+                message: "Mensagem marcada como lida."
+        '403': { description: Apenas o destinatário pode marcar como lida }
+        '404': { description: Mensagem não encontrada }
+
+  /api/pontos/{pon_id}:
+    put:
+      summary: Atualiza nome e/ou ordem do ponto de encontro
+      tags: [Pontos de Encontro]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: pon_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pon_nome:
+                  type: string
+                  example: "Portão Principal"
+                pon_ordem:
+                  type: integer
+                  example: 2
+      responses:
+        '200':
+          description: Ponto atualizado
+          content:
+            application/json:
+              example:
+                message: "Ponto atualizado com sucesso."
+        '403': { description: Apenas o motorista da carona vinculada }
+        '404': { description: Ponto não encontrado }
+
+  /api/admin/cadastrar:
+    post:
+      summary: Cria conta Admin ou Dev sem fluxo de OTP (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_email, usu_senha, per_tipo]
+              properties:
+                usu_email:
+                  type: string
+                  format: email
+                  example: "novo.admin@escola.edu.br"
+                usu_senha:
+                  type: string
+                  minLength: 8
+                  example: "Senha@Forte2026"
+                usu_nome:
+                  type: string
+                  example: "Admin Principal"
+                per_tipo:
+                  type: integer
+                  enum: [1, 2]
+                  description: "1=Administrador, 2=Desenvolvedor"
+                per_escola_id:
+                  type: integer
+                  nullable: true
+                  description: "Obrigatório para per_tipo=1; null para per_tipo=2"
+                  example: 2
+      responses:
+        '201':
+          description: Conta criada e pronta para login
+          content:
+            application/json:
+              example:
+                message: "Conta Administrador criada com sucesso."
+                usuario:
+                  usu_id: 15
+                  usu_email: "novo.admin@escola.edu.br"
+                  per_tipo: 1
+                  per_escola_id: 2
+        '400': { description: Campos obrigatórios ausentes ou per_tipo inválido }
+        '403': { description: Apenas Desenvolvedor pode criar Admin/Dev }
+        '409': { description: E-mail já cadastrado }
+
+  /api/admin/usuarios/{usu_id}/redefinir-senha:
+    post:
+      summary: Redefine a senha de uma conta Admin ou Dev (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: usu_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nova_senha]
+              properties:
+                nova_senha:
+                  type: string
+                  minLength: 8
+                  example: "NovaSenha@2026"
+      responses:
+        '200':
+          description: Senha redefinida e sessões invalidadas
+          content:
+            application/json:
+              example:
+                message: "Senha do usuário 5 redefinida com sucesso. Sessões ativas foram encerradas."
+        '400': { description: nova_senha ausente ou fraca }
+        '403': { description: Apenas Desenvolvedor; ou alvo não é Admin/Dev }
+        '404': { description: Usuário não encontrado }
+
+  /api/admin/stats/documentos:
+    get:
+      summary: Contagem de documentos por tipo e status OCR
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Estatísticas de documentos
+          content:
+            application/json:
+              example:
+                message: "Estatísticas de documentos"
+                stats:
+                  total: 45
+                  comprovantes: 30
+                  cnhs: 15
+                  aprovados: 35
+                  reprovados: 7
+                  pendentes: 3
+
+  /api/admin/usuarios/{usu_id}/status:
+    patch:
+      summary: Ativa ou inativa um usuário sem penalidade
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: usu_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_status]
+              properties:
+                usu_status:
+                  type: integer
+                  enum: [0, 1]
+                  example: 0
+      responses:
+        '200':
+          description: Status atualizado
+          content:
+            application/json:
+              example:
+                message: "Usuário 12 inativado com sucesso."
+        '403': { description: Não é possível operar sobre Admin ou Desenvolvedor }
+        '404': { description: Usuário não encontrado }
+        '409': { description: Usuário já está no estado solicitado }
+
+  /api/admin/matriculas:
+    get:
+      summary: Lista matrículas com dados completos
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+        - in: query
+          name: cur_id
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Lista de matrículas
+          content:
+            application/json:
+              example:
+                message: "Matrículas"
+                total: 2
+                matriculas:
+                  - cur_usu_id: 1
+                    usu_id: 3
+                    usu_nome: "Carlos Silva"
+                    usu_email: "carlos@usp.br"
+                    cur_id: 2
+                    cur_nome: "Engenharia de Computação"
+                    esc_nome: "USP"
+                    cur_usu_dataFinal: "2026-12-01"
+
+  /api/admin/avaliacoes:
+    get:
+      summary: Lista avaliações com nomes dos participantes
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Lista de avaliações
+          content:
+            application/json:
+              example:
+                message: "Avaliações"
+                total: 3
+                avaliacoes:
+                  - ava_id: 1
+                    car_id: 5
+                    avaliador: "Carlos Silva"
+                    avaliado: "João Souza"
+                    ava_nota: 5
+                    ava_comentario: "Ótima carona!"
+                    ava_criado_em: "2026-03-20T10:00:00.000Z"
+
+  /api/admin/veiculos:
+    get:
+      summary: Lista veículos com dados do proprietário
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+        - in: query
+          name: vei_status
+          schema: { type: integer, enum: [0, 1] }
+      responses:
+        '200':
+          description: Lista de veículos
+          content:
+            application/json:
+              example:
+                message: "Veículos"
+                total: 2
+                veiculos:
+                  - vei_id: 1
+                    vei_placa: "ABC1D23"
+                    vei_marca_modelo: "Honda Civic"
+                    vei_tipo: 1
+                    vei_vagas: 4
+                    vei_status: 1
+                    usu_nome: "Carlos Silva"
+                    usu_email: "carlos@usp.br"
+
+  /api/admin/logs/exportar:
+    get:
+      summary: Exporta AUDIT_LOG como CSV (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: acao
+          schema: { type: string }
+          example: LOGIN
+        - in: query
+          name: tabela
+          schema: { type: string }
+        - in: query
+          name: usu_id
+          schema: { type: integer }
+        - in: query
+          name: data_inicio
+          schema: { type: string, format: date }
+          example: "2026-01-01"
+        - in: query
+          name: data_fim
+          schema: { type: string, format: date }
+          example: "2026-12-31"
+      responses:
+        '200':
+          description: Arquivo CSV com os logs (máx. 10.000 registros)
+          content:
+            text/csv:
+              schema:
+                type: string
+              example: "audit_id,tabela,registro_id,acao,usu_id,ip,criado_em\n1,USUARIOS,3,LOGIN,3,127.0.0.1,2026-04-28T10:00:00.000Z"
+        '403': { description: Apenas Desenvolvedor }
+
+  /api/admin/stats/contratos:
+    get:
+      summary: Resumo de contratos de escolas (Dev only)
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Estatísticas de contratos
+          content:
+            application/json:
+              example:
+                message: "Estatísticas de contratos"
+                stats:
+                  sem_contrato: 1
+                  ativos: 1
+                  expirados: 1
+                  vencendo_em_90_dias: 0
+                alertas_vencimento: []
+        '403': { description: Apenas Desenvolvedor }
 ```

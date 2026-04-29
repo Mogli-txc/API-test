@@ -65,6 +65,11 @@ class AdminController {
         try {
             const { per_tipo, per_escola_id } = req.user;
 
+            // PASSO 0: Administrador sem escola associada não pode filtrar
+            if (per_tipo === 1 && !per_escola_id) {
+                return res.status(403).json({ error: "Perfil de Administrador sem escola associada. Contate o Desenvolvedor." });
+            }
+
             let rows;
 
             if (per_tipo === 2) {
@@ -123,6 +128,10 @@ class AdminController {
         try {
             const { per_tipo, per_escola_id } = req.user;
 
+            if (per_tipo === 1 && !per_escola_id) {
+                return res.status(403).json({ error: "Perfil de Administrador sem escola associada. Contate o Desenvolvedor." });
+            }
+
             let rows;
 
             if (per_tipo === 2) {
@@ -170,6 +179,10 @@ class AdminController {
     async statsSugestoes(req, res) {
         try {
             const { per_tipo, per_escola_id } = req.user;
+
+            if (per_tipo === 1 && !per_escola_id) {
+                return res.status(403).json({ error: "Perfil de Administrador sem escola associada. Contate o Desenvolvedor." });
+            }
 
             let rows;
 
