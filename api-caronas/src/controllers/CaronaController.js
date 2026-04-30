@@ -23,6 +23,7 @@ const db = require('../config/database'); // Pool de conexão MySQL
 const { stripHtml }        = require('../utils/sanitize');
 const { checkPenalidade }  = require('../utils/penaltyHelper');
 const { registrarAudit }   = require('../utils/auditLog');
+const { notificar, TIPOS } = require('../utils/notificar');
 
 // Haversine para filtro de proximidade — sem custo de API, executado em memória  [v10]
 const { calcularDistanciaKm } = require('../services/geocodingService');
@@ -31,6 +32,7 @@ const { calcularDistanciaKm } = require('../services/geocodingService');
 const HORA_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
 
 const LIMITE_MAX_PAGINACAO = 100;
+const RAIO_MAX_KM          = 25;  // raio máximo permitido no filtro de proximidade
 
 /**
  * Valida data e hora da carona combinados no fuso local do servidor.
@@ -142,6 +144,9 @@ class CaronaController {
                 }
                 if (raioKm <= 0) {
                     return res.status(400).json({ error: 'raio deve ser maior que zero.' });
+                }
+                if (raioKm > RAIO_MAX_KM) {
+                    return res.status(400).json({ error: `raio máximo permitido é ${RAIO_MAX_KM} km.` });
                 }
 
                 proximidadeAtiva = true;
@@ -326,16 +331,20 @@ class CaronaController {
         try {
             const { cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo } = req.body;
 
-            if (!cur_usu_id || !vei_id || !car_desc || !car_data || !car_hor_saida || !car_vagas_dispo) {
+            if (!cur_usu_id || !vei_id || !car_data || !car_hor_saida || !car_vagas_dispo) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo."
+                    error: "Campos obrigatórios: cur_usu_id, vei_id, car_data, car_hor_saida, car_vagas_dispo."
                 });
             }
 
-            // Sanitiza car_desc para prevenir XSS armazenado
-            const car_desc_limpa = stripHtml(car_desc.trim());
-            if (car_desc_limpa.length < 3 || car_desc_limpa.length > 255) {
-                return res.status(400).json({ error: "car_desc deve ter entre 3 e 255 caracteres." });
+            // Sanitiza car_desc quando fornecido (campo opcional)
+            let car_desc_limpa = null;
+            if (car_desc) {
+                car_desc_limpa = stripHtml(String(car_desc).trim());
+                if (car_desc_limpa.length > 255) {
+                    return res.status(400).json({ error: "car_desc deve ter no máximo 255 caracteres." });
+                }
+                if (car_desc_limpa.length === 0) car_desc_limpa = null;
             }
 
             if (isNaN(car_vagas_dispo) || car_vagas_dispo <= 0) {
@@ -779,6 +788,24 @@ class CaronaController {
 
             await conn.commit();
 
+            // PASSO 4: Notifica passageiros confirmados (fire-and-forget)
+            db.query(
+                `SELECT sc.usu_id_passageiro AS usu_id FROM SOLICITACOES_CARONA sc
+                 WHERE sc.car_id = ? AND sc.sol_status = 2
+                 UNION
+                 SELECT cp.usu_id FROM CARONA_PESSOAS cp
+                 WHERE cp.car_id = ? AND cp.car_pes_status = 1`,
+                [car_id, car_id]
+            ).then(([passageiros]) => {
+                passageiros.forEach(p => notificar({
+                    usu_id:   p.usu_id,
+                    tipo:     TIPOS.CARONA_FINALIZADA,
+                    titulo:   'Carona finalizada',
+                    mensagem: 'O motorista finalizou a carona. Que tal deixar uma avaliação?',
+                    dados:    { car_id: parseInt(car_id) }
+                }).catch(() => {}));
+            }).catch(() => {});
+
             await registrarAudit({ tabela: 'CARONAS', registroId: parseInt(car_id), acao: 'CARONA_FINALIZAR', usuId: req.user.id, ip: req.ip });
 
             return res.status(200).json({ message: "Carona finalizada com sucesso!" });
@@ -831,6 +858,16 @@ class CaronaController {
                 return res.status(409).json({ error: "Não é possível cancelar uma carona já finalizada." });
             }
 
+            // PASSO PRÉ: Captura passageiros confirmados antes de cancelar (para notificação)
+            const [passageirosParaNotificar] = await db.query(
+                `SELECT sc.usu_id_passageiro AS usu_id FROM SOLICITACOES_CARONA sc
+                 WHERE sc.car_id = ? AND sc.sol_status = 2
+                 UNION
+                 SELECT cp.usu_id FROM CARONA_PESSOAS cp
+                 WHERE cp.car_id = ? AND cp.car_pes_status = 1`,
+                [car_id, car_id]
+            );
+
             // Soft delete em transação: cancela a carona e libera os passageiros vinculados
             conn = await db.getConnection();
             await conn.beginTransaction();
@@ -847,6 +884,15 @@ class CaronaController {
 
             await conn.commit();
 
+            // PASSO 4: Notifica passageiros confirmados sobre o cancelamento (fire-and-forget)
+            passageirosParaNotificar.forEach(p => notificar({
+                usu_id:   p.usu_id,
+                tipo:     TIPOS.CARONA_CANCELADA,
+                titulo:   'Carona cancelada',
+                mensagem: 'O motorista cancelou a carona que você participava.',
+                dados:    { car_id: parseInt(car_id) }
+            }).catch(() => {}));
+
             await registrarAudit({ tabela: 'CARONAS', registroId: parseInt(car_id), acao: 'CARONA_CANCEL', usuId: req.user.id, ip: req.ip });
 
             return res.status(204).send();
@@ -862,14 +908,16 @@ class CaronaController {
 
     /**
      * MÉTODO: buscar
-     * Busca caronas com filtros avançados: status, data, escola e curso.
-     * Diferença do listarTodas: aceita qualquer car_status e filtro por data.
+     * Busca caronas com filtros avançados: status, data, escola, curso e proximidade.
      *
      * Query params:
      *   ?car_status= — 0=Cancelada, 1=Aberta (padrão), 2=Em espera, 3=Finalizada
      *   ?data=       — YYYY-MM-DD — filtra por data da carona
      *   ?esc_id=     — filtra por escola
      *   ?cur_id=     — filtra por curso
+     *   ?lat=&lon=   — filtro de proximidade: retorna apenas caronas com ponto de partida
+     *                  a até RAIO_MAX_KM km da localização fornecida.
+     *                  Estratégia em dois estágios: bounding box SQL + Haversine JS.
      *   ?page=, ?limit=
      */
     async buscar(req, res) {
@@ -920,7 +968,51 @@ class CaronaController {
                 params.push(req.query.data);
             }
 
+            // ── Filtro de proximidade ────────────────────────────────────────────────────
+            // Ativado quando ?lat= e ?lon= são fornecidos.
+            // Raio fixo: RAIO_MAX_KM (25 km). Não aceita parâmetro ?raio= — o limite é sempre 25 km.
+            // Estratégia em dois estágios (idêntica ao listarTodas):
+            //   1. Bounding box SQL via INNER JOIN PONTO_ENCONTROS — usa índice idx_pon_coords.
+            //   2. Haversine em JS — descarta false positives dos cantos do quadrado.
+            let proximidadeAtiva = false;
+            let latUsuario, lonUsuario;
+
+            if (req.query.lat !== undefined || req.query.lon !== undefined) {
+                latUsuario = parseFloat(req.query.lat);
+                lonUsuario = parseFloat(req.query.lon);
+
+                if (isNaN(latUsuario) || isNaN(lonUsuario)) {
+                    return res.status(400).json({ error: 'Filtro de proximidade requer lat e lon numéricos.' });
+                }
+
+                // Calcula bounding box para o raio máximo permitido
+                const deltaLat = RAIO_MAX_KM / 111;
+                const deltaLon = RAIO_MAX_KM / (111 * Math.cos(latUsuario * Math.PI / 180));
+
+                filtros.push('pe.pon_lat BETWEEN ? AND ?');
+                filtros.push('pe.pon_lon BETWEEN ? AND ?');
+                params.push(latUsuario - deltaLat, latUsuario + deltaLat);
+                params.push(lonUsuario - deltaLon, lonUsuario + deltaLon);
+
+                proximidadeAtiva = true;
+            }
+            // ────────────────────────────────────────────────────────────────────────────
+
             const where = 'WHERE ' + filtros.join(' AND ');
+
+            // JOIN com PONTO_ENCONTROS apenas quando filtro de proximidade está ativo.
+            // INNER JOIN garante que caronas sem ponto geocodificado não apareçam no resultado.
+            const joinPontos = proximidadeAtiva
+                ? `INNER JOIN PONTO_ENCONTROS pe ON pe.car_id   = c.car_id
+                       AND pe.pon_tipo   = 0
+                       AND pe.pon_status = 1
+                       AND pe.pon_lat IS NOT NULL`
+                : '';
+
+            // Inclui coordenadas na projeção apenas quando necessário para o Haversine em JS
+            const selecaoCoordenadas = proximidadeAtiva
+                ? ', pe.pon_lat AS partida_lat, pe.pon_lon AS partida_lon'
+                : '';
 
             // PASSO 3: Busca caronas com dados de veículo, motorista, curso e escola
             const [caronas] = await db.query(
@@ -929,17 +1021,29 @@ class CaronaController {
                         u.usu_id, u.usu_nome, u.usu_foto,
                         v.vei_tipo, v.vei_vagas,
                         cur.cur_id, cur.cur_nome, e.esc_id, e.esc_nome
+                        ${selecaoCoordenadas}
                  FROM CARONAS c
                  INNER JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id = cu_mot.cur_usu_id
                  INNER JOIN USUARIOS        u      ON cu_mot.usu_id  = u.usu_id
                  INNER JOIN VEICULOS        v      ON c.vei_id       = v.vei_id
                  INNER JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
                  INNER JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
+                 ${joinPontos}
                  ${where}
                  ORDER BY c.car_data ASC, c.car_hor_saida ASC
                  LIMIT ? OFFSET ?`,
                 [...params, limit, offset]
             );
+
+            // PASSO 4: Refinamento Haversine — descarta registros nos cantos do bounding box
+            // e remove as coordenadas internas da resposta final.
+            let caronasFiltradas = caronas;
+            if (proximidadeAtiva) {
+                caronasFiltradas = caronas.filter(c => {
+                    const dist = calcularDistanciaKm(latUsuario, lonUsuario, c.partida_lat, c.partida_lon);
+                    return dist <= RAIO_MAX_KM;
+                }).map(({ partida_lat, partida_lon, ...rest }) => ({ ...rest }));
+            }
 
             const [[{ totalGeral }]] = await db.query(
                 `SELECT COUNT(*) AS totalGeral
@@ -947,13 +1051,19 @@ class CaronaController {
                  INNER JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id = cu_mot.cur_usu_id
                  INNER JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
                  INNER JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
+                 ${joinPontos}
                  ${where}`,
                 params
             );
 
             return res.status(200).json({
                 message:    "Resultado da busca.",
-                totalGeral, total: caronas.length, page, limit, caronas
+                raio_km:    proximidadeAtiva ? RAIO_MAX_KM : undefined,
+                totalGeral,
+                total:      caronasFiltradas.length,
+                page,
+                limit,
+                caronas:    caronasFiltradas
             });
 
         } catch (error) {

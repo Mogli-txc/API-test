@@ -203,6 +203,18 @@ Regras: apenas participantes confirmados podem avaliar; nota de 1–5; um avalia
 
 Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no handshake.
 
+#### WebSocket — Canal de Notificações
+
+Conecte-se ao namespace `/notificacoes` com o mesmo JWT:
+```js
+const io = require('socket.io-client');
+const socket = io('http://localhost:3000/notificacoes', {
+    auth: { token: '<access_token>' }
+});
+socket.on('nova_notificacao', (notif) => console.log(notif));
+socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
+```
+
 | Evento cliente → servidor | Payload                                                        | Descrição               |
 |---------------------------|----------------------------------------------------------------|-------------------------|
 | `entrar_carona`           | `{ car_id }`                                                   | Entra na sala da carona |
@@ -214,6 +226,17 @@ Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no
 | `mensagem_recebida`       | `{ men_id, car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta }` | Nova mensagem broadcast na sala |
 | `entrou_carona`           | `{ car_id }`                                                                            | Confirmação de entrada          |
 | `erro`                    | `{ message }`                                                                           | Erro de validação               |
+
+### Notificações — `/api/notificacoes`
+
+| Método | Rota                      | Acesso    | Descrição                           |
+|--------|---------------------------|-----------|-------------------------------------|
+| GET    | `/api/notificacoes`       | JWT       | Lista notificações (`?lida=0/1`)   |
+| GET    | `/api/notificacoes/nao-lidas` | JWT   | Contagem de não lidas (badge)      |
+| PATCH  | `/api/notificacoes/ler-todas` | JWT   | Marca todas como lidas             |
+| PATCH  | `/api/notificacoes/:id/ler` | JWT     | Marca uma notificação como lida    |
+| POST   | `/api/notificacoes/enviar` | ADMIN/DEV | Envia notificação manual           |
+| DELETE | `/api/notificacoes/:id`   | JWT       | Deleta notificação própria         |
 
 ### Documentos de Verificação — `/api/documentos`
 
@@ -409,3 +432,100 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Operações marcadas **Dev** exigem 
 | v9     | `esc_dominio`, `esc_max_usuarios` em ESCOLAS; `vei_placa` UNIQUE                 |
 | v10    | Lat/lon em ESCOLAS, USUARIOS e PONTO_ENCONTROS (Nominatim)                       |
 | v11    | Contrato de escola: `esc_contrato_duracao`, `esc_contrato_inicio`, `esc_contrato_expira` |
+| v12    | Tabela NOTIFICACOES: persistência de notificações automáticas e manuais |
+
+---
+
+## Explicação detalhada do Projeto (para estudantes)
+
+Este projeto é uma **API REST** — ou seja, um servidor que recebe pedidos (requisições) de aplicativos móveis ou web e responde com dados em formato JSON. Pense nele como o "cérebro" de um aplicativo de caronas universitárias.
+
+### O que é uma API REST?
+
+Quando você usa um aplicativo no celular, ele se comunica com um servidor na internet. Essa comunicação segue regras definidas — isso é a API. O formato **REST** organiza essa comunicação usando os verbos do protocolo HTTP:
+
+- **GET** → Buscar informação ("me dê a lista de caronas")
+- **POST** → Criar algo novo ("crie uma nova carona para mim")
+- **PUT/PATCH** → Atualizar algo ("mude o horário desta carona")
+- **DELETE** → Remover algo ("cancele esta carona")
+
+---
+
+### Seções do projeto
+
+#### `/api/usuarios` — Quem usa o sistema
+
+Controla o cadastro e autenticação dos usuários. Quando alguém se cadastra, recebe um código por e-mail (OTP) para confirmar a identidade. Após confirmar, faz login e recebe dois tokens:
+- **Access token** (24h): usado em cada requisição para provar que está logado
+- **Refresh token** (30 dias): serve para gerar um novo access token sem precisar logar novamente
+
+Cada usuário tem um **nível de verificação** (`usu_verificacao`) que controla o que pode fazer no sistema — de 0 (recém cadastrado) até 2 (pode oferecer caronas).
+
+#### `/api/caronas` — As caronas em si
+
+Motoristas cadastram caronas informando data, horário e vagas disponíveis. Passageiros buscam e solicitam participação. O sistema controla status (Aberta → Em espera → Finalizada ou Cancelada).
+
+O filtro de proximidade usa **Haversine** — uma fórmula matemática que calcula distância entre coordenadas geográficas — limitado a 25 km do usuário.
+
+#### `/api/solicitacoes` — Pedidos de vaga
+
+Passageiros enviam solicitações para participar de uma carona. O motorista aceita ou recusa. Se aceito, as vagas diminuem automaticamente. Toda a lógica usa **transações SQL** para evitar que duas pessoas ocupem a mesma vaga ao mesmo tempo (race condition).
+
+#### `/api/passageiros` — Confirmação direta
+
+Alternativa às solicitações: o motorista pode adicionar passageiros diretamente na carona, sem precisar de solicitação.
+
+#### `/api/veiculos` — Gestão de veículos
+
+Motoristas cadastram seus veículos. O sistema valida formato de placa (padrão brasileiro e Mercosul) e impede duplicatas. Veículos são desativados com soft-delete (não são apagados, apenas marcados como inativos).
+
+#### `/api/pontos` — Onde encontrar o motorista
+
+Cada carona pode ter pontos de partida e destino. O endereço digitado é convertido automaticamente em coordenadas (latitude/longitude) pelo serviço **Nominatim** (OpenStreetMap), sem custo de API.
+
+#### `/api/mensagens` — Chat da carona
+
+Motorista e passageiros podem trocar mensagens dentro do contexto de uma carona. Funciona tanto via API REST (para histórico) quanto via **WebSocket** (para tempo real). O WebSocket usa **Socket.io**, que mantém uma conexão aberta entre o app e o servidor para entrega instantânea de mensagens.
+
+#### `/api/notificacoes` — Alertas do sistema
+
+Notificações automáticas são disparadas quando algo importante acontece: nova solicitação, solicitação aceita, carona cancelada, penalidade aplicada, etc. Cada notificação é salva no banco (histórico) e entregue em tempo real via Socket.io para quem estiver conectado. Admin e Dev também podem enviar notificações manuais para usuários específicos.
+
+#### `/api/avaliacoes` — Reputação
+
+Após uma carona finalizada, motorista e passageiro podem se avaliar com notas de 1 a 5. Isso cria um sistema de reputação que ajuda outros usuários a decidir com quem viajar.
+
+#### `/api/documentos` — Verificação de identidade
+
+Usuários enviam PDFs (comprovante de matrícula, CNH). O sistema usa **OCR** (reconhecimento de texto em imagens) para verificar automaticamente se o documento é válido, promovendo o nível de acesso do usuário sem intervenção humana.
+
+#### `/api/sugestoes` — Feedback dos usuários
+
+Canal para usuários enviarem sugestões de melhoria ou denúncias. Administradores revisam e respondem.
+
+#### `/api/matriculas` — Vínculo com cursos
+
+Usuários se matriculam em cursos das escolas parceiras. Essa matrícula é usada ao criar uma carona — ela vincula a carona ao curso e escola do motorista.
+
+#### `/api/admin` — Painel de controle
+
+Rotas exclusivas para Administradores (de cada escola) e Desenvolvedores (acesso total). Incluem estatísticas do sistema, gestão de usuários, penalidades, contratos de escolas e exportação de logs em CSV para auditoria.
+
+#### `/api/infra` — Dados públicos
+
+Única rota sem autenticação. Lista escolas e cursos disponíveis — necessário para a tela de cadastro do app, quando o usuário ainda não tem token.
+
+---
+
+### Conceitos técnicos importantes
+
+| Conceito | O que é | Onde é usado |
+|----------|---------|--------------|
+| **JWT** | Token criptografado que prova identidade sem consultar o banco | Autenticação em todas as rotas protegidas |
+| **Soft Delete** | Marca registro como deletado sem remover do banco | Usuários, caronas, mensagens |
+| **Transação SQL** | Garante que múltiplas operações ou acontecem todas ou nenhuma | Aceitação de solicitação, cancelamento |
+| **WebSocket** | Conexão persistente para comunicação bidirecional em tempo real | Chat e notificações |
+| **OCR** | Reconhecimento de texto em imagens/PDFs | Verificação de documentos |
+| **Haversine** | Fórmula para calcular distância entre coordenadas geográficas | Filtro de proximidade em caronas |
+| **Rate Limiting** | Limita número de requisições por IP em janela de tempo | Proteção contra ataques de força bruta |
+| **Audit Log** | Registro imutável de todas as ações sensíveis | Rastreabilidade e conformidade |

@@ -27,6 +27,8 @@ const { Server: SocketIOServer } = require('socket.io');
 require('dotenv').config(); // Carrega variáveis de ambiente do arquivo .env
 
 const { registrarMensagensSocket } = require('./sockets/mensagensSocket');
+const { setIo }                    = require('./sockets/io');
+const { registrarNotificacoesSocket } = require('./sockets/notificacoesSocket');
 const db = require('./config/database'); // Pool MySQL — usado no health check
 
 // Importação das rotas
@@ -43,6 +45,7 @@ const matriculaRoutes    = require('./routes/matriculaRoutes');      // Matrícu
 const adminRoutes        = require('./routes/adminRoutes');           // Estatísticas admin
 const avaliacaoRoutes    = require('./routes/avaliacaoRoutes');        // Avaliações pós-carona
 const documentoRoutes    = require('./routes/documentoRoutes');         // Comprovante de matrícula e CNH
+const notificacaoRoutes  = require('./routes/notificacaoRoutes');
 
 // Instancia a aplicação Express
 const app = express();
@@ -316,6 +319,7 @@ app.use('/api/avaliacoes', avaliacaoRoutes);
  * Validação automática — promoção de nível após upload bem-sucedido
  */
 app.use('/api/documentos', documentoRoutes);
+app.use('/api/notificacoes', notificacaoRoutes);
 
 // ========== TRATAMENTO DE ERROS ==========
 
@@ -375,6 +379,8 @@ if (process.env.NODE_ENV !== 'test') {
         }
     });
     registrarMensagensSocket(io);
+    setIo(io);
+    registrarNotificacoesSocket(io);
 
     httpServer.listen(PORT, () => {
         console.log(`

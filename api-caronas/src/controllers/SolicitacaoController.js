@@ -13,6 +13,7 @@ const { getMotoristaId }           = require('../utils/authHelper');
 const { checkPenalidade }          = require('../utils/penaltyHelper');
 const { enqueue: enqueueEmail }    = require('../utils/emailQueue');
 const { registrarAudit }           = require('../utils/auditLog');
+const { notificar, TIPOS }         = require('../utils/notificar');
 
 class SolicitacaoController {
 
@@ -186,6 +187,15 @@ class SolicitacaoController {
             } finally {
                 conn.release();
             }
+
+                // PASSO 4: Notifica o motorista sobre a nova solicitação (fire-and-forget)
+                notificar({
+                    usu_id:   motorista[0].usu_id,
+                    tipo:     TIPOS.SOLICITACAO_NOVA,
+                    titulo:   'Nova solicitação de carona',
+                    mensagem: `Um passageiro solicitou ${sol_vaga_soli} vaga(s) na sua carona.`,
+                    dados:    { car_id: parseInt(car_id), sol_id: resultado.insertId }
+                }).catch(() => {});
 
             return res.status(201).json({
                 message: "Solicitação de carona criada com sucesso!",
@@ -498,6 +508,18 @@ class SolicitacaoController {
             }
 
             await conn.commit();
+
+            // PASSO 3: Notifica o passageiro sobre a resposta (fire-and-forget)
+            const aceito = statusCodigo === 2;
+            notificar({
+                usu_id:   sol[0].usu_id_passageiro,
+                tipo:     aceito ? TIPOS.SOLICITACAO_ACEITA : TIPOS.SOLICITACAO_RECUSADA,
+                titulo:   aceito ? 'Solicitação aceita!' : 'Solicitação recusada',
+                mensagem: aceito
+                    ? 'O motorista aceitou sua solicitação de carona.'
+                    : 'O motorista recusou sua solicitação.',
+                dados:    { car_id: sol[0].car_id, sol_id: parseInt(sol_id) }
+            }).catch(() => {});
 
             // Registra auditoria — ação mais crítica do sistema: aceite/recusa de carona
             registrarAudit({

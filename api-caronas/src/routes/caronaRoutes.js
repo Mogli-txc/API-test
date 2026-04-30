@@ -37,7 +37,8 @@ router.get('/passageiro', authMiddleware, CaronaController.listarCaronasComoPass
  * ROTA: POST /api/caronas/oferecer
  * Descrição: Cria uma nova carona (oferecida por um condutor)
  * Acesso: PROTEGIDO - Requer Token JWT válido no header Authorization
- * Campos obrigatórios: cur_usu_id, vei_id, car_desc, car_data, car_vagas_dispo
+ * Campos obrigatórios: cur_usu_id, vei_id, car_data, car_hor_saida, car_vagas_dispo
+ * Campo opcional: car_desc (descrição da carona — NULL se não informado)
  * MER: Tabela CARONAS
  */
 router.post('/oferecer', authMiddleware, CaronaController.criar);

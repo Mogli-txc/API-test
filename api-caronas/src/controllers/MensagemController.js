@@ -8,9 +8,10 @@
  *   men_texto, men_id_resposta
  */
 
-const db = require('../config/database'); // Pool de conexão MySQL
+const db = require('../config/database');
 const { stripHtml }            = require('../utils/sanitize');
 const { isParticipanteCarona } = require('../utils/authHelper');
+const { getIo }                = require('../sockets/io');
 
 class MensagemController {
 
@@ -89,15 +90,24 @@ class MensagemController {
                  men_id_resposta ? parseInt(men_id_resposta) : null]
             );
 
-            // PASSO 9: Resposta de sucesso com o ID gerado pelo banco
+            const mensagem = {
+                men_id:              resultado.insertId,
+                car_id:              parseInt(car_id),
+                usu_id_remetente,
+                usu_id_destinatario: parseInt(usu_id_destinatario),
+                men_texto:           men_texto_trim,
+                men_status:          1, // Enviada
+                men_id_resposta:     men_id_resposta ? parseInt(men_id_resposta) : null
+            };
+
+            // PASSO 9: Notifica via Socket.io os participantes na sala (se houver sessão ativa)
+            // getIo() retorna null em modo test ou quando não há clientes conectados — degrada sem erro.
+            const io = getIo();
+            if (io) io.to(`carona_${car_id}`).emit('mensagem_recebida', mensagem);
+
             return res.status(201).json({
                 message: "Mensagem enviada com sucesso!",
-                mensagem: {
-                    men_id: resultado.insertId, // ID gerado automaticamente pelo banco
-                    car_id, usu_id_remetente, usu_id_destinatario,
-                    men_texto: men_texto_trim,
-                    men_id_resposta: men_id_resposta || null
-                }
+                mensagem
             });
 
         } catch (error) {

@@ -19,6 +19,7 @@
 --           pon_lat/pon_lon + índice em PONTO_ENCONTROS; pon_endereco_geom passa a NULL (opcional)
 --   v11  — migration-contratos.sql: esc_contrato_duracao + esc_contrato_inicio + esc_contrato_expira em ESCOLAS
 --           Gerenciado exclusivamente por Desenvolvedores via POST /api/admin/escolas/:esc_id/contrato
+--   v12  — migration-notificacoes.sql: tabela NOTIFICACOES (persistência + Socket.io)
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -212,7 +213,7 @@ CREATE TABLE CARONAS (
     car_id          INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Carona (PK)',
     vei_id          INT          NOT NULL               COMMENT 'Veículo utilizado (FK)',
     cur_usu_id      INT          NOT NULL               COMMENT 'Inscrição do motorista (FK para CURSOS_USUARIOS)',
-    car_desc        VARCHAR(255) NOT NULL               COMMENT 'Detalhes da carona',
+    car_desc        VARCHAR(255) NULL DEFAULT NULL      COMMENT 'Detalhes da carona (opcional)',
     car_data        DATETIME     NOT NULL               COMMENT 'Data e hora da carona',
     car_hor_saida   TIME         NOT NULL               COMMENT 'Horário de saída',
     car_vagas_dispo INT          NOT NULL               COMMENT 'Vagas disponíveis (1 a 6)',
@@ -538,5 +539,47 @@ ALTER TABLE PENALIDADES
     ADD CONSTRAINT FK_pen_aplicado_por
         FOREIGN KEY (pen_aplicado_por) REFERENCES USUARIOS (usu_id)
         ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- =====================================================
+-- 18. Tabela NOTIFICACOES  [v12 — migration-notificacoes.sql]
+-- Armazena notificações persistentes de cada usuário.
+-- Tipos automáticos (sistema) e manuais (Admin/Dev).
+--
+-- noti_tipo valores:
+--   SOLICITACAO_NOVA      — passageiro pediu vaga (→ motorista)
+--   SOLICITACAO_ACEITA    — motorista aceitou (→ passageiro)
+--   SOLICITACAO_RECUSADA  — motorista recusou (→ passageiro)
+--   CARONA_CANCELADA      — motorista cancelou (→ passageiros confirmados)
+--   CARONA_FINALIZADA     — motorista finalizou (→ passageiros confirmados)
+--   AVALIACAO_RECEBIDA    — nova avaliação recebida (→ avaliado)
+--   PENALIDADE_APLICADA   — admin aplicou penalidade (→ usuário)
+--   PENALIDADE_REMOVIDA   — admin removeu penalidade (→ usuário)
+--   ADMIN_MANUAL          — notificação manual enviada por Admin/Dev
+-- =====================================================
+DROP TABLE IF EXISTS NOTIFICACOES;
+CREATE TABLE NOTIFICACOES (
+    noti_id        BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Identificador da notificação (PK)',
+    usu_id         INT          NOT NULL               COMMENT 'Destinatário (FK → USUARIOS)',
+    noti_tipo      VARCHAR(40)  NOT NULL               COMMENT 'Código do tipo de notificação',
+    noti_titulo    VARCHAR(100) NOT NULL               COMMENT 'Título curto',
+    noti_mensagem  VARCHAR(255) NOT NULL               COMMENT 'Texto da notificação',
+    noti_lida      TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Não lida, 1=Lida',
+    noti_dados     JSON         NULL     DEFAULT NULL  COMMENT 'Payload extra em JSON (car_id, sol_id…)',
+    noti_remetente INT          NULL     DEFAULT NULL  COMMENT 'usu_id do Admin/Dev. NULL = sistema automático',
+    noti_criada_em DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora de criação',
+    PRIMARY KEY (noti_id),
+    INDEX idx_noti_usu_lida  (usu_id, noti_lida),
+    INDEX idx_noti_criada_em (noti_criada_em)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = 'Notificações persistentes — automáticas e manuais  [v12]';
+
+-- NOTIFICACOES → USUARIOS  [v12]
+ALTER TABLE NOTIFICACOES
+    ADD CONSTRAINT FK_noti_destinatario
+        FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    ADD CONSTRAINT FK_noti_remetente
+        FOREIGN KEY (noti_remetente) REFERENCES USUARIOS (usu_id)
+        ON DELETE SET NULL ON UPDATE CASCADE;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -4835,4 +4835,141 @@ paths:
                   vencendo_em_90_dias: 0
                 alertas_vencimento: []
         '403': { description: Apenas Desenvolvedor }
+
+  /api/notificacoes:
+    get:
+      summary: Lista notificações do usuário autenticado
+      tags: [Notificações]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: lida
+          schema: { type: integer, enum: [0, 1] }
+          description: "0=não lidas, 1=lidas. Omitir = todas."
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        '200':
+          description: Lista de notificações
+          content:
+            application/json:
+              example:
+                message: "Notificações recuperadas."
+                totalGeral: 5
+                total: 3
+                page: 1
+                limit: 20
+                notificacoes:
+                  - noti_id: 12
+                    noti_tipo: "SOLICITACAO_NOVA"
+                    noti_titulo: "Nova solicitação de carona"
+                    noti_mensagem: "Um passageiro solicitou 1 vaga(s) na sua carona."
+                    noti_lida: 0
+                    noti_dados: { car_id: 5, sol_id: 8 }
+                    noti_remetente: null
+                    noti_criada_em: "2026-04-29T10:00:00.000Z"
+        '400': { description: Parâmetro lida inválido }
+        '401': { description: Não autenticado }
+
+  /api/notificacoes/nao-lidas:
+    get:
+      summary: Contagem de notificações não lidas (badge)
+      tags: [Notificações]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Contagem
+          content:
+            application/json:
+              example: { total: 3 }
+
+  /api/notificacoes/ler-todas:
+    patch:
+      summary: Marca todas as notificações do usuário como lidas
+      tags: [Notificações]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Todas marcadas
+          content:
+            application/json:
+              example: { message: "Todas as notificações marcadas como lidas.", atualizadas: 3 }
+
+  /api/notificacoes/{noti_id}/ler:
+    patch:
+      summary: Marca uma notificação como lida
+      tags: [Notificações]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: noti_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Marcada como lida }
+        '404': { description: Notificação não encontrada }
+        '409': { description: Já estava lida }
+
+  /api/notificacoes/enviar:
+    post:
+      summary: Admin/Dev envia notificação manual
+      tags: [Notificações]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_ids, titulo, mensagem]
+              properties:
+                usu_ids:
+                  oneOf:
+                    - type: integer
+                    - type: array
+                      items: { type: integer }
+                  example: [3, 7, 12]
+                  description: "ID único ou array de IDs (máx. 100)"
+                titulo:
+                  type: string
+                  maxLength: 100
+                  example: "Aviso importante"
+                mensagem:
+                  type: string
+                  maxLength: 255
+                  example: "O sistema entrará em manutenção às 22h."
+                dados:
+                  type: object
+                  nullable: true
+                  description: "Payload extra opcional em JSON"
+      responses:
+        '201':
+          description: Notificação enviada
+          content:
+            application/json:
+              example:
+                message: "Notificação enviada para 2 usuário(s)."
+                noti_ids: [45, 46]
+                destinatarios: 2
+        '400': { description: Campos ausentes ou IDs inválidos }
+        '403': { description: Apenas Admin ou Desenvolvedor }
+        '404': { description: Um ou mais destinatários não encontrados }
+
+  /api/notificacoes/{noti_id}:
+    delete:
+      summary: Deleta notificação própria
+      tags: [Notificações]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: noti_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Notificação deletada }
+        '404': { description: Notificação não encontrada }
 ```

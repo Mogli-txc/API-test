@@ -37,6 +37,7 @@ const { stripHtml }           = require('../utils/sanitize');
 const { registrarAudit }      = require('../utils/auditLog');
 const { DURACAO_SQL }         = require('../utils/penaltyHelper');
 const { geocodificarEndereco } = require('../services/geocodingService');
+const { notificar, TIPOS }    = require('../utils/notificar');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -442,6 +443,18 @@ class AdminController {
                 conn.release();
             }
 
+            // PASSO 9b: Notifica o usuário penalizado (fire-and-forget)
+            notificar({
+                usu_id:       parseInt(usu_id),
+                tipo:         TIPOS.PENALIDADE_APLICADA,
+                titulo:       tipoNum === 4 ? 'Conta suspensa' : 'Penalidade aplicada',
+                mensagem:     tipoNum === 4
+                    ? 'Sua conta foi suspensa pelo administrador.'
+                    : `Uma restrição foi aplicada à sua conta${motivoLimpo ? `: ${motivoLimpo}` : '.'}`,
+                dados:        { pen_tipo: tipoNum },
+                remetente_id: admin_id
+            }).catch(() => {});
+
             const [[pen]] = await db.query(
                 'SELECT pen_id, pen_tipo, pen_expira_em FROM PENALIDADES WHERE pen_id = ?',
                 [insertId]
@@ -513,6 +526,18 @@ class AdminController {
 
             // PASSO 4: Desativa a penalidade
             await db.query('UPDATE PENALIDADES SET pen_ativo = 0 WHERE pen_id = ?', [pen_id]);
+
+            // PASSO 4b: Notifica o usuário sobre remoção da penalidade (fire-and-forget)
+            notificar({
+                usu_id:       pen.usu_id,
+                tipo:         TIPOS.PENALIDADE_REMOVIDA,
+                titulo:       'Restrição removida',
+                mensagem:     pen.pen_tipo === 4
+                    ? 'Sua conta foi reativada pelo administrador.'
+                    : 'Uma restrição foi removida da sua conta.',
+                dados:        { pen_id: parseInt(pen_id), pen_tipo: pen.pen_tipo },
+                remetente_id: req.user.id
+            }).catch(() => {});
 
             // PASSO 5: Penalidade tipo 4 → restaura acesso ao nível correto e renova prazo.
             // Verifica se o usuário possui veículos ativos para determinar o nível (1 ou 2).

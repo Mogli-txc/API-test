@@ -45,6 +45,15 @@
 -- Execute este bloco em bancos existentes (antes do create.sql completo).
 -- Não é necessário se o banco foi criado do zero com create.sql atualizado.
 -- =====================================================
+-- ALTER TABLE ... (criar tabela NOTIFICACOES conforme create.sql v12)
+-- Ver create.sql seção 18 para DDL completo.
+
+-- =====================================================
+-- MIGRATION v12 — Notificações
+-- Execute em bancos existentes antes do create.sql completo.
+-- =====================================================
+-- ALTER TABLE ... (criar tabela NOTIFICACOES conforme create.sql v12)
+-- Ver create.sql seção 18 para DDL completo.
 -- ALTER TABLE ESCOLAS
 --     ADD COLUMN esc_contrato_duracao ENUM('1ano','2anos','5anos') NULL DEFAULT NULL
 --         COMMENT 'Duração do contrato com a instituição  [v11]',

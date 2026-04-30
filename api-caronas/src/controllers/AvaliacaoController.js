@@ -16,6 +16,7 @@
 const db = require('../config/database');
 const { stripHtml }             = require('../utils/sanitize');
 const { isParticipanteCarona }  = require('../utils/authHelper');
+const { notificar, TIPOS }      = require('../utils/notificar');
 
 class AvaliacaoController {
 
@@ -87,6 +88,15 @@ class AvaliacaoController {
                  VALUES (?, ?, ?, ?, ?)`,
                 [car_id, usu_id_avaliador, usu_id_avaliado, nota, comentario]
             );
+
+            // PASSO 10: Notifica o avaliado (fire-and-forget)
+            notificar({
+                usu_id:   parseInt(usu_id_avaliado),
+                tipo:     TIPOS.AVALIACAO_RECEBIDA,
+                titulo:   'Você recebeu uma avaliação',
+                mensagem: `Você recebeu nota ${nota} em uma carona.`,
+                dados:    { car_id: parseInt(car_id), ava_id: resultado.insertId, ava_nota: nota }
+            }).catch(() => {});
 
             return res.status(201).json({
                 message:   "Avaliação registrada com sucesso!",
