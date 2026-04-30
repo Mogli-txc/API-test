@@ -1151,10 +1151,17 @@ paths:
 
         **Pipeline de validação:**
         1. Magic bytes verificados (`%PDF-`, 5 bytes) — rejeita arquivos falsificados.
-        2. OCR automático: tenta extração de texto nativo (`pdfjs-dist`); se insuficiente,
-           converte a 1ª página para PNG e executa Tesseract.js.
-        3. Avalia ≥ 2 de 3 grupos de critérios (`instituicao`, `matricula`, `periodo`)
-           com confiança mínima de 75%.
+        2. OCR automático: tenta extração de texto nativo (`pdfjs-dist`, limiar ≥ 120 chars);
+           se insuficiente, converte a 1ª página para PNG e executa Tesseract.js.
+        3. Avalia ≥ 2 de 3 grupos de critérios com confiança Tesseract ≥ **60%**:
+           - `instituicao`: universidade, faculdade, usp, unicamp, unesp, etec, fatec, senac,
+             senai, cps, centro paula souza, tecnico, escola, unidade de ensino, instituto…
+           - `matricula`: matricula, matriculado, declaracao, aluno, estudante, ra, ra:,
+             habilitacao, modulo, discente…
+           - `periodo`: 2024–2027, semestre, periodo letivo, 1–4 modulo, bimestre, trimestre…
+
+        > Compatível com: comprovantes USP, UNICAMP, UNESP, ETEC/FATEC (NSA), SENAC, SENAI,
+        > portais SIGAA e outros sistemas governamentais brasileiros.
 
         **Promoção automática (OCR aprovado):**
         - Nível 5 → **1** (matrícula verificada, +6 meses)
@@ -1228,7 +1235,7 @@ paths:
                     example: Documento não reconhecido como comprovante de matrícula válido.
                   detalhes:
                     type: string
-                    example: "Critérios identificados: 1/3. Confiança OCR: 42%."
+                    example: "Critérios identificados: 1/3. Confiança OCR: 55%."
         '401':
           description: Não autenticado
 

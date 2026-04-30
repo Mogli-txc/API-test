@@ -26,8 +26,9 @@ const { extrairTextoPdf, pdfParaImagemBuffer } = require('../utils/pdfHelper');
 const { ocrImagem }                            = require('../utils/ocrHelper');
 
 // Limiar mínimo de caracteres para considerar que o PDF possui texto nativo legível.
-// PDFs escaneados geralmente retornam vazio ou menos de 10 chars.
-const TEXTO_MINIMO = 80;
+// PDFs de sistemas governamentais (NSA, SIGAA) às vezes retornam pouco texto mesmo sendo
+// digitais — valor maior força o fallback para OCR nesses casos.
+const TEXTO_MINIMO = 120;
 
 /**
  * Critérios de palavras-chave por tipo de documento.
@@ -42,17 +43,22 @@ const CRITERIOS = {
         {
             grupo:    'instituicao',
             palavras: ['universidade', 'faculdade', 'instituto federal', 'usp', 'unicamp',
-                       'unesp', 'fgv', 'puc', 'ufsp', 'unifesp', 'escola']
+                       'unesp', 'fgv', 'puc', 'ufsp', 'unifesp', 'escola',
+                       'etec', 'fatec', 'senac', 'senai', 'cps', 'centro paula souza',
+                       'tecnico', 'tecnica', 'instituto', 'college', 'unidade de ensino']
         },
         {
             grupo:    'matricula',
-            palavras: ['matricula', 'registro academico', 'ra:', 'numero de matricula',
-                       'aluno', 'estudante', 'discente', 'n matricula']
+            palavras: ['matricula', 'registro academico', 'ra:', 'ra ', 'numero de matricula',
+                       'aluno', 'estudante', 'discente', 'n matricula',
+                       'declaracao', 'habilitacao', 'modulo', 'matriculado']
         },
         {
             grupo:    'periodo',
-            palavras: ['2024', '2025', '2026', 'semestre', 'periodo letivo',
-                       'ano letivo', '1 semestre', '2 semestre']
+            palavras: ['2024', '2025', '2026', '2027', 'semestre', 'periodo letivo',
+                       'ano letivo', '1 semestre', '2 semestre',
+                       '1 modulo', '2 modulo', '3 modulo', '4 modulo',
+                       'modulo', 'bimestre', 'trimestre']
         }
     ],
     cnh: [
@@ -75,9 +81,10 @@ const CRITERIOS = {
 };
 
 // Confiança mínima do Tesseract por tipo (0-100).
-// CNH tem tipografia mais legível → threshold mais alto.
-// Comprovantes de matrícula têm layouts variados → threshold menor.
-const CONFIANCA_MINIMA = { comprovante: 75, cnh: 75 };
+// CNH tem tipografia padronizada → threshold mais alto.
+// Comprovantes têm layouts variados (USP, ETEC, FATEC, NSA) → threshold menor
+// para absorver variações de renderização de PDFs governamentais.
+const CONFIANCA_MINIMA = { comprovante: 60, cnh: 75 };
 
 /**
  * Normaliza o texto removendo acentos e convertendo para minúsculas.

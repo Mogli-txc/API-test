@@ -376,7 +376,19 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Operações marcadas **Dev** exigem 
 | `authMiddleware.js` | Valida JWT, injeta `req.user.id` e `req.user.email`                      |
 | `roleMiddleware.js` | Valida `per_tipo` e `per_habilitado`; injeta `per_tipo` e `per_escola_id` em `req.user` |
 | `uploadHelper.js`  | Multer para imagens (5 MB) e documentos PDF (10 MB); valida magic bytes   |
-| `ocrValidator.js`  | Pipeline OCR — Tesseract.js para imagem, pdfjs-dist para PDF nativo       |
+| `ocrValidator.js`  | Pipeline OCR — texto nativo (pdfjs-dist) → fallback Tesseract.js; critérios por grupo de palavras-chave |
+
+#### Critérios OCR — comprovante de matrícula
+
+O validador exige **≥ 2 de 3 grupos** de palavras-chave + confiança Tesseract ≥ 60%:
+
+| Grupo | Palavras monitoradas |
+|---|---|
+| `instituicao` | universidade, faculdade, instituto federal, usp, unicamp, unesp, fgv, puc, unifesp, escola, **etec, fatec, senac, senai, cps, centro paula souza, tecnico, tecnica, instituto, unidade de ensino** |
+| `matricula` | matricula, registro academico, ra: / ra (sem dois pontos), numero de matricula, aluno, estudante, discente, **declaracao, habilitacao, modulo, matriculado** |
+| `periodo` | 2024, 2025, 2026, 2027, semestre, periodo letivo, ano letivo, **1–4 modulo, bimestre, trimestre** |
+
+> PDFs de sistemas governamentais (NSA, SIGAA) têm `TEXTO_MINIMO = 120` chars para forçar OCR quando a extração nativa retorna texto incompleto. Confiança mínima para CNH permanece em 75%.
 
 ### Utilitários
 
