@@ -386,14 +386,14 @@ describe('GET /api/caronas — filtro de proximidade (?lat&lon&raio)', () => {
     });
 
     it('retorna 200 com raio_km na resposta quando filtro de proximidade é aplicado', async () => {
-        // Coordenadas próximas ao seed (pontos da Av. Paulista), raio generoso de 50 km
+        // Raio máximo permitido é 25 km (RAIO_MAX_KM) — usa 20 para garantir validade
         const res = await request(app)
-            .get('/api/caronas?lat=-23.5614&lon=-46.6560&raio=50')
+            .get('/api/caronas?lat=-23.5614&lon=-46.6560&raio=20')
             .set('Authorization', `Bearer ${token}`);
 
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('caronas');
-        expect(res.body).toHaveProperty('raio_km', 50);
+        expect(res.body).toHaveProperty('raio_km', 20);
     });
 
     it('retorna 200 com lista vazia quando raio muito pequeno exclui todos os pontos', async () => {
@@ -408,7 +408,7 @@ describe('GET /api/caronas — filtro de proximidade (?lat&lon&raio)', () => {
 
     it('não inclui partida_lat/partida_lon nas caronas da resposta (campos internos)', async () => {
         const res = await request(app)
-            .get('/api/caronas?lat=-23.5614&lon=-46.6560&raio=50')
+            .get('/api/caronas?lat=-23.5614&lon=-46.6560&raio=20')
             .set('Authorization', `Bearer ${token}`);
 
         expect(res.status).toBe(200);

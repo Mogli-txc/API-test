@@ -113,8 +113,8 @@ describe('SELECT com JOIN — consultas reais da API', () => {
             SELECT c.car_id, u.usu_nome AS motorista, v.vei_marca_modelo, c.car_status
             FROM CARONAS c
             INNER JOIN VEICULOS        v   ON c.vei_id     = v.vei_id
-            INNER JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
-            INNER JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
+            LEFT  JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
+            LEFT  JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
             WHERE c.car_status = 1
         `);
         expect(Array.isArray(rows)).toBe(true);
@@ -167,6 +167,66 @@ describe('SELECT com JOIN — consultas reais da API', () => {
             LEFT  JOIN USUARIOS u_resp  ON sd.sug_id_resposta = u_resp.usu_id
         `);
         expect(Array.isArray(rows)).toBe(true);
+    });
+
+    it('Documentos com dados OCR extraídos [v13] (doc_matricula, doc_curso, doc_periodo)', async () => {
+        const [rows] = await pool.query(`
+            SELECT doc_id, usu_id, doc_tipo, doc_status, doc_ocr_confianca,
+                   doc_matricula, doc_curso, doc_periodo
+            FROM DOCUMENTOS_VERIFICACAO
+        `);
+        expect(Array.isArray(rows)).toBe(true);
+    });
+
+    it('Notificações com remetente (tabela NOTIFICACOES [v12])', async () => {
+        const [rows] = await pool.query(`
+            SELECT n.noti_id, n.usu_id, n.noti_tipo, n.noti_lida,
+                   u.usu_nome AS remetente
+            FROM NOTIFICACOES n
+            LEFT JOIN USUARIOS u ON n.noti_remetente = u.usu_id
+        `);
+        expect(Array.isArray(rows)).toBe(true);
+    });
+
+});
+
+// ========== SCHEMA v13 — novas colunas ==========
+
+describe('Schema v13 — colunas adicionadas', () => {
+
+    it('USUARIOS deve ter colunas usu_curso_nome e usu_periodo', async () => {
+        const [cols] = await pool.query(`
+            SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'USUARIOS'
+              AND COLUMN_NAME IN ('usu_curso_nome', 'usu_periodo')
+        `);
+        const nomes = cols.map(c => c.COLUMN_NAME);
+        expect(nomes).toContain('usu_curso_nome');
+        expect(nomes).toContain('usu_periodo');
+    });
+
+    it('DOCUMENTOS_VERIFICACAO deve ter colunas doc_matricula, doc_curso, doc_periodo', async () => {
+        const [cols] = await pool.query(`
+            SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'DOCUMENTOS_VERIFICACAO'
+              AND COLUMN_NAME IN ('doc_matricula', 'doc_curso', 'doc_periodo')
+        `);
+        const nomes = cols.map(c => c.COLUMN_NAME);
+        expect(nomes).toContain('doc_matricula');
+        expect(nomes).toContain('doc_curso');
+        expect(nomes).toContain('doc_periodo');
+    });
+
+    it('CARONAS.cur_usu_id deve aceitar NULL (IS_NULLABLE = YES)', async () => {
+        const [[col]] = await pool.query(`
+            SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'CARONAS'
+              AND COLUMN_NAME  = 'cur_usu_id'
+        `);
+        expect(col.IS_NULLABLE).toBe('YES');
     });
 
 });

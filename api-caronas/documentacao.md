@@ -36,7 +36,7 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.3.0
+  version: 1.4.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -228,11 +228,15 @@ components:
     # ─── Carona ─────────────────────────────────────────────────────────────────
     CaronaCriarRequest:
       type: object
-      required: [cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo]
+      required: [vei_id, car_data, car_hor_saida, car_vagas_dispo]
       properties:
         cur_usu_id:
           type: integer
-          description: ID da matrícula do motorista (CURSOS_USUARIOS)
+          nullable: true
+          description: |
+            ID da matrícula do motorista (CURSOS_USUARIOS). **Opcional [v13]** — NULL para
+            cadastros temporários. Preenchido automaticamente pelo OCR do comprovante de
+            matrícula quando o curso é validado com sucesso.
           example: 3
         vei_id:
           type: integer
@@ -262,6 +266,8 @@ components:
           example: 1
         cur_usu_id:
           type: integer
+          nullable: true
+          description: "NULL para cadastros temporários sem curso vinculado [v13]"
           example: 3
         vei_id:
           type: integer
@@ -1149,7 +1155,7 @@ paths:
       description: |
         Aceita usuários nos níveis **5** (sem veículo) ou **6** (com veículo).
 
-        **Pipeline de validação:**
+        **Pipeline de validação [v13]:**
         1. Magic bytes verificados (`%PDF-`, 5 bytes) — rejeita arquivos falsificados.
         2. OCR automático: tenta extração de texto nativo (`pdfjs-dist`, limiar ≥ 120 chars);
            se insuficiente, converte a 1ª página para PNG e executa Tesseract.js.
@@ -1159,15 +1165,21 @@ paths:
            - `matricula`: matricula, matriculado, declaracao, aluno, estudante, ra, ra:,
              habilitacao, modulo, discente…
            - `periodo`: 2024–2027, semestre, periodo letivo, 1–4 modulo, bimestre, trimestre…
+        4. **Extração de dados estruturados:** matrícula/RA, nome do curso e período.
+        5. **Validação de curso [v13]:** busca a escola pelo domínio do e-mail do usuário e
+           verifica se o curso extraído existe nela (matching por palavras-chave). Curso não
+           encontrado → **422** (documento recusado).
+        6. **Auto-matrícula [v13]:** curso encontrado → cria `CURSOS_USUARIOS` automaticamente
+           e salva os dados em `DOCUMENTOS_VERIFICACAO` (histórico) e `USUARIOS` (perfil).
 
         > Compatível com: comprovantes USP, UNICAMP, UNESP, ETEC/FATEC (NSA), SENAC, SENAI,
         > portais SIGAA e outros sistemas governamentais brasileiros.
 
-        **Promoção automática (OCR aprovado):**
+        **Promoção automática (OCR aprovado + curso validado):**
         - Nível 5 → **1** (matrícula verificada, +6 meses)
         - Nível 6 → **2** (matrícula + veículo, +6 meses)
 
-        **OCR reprovado:** documento salvo com `doc_status=2` para auditoria — retorna 422.
+        **Falha:** documento salvo com `doc_status=2` para auditoria — retorna 422.
 
         **Variáveis de ambiente necessárias:** `JWT_SECRET`, `REFRESH_SECRET`, `OTP_SECRET`, `APP_URL`, `SMTP_*` — todas obrigatórias na inicialização.
       security:
@@ -1201,6 +1213,10 @@ paths:
                   expira:
                     type: string
                     format: date-time
+                  curso:
+                    type: string
+                    description: Nome do curso identificado e validado no banco [v13]
+                    example: Técnico em Desenvolvimento de Sistemas
                   ocr:
                     type: object
                     properties:
@@ -1217,6 +1233,22 @@ paths:
                         type: string
                         enum: [texto-nativo, ocr-tesseract]
                         example: texto-nativo
+                      dados:
+                        type: object
+                        description: Dados estruturados extraídos do comprovante [v13]
+                        properties:
+                          matricula:
+                            type: string
+                            nullable: true
+                            example: "106033933-X"
+                          curso:
+                            type: string
+                            nullable: true
+                            example: "HABILITAÇÃO PROFISSIONAL DE TÉCNICO EM DESENVOLVIMENTO DE SISTEMAS"
+                          periodo:
+                            type: string
+                            nullable: true
+                            example: "3 modulo"
         '400':
           description: Nenhum arquivo enviado ou arquivo não é um PDF válido
         '403':
@@ -1224,7 +1256,12 @@ paths:
         '409':
           description: Matrícula já verificada (nível 1 ou 2)
         '422':
-          description: OCR reprovado — documento não reconhecido como comprovante válido
+          description: |
+            Documento recusado. Possíveis causas:
+            - OCR não identificou critérios suficientes (critérios < 2/3 ou confiança < 60%)
+            - Curso não identificado no texto do documento
+            - Escola não encontrada para o domínio do e-mail do usuário
+            - Curso extraído não está cadastrado na escola identificada [v13]
           content:
             application/json:
               schema:
@@ -1232,10 +1269,10 @@ paths:
                 properties:
                   error:
                     type: string
-                    example: Documento não reconhecido como comprovante de matrícula válido.
+                    example: Curso do comprovante não encontrado na instituição.
                   detalhes:
                     type: string
-                    example: "Critérios identificados: 1/3. Confiança OCR: 55%."
+                    example: "O curso \"Desenvolvimento de Sistemas\" não está cadastrado na escola vinculada ao seu e-mail (@etec.sp.gov.br)."
         '401':
           description: Não autenticado
 

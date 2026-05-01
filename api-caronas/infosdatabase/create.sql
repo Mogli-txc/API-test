@@ -20,6 +20,8 @@
 --   v11  — migration-contratos.sql: esc_contrato_duracao + esc_contrato_inicio + esc_contrato_expira em ESCOLAS
 --           Gerenciado exclusivamente por Desenvolvedores via POST /api/admin/escolas/:esc_id/contrato
 --   v12  — migration-notificacoes.sql: tabela NOTIFICACOES (persistência + Socket.io)
+--   v13  — migration-ocr-extract.sql: cur_usu_id nullable em CARONAS; doc_matricula/doc_curso/doc_periodo
+--           em DOCUMENTOS_VERIFICACAO; usu_curso_nome/usu_periodo em USUARIOS
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -79,7 +81,9 @@ CREATE TABLE USUARIOS (
     usu_nome              VARCHAR(80)                         COMMENT 'Nome do Usuário (NULL no cadastro temporário)',
     usu_foto              VARCHAR(256)                        COMMENT 'Caminho/URL da Foto do Usuário (NULL)',
     usu_telefone          VARCHAR(11)                         COMMENT 'Telefone sem máscara (ex: 11999990000) (NULL no cadastro temporário)',
-    usu_matricula         VARCHAR(100)                        COMMENT 'Foto/Comprovante da Matrícula (NULL no cadastro temporário)',
+    usu_matricula         VARCHAR(100)                        COMMENT 'Número de matrícula/RA extraído pelo OCR (NULL no cadastro temporário)  [v13]',
+    usu_curso_nome        VARCHAR(255) NULL DEFAULT NULL      COMMENT 'Nome do curso extraído pelo OCR do comprovante  [v13]',
+    usu_periodo           VARCHAR(50)  NULL DEFAULT NULL      COMMENT 'Período/semestre/módulo extraído pelo OCR do comprovante  [v13]',
     usu_senha             VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash bcrypt custo 12)',
     usu_verificacao       TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Aguardando OTP, 1=Matrícula verificada, 2=Matrícula+veículo, 5=Temporário sem veículo (+5 dias), 6=Temporário com veículo (+5 dias), 9=Suspenso (pelo administrador da escola)',
     usu_verificacao_expira DATETIME                           COMMENT 'Expiração da verificação — semestral (nível 1/2) ou +5 dias (nível 5/6)',
@@ -212,7 +216,7 @@ DROP TABLE IF EXISTS CARONAS;
 CREATE TABLE CARONAS (
     car_id          INT          NOT NULL AUTO_INCREMENT COMMENT 'Identificador da Carona (PK)',
     vei_id          INT          NOT NULL               COMMENT 'Veículo utilizado (FK)',
-    cur_usu_id      INT          NOT NULL               COMMENT 'Inscrição do motorista (FK para CURSOS_USUARIOS)',
+    cur_usu_id      INT          NULL DEFAULT NULL      COMMENT 'Inscrição do motorista (FK para CURSOS_USUARIOS — NULL para cadastros temporários sem curso vinculado)  [v13]',
     car_desc        VARCHAR(255) NULL DEFAULT NULL      COMMENT 'Detalhes da carona (opcional)',
     car_data        DATETIME     NOT NULL               COMMENT 'Data e hora da carona',
     car_hor_saida   TIME         NOT NULL               COMMENT 'Horário de saída',
@@ -353,6 +357,12 @@ CREATE TABLE DOCUMENTOS_VERIFICACAO (
     doc_ocr_confianca TINYINT UNSIGNED NULL                   COMMENT 'Confiança média do OCR Tesseract (0-100). NULL = pré-OCR.',
     doc_status        TINYINT          NOT NULL DEFAULT 0     COMMENT '0=aprovado_ocr, 1=pendente, 2=reprovado_ocr',
     doc_enviado_em    DATETIME         NOT NULL               COMMENT 'Data e hora do envio',
+
+    -- Dados extraídos pelo OCR do comprovante de matrícula  [v13]
+    -- Preenchidos apenas para doc_tipo=0 (comprovante). NULL para CNH e documentos reprovados.
+    doc_matricula     VARCHAR(100)     NULL DEFAULT NULL      COMMENT 'Número de matrícula/RA extraído pelo OCR  [v13]',
+    doc_curso         VARCHAR(255)     NULL DEFAULT NULL      COMMENT 'Nome do curso extraído pelo OCR  [v13]',
+    doc_periodo       VARCHAR(50)      NULL DEFAULT NULL      COMMENT 'Período/semestre/módulo extraído pelo OCR  [v13]',
     PRIMARY KEY (doc_id),
     INDEX idx_doc_usu_tipo (usu_id, doc_tipo)                 -- lookup por usuário e tipo de documento
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4

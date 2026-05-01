@@ -331,9 +331,10 @@ class CaronaController {
         try {
             const { cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo } = req.body;
 
-            if (!cur_usu_id || !vei_id || !car_data || !car_hor_saida || !car_vagas_dispo) {
+            // cur_usu_id é opcional — NULL para cadastros temporários sem curso vinculado [v13]
+            if (!vei_id || !car_data || !car_hor_saida || !car_vagas_dispo) {
                 return res.status(400).json({
-                    error: "Campos obrigatórios: cur_usu_id, vei_id, car_data, car_hor_saida, car_vagas_dispo."
+                    error: "Campos obrigatórios: vei_id, car_data, car_hor_saida, car_vagas_dispo."
                 });
             }
 
@@ -416,16 +417,19 @@ class CaronaController {
                 });
             }
 
-            // Verifica se o cur_usu_id enviado pertence ao motorista autenticado
-            // Evita que um usuário ofereça carona usando a matrícula de outro
-            const [matricula] = await db.query(
-                'SELECT cur_usu_id FROM CURSOS_USUARIOS WHERE cur_usu_id = ? AND usu_id = ?',
-                [cur_usu_id, usu_id]
-            );
-            if (matricula.length === 0) {
-                return res.status(403).json({
-                    error: "Matrícula não encontrada ou não pertence ao motorista."
-                });
+            // Valida cur_usu_id apenas quando fornecido — campo opcional [v13]
+            let curUsuIdFinal = null;
+            if (cur_usu_id) {
+                const [matricula] = await db.query(
+                    'SELECT cur_usu_id FROM CURSOS_USUARIOS WHERE cur_usu_id = ? AND usu_id = ?',
+                    [cur_usu_id, usu_id]
+                );
+                if (matricula.length === 0) {
+                    return res.status(403).json({
+                        error: "Matrícula não encontrada ou não pertence ao motorista."
+                    });
+                }
+                curUsuIdFinal = cur_usu_id;
             }
 
             // Insere a carona com status 1 (Aberta)
@@ -433,7 +437,7 @@ class CaronaController {
                 `INSERT INTO CARONAS
                     (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status)
                  VALUES (?, ?, ?, ?, ?, ?, 1)`,
-                [vei_id, cur_usu_id, car_desc_limpa, car_data, car_hor_saida, car_vagas_dispo]
+                [vei_id, curUsuIdFinal, car_desc_limpa, car_data, car_hor_saida, car_vagas_dispo]
             );
 
             await registrarAudit({ tabela: 'CARONAS', registroId: resultado.insertId, acao: 'CARONA_CRIAR', usuId: usu_id, ip: req.ip });
@@ -442,7 +446,7 @@ class CaronaController {
                 message: "Carona criada com sucesso!",
                 carona: {
                     car_id: resultado.insertId,
-                    cur_usu_id, vei_id, car_desc: car_desc_limpa, car_data,
+                    cur_usu_id: curUsuIdFinal, vei_id, car_desc: car_desc_limpa, car_data,
                     car_hor_saida, car_vagas_dispo, car_status: 1
                 }
             });

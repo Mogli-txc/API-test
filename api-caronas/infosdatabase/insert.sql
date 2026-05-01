@@ -52,8 +52,7 @@
 -- MIGRATION v12 — Notificações
 -- Execute em bancos existentes antes do create.sql completo.
 -- =====================================================
--- ALTER TABLE ... (criar tabela NOTIFICACOES conforme create.sql v12)
--- Ver create.sql seção 18 para DDL completo.
+-- Ver create.sql seção 18 para DDL completo da tabela NOTIFICACOES.
 -- ALTER TABLE ESCOLAS
 --     ADD COLUMN esc_contrato_duracao ENUM('1ano','2anos','5anos') NULL DEFAULT NULL
 --         COMMENT 'Duração do contrato com a instituição  [v11]',
@@ -61,6 +60,21 @@
 --         COMMENT 'Data de início do contrato  [v11]',
 --     ADD COLUMN esc_contrato_expira DATE NULL DEFAULT NULL
 --         COMMENT 'Data de expiração calculada (inicio + duracao)  [v11]';
+
+-- =====================================================
+-- MIGRATION v13 — OCR extração + cur_usu_id nullable
+-- Execute em bancos existentes antes de usar funcionalidades v13.
+-- =====================================================
+-- ALTER TABLE CARONAS
+--     MODIFY COLUMN cur_usu_id INT NULL DEFAULT NULL,
+--     MODIFY COLUMN car_desc   VARCHAR(255) NULL DEFAULT NULL;
+-- ALTER TABLE USUARIOS
+--     ADD COLUMN usu_curso_nome VARCHAR(255) NULL DEFAULT NULL AFTER usu_matricula,
+--     ADD COLUMN usu_periodo    VARCHAR(50)  NULL DEFAULT NULL AFTER usu_curso_nome;
+-- ALTER TABLE DOCUMENTOS_VERIFICACAO
+--     ADD COLUMN doc_matricula VARCHAR(100) NULL DEFAULT NULL AFTER doc_enviado_em,
+--     ADD COLUMN doc_curso     VARCHAR(255) NULL DEFAULT NULL AFTER doc_matricula,
+--     ADD COLUMN doc_periodo   VARCHAR(50)  NULL DEFAULT NULL AFTER doc_curso;
 
 
 -- =====================================================

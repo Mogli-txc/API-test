@@ -122,6 +122,42 @@ function avaliarCriterios(texto, tipo) {
 }
 
 /**
+ * Extrai dados estruturados do texto do comprovante de matrícula.
+ * Roda após a validação de critérios (apenas para documentos aprovados).
+ *
+ * @param {string} texto — texto normalizado (sem acentos, minúsculas)
+ * @returns {{ matricula: string|null, curso: string|null, periodo: string|null }}
+ */
+function extrairDados(texto) {
+    // ── Matrícula / RA ───────────────────────────────────────────────────────
+    // Padrões: "RA 123456", "RA: 123456", "Matrícula: 123456", "nº 123456",
+    //          "registro: 123456-X", "matricula 123456"
+    const reMatricula = /(?:ra[:\s]+|matricula[:\s]+|registro[:\s]+|n[°º][:\s]*|numero de matricula[:\s]*)([a-z0-9][\w\-./]{3,30})/i;
+    const mMatricula  = texto.match(reMatricula);
+    const matricula   = mMatricula ? mMatricula[1].trim() : null;
+
+    // ── Curso ────────────────────────────────────────────────────────────────
+    // Captura a linha ou trecho após palavras-chave de curso.
+    // Limita a 120 chars para não capturar parágrafos inteiros.
+    const reCurso = /(?:curso[:\s]+|habilitacao(?:\s+profissional)?(?:\s+de)?[:\s]+|graduacao\s+em[:\s]+|tecnico\s+em[:\s]+|bacharelado\s+em[:\s]+|licenciatura\s+em[:\s]+)([^\n\r]{5,120})/i;
+    const mCurso  = texto.match(reCurso);
+    let curso     = mCurso ? mCurso[1].trim() : null;
+    // Remove sufixos comuns que não fazem parte do nome do curso
+    if (curso) {
+        curso = curso.replace(/\s*[\(\[].*/, '').trim(); // remove "(TÉCNICO)" etc
+        if (curso.length > 120) curso = curso.substring(0, 120);
+    }
+
+    // ── Período / Semestre / Módulo ──────────────────────────────────────────
+    // Padrões: "3º módulo", "2º semestre", "3° ano", "periodo letivo 2026/1"
+    const rePeriodo = /(\d+[°º]?\s*(?:modulo|semestre|ano|bimestre|trimestre)|periodo\s+letivo\s+[\d\/]+|semestre\s+letivo\s+[\d\/]+)/i;
+    const mPeriodo  = texto.match(rePeriodo);
+    const periodo   = mPeriodo ? mPeriodo[1].trim() : null;
+
+    return { matricula, curso, periodo };
+}
+
+/**
  * Retorna o middleware de validação OCR configurado para o tipo de documento.
  * @param {'comprovante'|'cnh'} tipo
  */
@@ -131,13 +167,15 @@ module.exports = (tipo) => async (req, res, next) => {
     // BYPASS em ambiente de teste — não inicializa Tesseract durante os testes
     if (process.env.NODE_ENV === 'test') {
         req.ocrResultado = {
-            aprovado:          true,
-            confianca:         99,
+            aprovado:           true,
+            confianca:          99,
             criteriosAtingidos: CRITERIOS[tipo]?.length ?? 3,
-            criteriosTotal:    CRITERIOS[tipo]?.length ?? 3,
-            gruposOk:          CRITERIOS[tipo]?.map(c => c.grupo) ?? [],
-            texto:             '[bypass de teste]',
-            origem:            'test-bypass'
+            criteriosTotal:     CRITERIOS[tipo]?.length ?? 3,
+            gruposOk:           CRITERIOS[tipo]?.map(c => c.grupo) ?? [],
+            texto:              '[bypass de teste]',
+            origem:             'test-bypass',
+            // dados = null sinaliza para o DocumentoController pular validação de curso [v13]
+            dados:              null
         };
         return next();
     }
@@ -165,7 +203,12 @@ module.exports = (tipo) => async (req, res, next) => {
         const avaliacao  = avaliarCriterios(texto, tipo);
         const aprovado   = confianca >= confMinima && avaliacao.aprovado;
 
-        // PASSO 4: Injeta resultado no req para o controller
+        // PASSO 4: Extrai dados estruturados (apenas para comprovante aprovado)
+        const dados = (tipo === 'comprovante' && aprovado)
+            ? extrairDados(normalizar(texto))
+            : null;
+
+        // PASSO 5: Injeta resultado no req para o controller
         req.ocrResultado = {
             aprovado,
             confianca,
@@ -173,7 +216,8 @@ module.exports = (tipo) => async (req, res, next) => {
             criteriosTotal:     avaliacao.total,
             gruposOk:           avaliacao.gruposOk,
             texto,
-            origem
+            origem,
+            dados   // { matricula, curso, periodo } ou null
         };
 
         next();

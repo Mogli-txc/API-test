@@ -100,7 +100,79 @@ class DocumentoController {
                 });
             }
 
-            // PASSO 5: OCR aprovado — determina novo nível (5→1 ou 6→2)
+            // PASSO 5: Valida curso extraído pelo OCR contra o banco
+            // Em modo test-bypass a validação é pulada — OCR não roda nos testes.
+            const dados = ocr.dados || {};
+            let curUsuId    = null;
+            let melhorCurso = null; // { cur_id, cur_nome } — preenchido no bloco abaixo
+
+            if (ocr.origem !== 'test-bypass') {
+                if (!dados.curso) {
+                    return res.status(422).json({
+                        error: "Não foi possível identificar o curso no documento.",
+                        detalhes: "O comprovante deve conter o nome do curso claramente legível."
+                    });
+                }
+
+                // Identifica escola pelo domínio do e-mail do usuário
+                const dominio = req.user.email.split('@')[1]?.toLowerCase();
+                const [escolas] = await db.query(
+                    'SELECT esc_id FROM ESCOLAS WHERE LOWER(esc_dominio) = ?',
+                    [dominio]
+                );
+                if (escolas.length === 0) {
+                    return res.status(422).json({
+                        error: "Instituição não encontrada para o domínio de e-mail cadastrado.",
+                        detalhes: `Nenhuma escola com domínio @${dominio} está cadastrada no sistema.`
+                    });
+                }
+
+                const esc_id = escolas[0].esc_id;
+                const [cursos] = await db.query(
+                    'SELECT cur_id, cur_nome FROM CURSOS WHERE esc_id = ?',
+                    [esc_id]
+                );
+
+                // Matching por palavras-chave — mais tolerante que LIKE para variações de OCR
+                const IGNORAR  = new Set(['de', 'em', 'do', 'da', 'dos', 'das', 'e', 'o', 'a', 'os', 'as']);
+                const cursoOcr = dados.curso.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+                let melhorScore = 0;
+
+                for (const c of cursos) {
+                    const nomeNorm  = c.cur_nome.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+                    const palavrasDb = nomeNorm.split(/\s+/).filter(p => p.length > 3 && !IGNORAR.has(p));
+                    const score = palavrasDb.filter(p => cursoOcr.includes(p)).length;
+                    if (score > melhorScore && score >= Math.ceil(palavrasDb.length / 2)) {
+                        melhorScore = score;
+                        melhorCurso = c;
+                    }
+                }
+
+                if (!melhorCurso) {
+                    return res.status(422).json({
+                        error: "Curso do comprovante não encontrado na instituição.",
+                        detalhes: `O curso "${dados.curso}" não está cadastrado na escola vinculada ao seu e-mail (@${dominio}).`
+                    });
+                }
+
+                // PASSO 6: Cria CURSOS_USUARIOS automaticamente se ainda não existir
+                const [jaMatriculado] = await db.query(
+                    'SELECT cur_usu_id FROM CURSOS_USUARIOS WHERE usu_id = ? AND cur_id = ?',
+                    [usu_id, melhorCurso.cur_id]
+                );
+                if (jaMatriculado.length === 0) {
+                    const dataFinal = new Date(Date.now() + SEIS_MESES_MS).toISOString().slice(0, 10);
+                    const [ins] = await db.query(
+                        'INSERT INTO CURSOS_USUARIOS (usu_id, cur_id, cur_usu_dataFinal) VALUES (?, ?, ?)',
+                        [usu_id, melhorCurso.cur_id, dataFinal]
+                    );
+                    curUsuId = ins.insertId;
+                } else {
+                    curUsuId = jaMatriculado[0].cur_usu_id;
+                }
+            } // fim bloco validação curso
+
+            // PASSO 7: Determina novo nível (5→1 ou 6→2)
             // Para nível 6→2: garante que o veículo ainda está ativo antes de promover
             if (verificacao === 6) {
                 const [vei] = await db.query(
@@ -114,24 +186,34 @@ class DocumentoController {
                 }
             }
             const novoNivel  = verificacao === 6 ? 2 : 1;
-            const novaExpira = new Date(Date.now() + SEIS_MESES_MS); // +6 meses
+            const novaExpira = new Date(Date.now() + SEIS_MESES_MS);
 
-            // PASSO 6: Registra o documento aprovado e promove o usuário em transação atômica
+            // PASSO 8: Salva documento + atualiza usuário em transação atômica
+            // Opção A: histórico em DOCUMENTOS_VERIFICACAO (doc_matricula, doc_curso, doc_periodo)
+            // Opção B: dados atualizados em USUARIOS (usu_matricula, usu_curso_nome, usu_periodo)
             const conn = await db.getConnection();
             try {
                 await conn.beginTransaction();
 
+                // Opção A — histórico do documento
                 await conn.query(
                     `INSERT INTO DOCUMENTOS_VERIFICACAO
-                     (usu_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em)
-                     VALUES (?, 0, ?, ?, 0, NOW())`,
-                    [usu_id, req.file.filename, ocr.confianca]
+                     (usu_id, doc_tipo, doc_arquivo, doc_ocr_confianca, doc_status, doc_enviado_em,
+                      doc_matricula, doc_curso, doc_periodo)
+                     VALUES (?, 0, ?, ?, 0, NOW(), ?, ?, ?)`,
+                    [usu_id, req.file.filename, ocr.confianca,
+                     dados.matricula || null, melhorCurso?.cur_nome || null, dados.periodo || null]
                 );
 
+                // Opção B — perfil do usuário atualizado
                 await conn.query(
-                    `UPDATE USUARIOS SET usu_verificacao = ?, usu_verificacao_expira = ?
+                    `UPDATE USUARIOS
+                     SET usu_verificacao = ?, usu_verificacao_expira = ?,
+                         usu_matricula   = ?, usu_curso_nome = ?, usu_periodo = ?
                      WHERE usu_id = ?`,
-                    [novoNivel, novaExpira, usu_id]
+                    [novoNivel, novaExpira,
+                     dados.matricula || null, melhorCurso?.cur_nome || null, dados.periodo || null,
+                     usu_id]
                 );
 
                 await conn.commit();
@@ -145,20 +227,22 @@ class DocumentoController {
             registrarAudit({
                 tabela: 'DOCUMENTOS_VERIFICACAO', registroId: usu_id,
                 acao: 'COMPROVANTE_APROVADO',
-                novo: { novoNivel, doc_arquivo: req.file.filename },
+                novo: { novoNivel, doc_arquivo: req.file.filename, cur_id: melhorCurso?.cur_id || null },
                 usuId: usu_id, ip: req.ip
             }).catch(err => console.warn('[AUDIT] Falha ao registrar comprovante aprovado:', err.message));
 
-            // PASSO 7: Resposta de sucesso
+            // PASSO 9: Resposta de sucesso
             return res.status(200).json({
                 message:     "Comprovante recebido e matrícula verificada com sucesso!",
                 verificacao: novoNivel,
                 expira:      novaExpira,
+                curso:       melhorCurso?.cur_nome || null,
                 ocr: {
-                    confianca:         ocr.confianca,
+                    confianca:          ocr.confianca,
                     criteriosAtingidos: ocr.criteriosAtingidos,
-                    criteriosTotal:    ocr.criteriosTotal,
-                    origem:            ocr.origem
+                    criteriosTotal:     ocr.criteriosTotal,
+                    origem:             ocr.origem,
+                    dados:              { matricula: dados.matricula, curso: dados.curso, periodo: dados.periodo }
                 }
             });
 

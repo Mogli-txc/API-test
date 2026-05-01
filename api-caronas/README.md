@@ -242,7 +242,7 @@ socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
 
 | Método | Rota           | Auth      | Descrição                                                          |
 |--------|----------------|-----------|--------------------------------------------------------------------|
-| POST   | `/comprovante` | JWT       | Envia comprovante de matrícula (PDF, OCR automático) — 5→1 ou 6→2 |
+| POST   | `/comprovante` | JWT       | Envia comprovante (PDF, OCR automático) — extrai matrícula/curso/período, valida curso na escola, cria CURSOS_USUARIOS automaticamente — 5→1 ou 6→2 |
 | POST   | `/cnh`         | JWT       | Envia CNH (PDF, OCR automático) — 1→2 se tiver veículo ativo      |
 | GET    | `/historico`   | JWT       | Histórico de documentos do próprio usuário                         |
 | GET    | `/admin`       | ADMIN/DEV | Lista todos os documentos para revisão (`?doc_tipo=`, `?doc_status=`) |
@@ -390,6 +390,22 @@ O validador exige **≥ 2 de 3 grupos** de palavras-chave + confiança Tesseract
 
 > PDFs de sistemas governamentais (NSA, SIGAA) têm `TEXTO_MINIMO = 120` chars para forçar OCR quando a extração nativa retorna texto incompleto. Confiança mínima para CNH permanece em 75%.
 
+#### Extração e validação de dados [v13]
+
+Após a aprovação pelos critérios, o OCR extrai automaticamente:
+
+| Campo extraído | Padrões reconhecidos | Salvo em |
+|---|---|---|
+| Matrícula / RA | `RA 123456`, `matrícula: 123456`, `nº 123456`, `registro: 123456` | `doc_matricula`, `usu_matricula` |
+| Curso | Linha após `curso:`, `habilitação`, `técnico em`, `graduação em` | `doc_curso`, `usu_curso_nome` |
+| Período | `3º módulo`, `2º semestre`, `período letivo 2026/1` | `doc_periodo`, `usu_periodo` |
+
+Após a extração, o backend valida o curso contra o banco:
+1. Identifica a escola pelo **domínio do e-mail** do usuário (`@etec.sp.gov.br` → escola ETEC)
+2. Compara o nome do curso extraído com os cursos cadastrados na escola (matching por palavras-chave)
+3. **Curso não encontrado → documento recusado (`422`)** — o usuário deve enviar um comprovante do curso correto
+4. Curso encontrado → cria `CURSOS_USUARIOS` automaticamente (se não existir) e salva os dados em Opção A (histórico em `DOCUMENTOS_VERIFICACAO`) + Opção B (perfil em `USUARIOS`)
+
 ### Utilitários
 
 | Arquivo                  | Função                                                                     |
@@ -407,7 +423,7 @@ O validador exige **≥ 2 de 3 grupos** de palavras-chave + confiança Tesseract
 |-------------------------|--------------------------------------------------------------------|
 | `ESCOLAS`               | Instituições (v9: domínio/quota; v10: lat/lon; v11: contrato)     |
 | `CURSOS`                | Cursos vinculados às escolas                                       |
-| `USUARIOS`              | Usuários (v2: OTP/reset; v3: soft-delete; v4: refresh token; v10: lat/lon) |
+| `USUARIOS`              | Usuários (v2: OTP/reset; v3: soft-delete; v4: refresh token; v10: lat/lon; v13: usu_curso_nome, usu_periodo) |
 | `USUARIOS_REGISTROS`    | Datas de login e atualização (1:1 com USUARIOS)                    |
 | `PERFIL`                | Papel (`per_tipo`) e escola do usuário                             |
 | `CURSOS_USUARIOS`       | Matrículas (N:M entre usuários e cursos)                           |
@@ -418,7 +434,7 @@ O validador exige **≥ 2 de 3 grupos** de palavras-chave + confiança Tesseract
 | `CARONA_PESSOAS`        | Passageiros confirmados em caronas                                 |
 | `MENSAGENS`             | Chat entre motorista e passageiros                                 |
 | `AVALIACOES`            | Avaliações pós-carona (v5)                                         |
-| `DOCUMENTOS_VERIFICACAO`| Comprovantes e CNH com resultado de OCR (v6/v7)                   |
+| `DOCUMENTOS_VERIFICACAO`| Comprovantes e CNH com resultado de OCR; dados extraídos: matrícula, curso, período (v6/v7/v13) |
 | `PENALIDADES`           | Penalidades aplicadas por admins (v8)                              |
 | `AUDIT_LOG`             | Rastreabilidade de ações sensíveis                                 |
 | `SUGESTAO_DENUNCIA`     | Feedback e denúncias dos usuários                                  |
@@ -445,6 +461,7 @@ O validador exige **≥ 2 de 3 grupos** de palavras-chave + confiança Tesseract
 | v10    | Lat/lon em ESCOLAS, USUARIOS e PONTO_ENCONTROS (Nominatim)                       |
 | v11    | Contrato de escola: `esc_contrato_duracao`, `esc_contrato_inicio`, `esc_contrato_expira` |
 | v12    | Tabela NOTIFICACOES: persistência de notificações automáticas e manuais |
+| v13    | `cur_usu_id` nullable em CARONAS; extração OCR de matrícula/curso/período; `usu_curso_nome` + `usu_periodo` em USUARIOS; `doc_matricula` + `doc_curso` + `doc_periodo` em DOCUMENTOS_VERIFICACAO; validação de curso contra escola pelo domínio do e-mail |
 
 ---
 
