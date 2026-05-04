@@ -90,10 +90,10 @@ class SolicitacaoController {
             }
 
             // REGRA DE NEGÓCIO: Motorista não pode solicitar a própria carona
-            // Verifica se o usu_id do token é o mesmo motorista da carona solicitada
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [motorista] = await db.query(
-                `SELECT cu.usu_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                `SELECT v.usu_id FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -102,11 +102,11 @@ class SolicitacaoController {
             }
 
             // REGRA DE NEGÓCIO: Não é possível solicitar carona enquanto tiver uma carona em andamento como motorista
-            // Caronas em andamento: status 1 (Aberta) ou status 2 (Em espera)
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [caronaAtiva] = await db.query(
                 `SELECT c.car_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE cu.usu_id = ? AND c.car_status IN (1, 2)`,
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 WHERE v.usu_id = ? AND c.car_status IN (1, 2)`,
                 [usu_id]
             );
             if (caronaAtiva.length > 0) {
@@ -231,11 +231,11 @@ class SolicitacaoController {
                         s.sol_vaga_soli, s.sol_status,
                         u.usu_nome AS passageiro,
                         c.car_desc AS carona,
-                        cu.usu_id  AS usu_id_motorista
+                        v.usu_id   AS usu_id_motorista
                  FROM SOLICITACOES_CARONA s
-                 INNER JOIN USUARIOS       u  ON s.usu_id_passageiro = u.usu_id
-                 INNER JOIN CARONAS        c  ON s.car_id            = c.car_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id       = cu.cur_usu_id
+                 INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
+                 INNER JOIN CARONAS  c ON s.car_id            = c.car_id
+                 INNER JOIN VEICULOS v ON c.vei_id            = v.vei_id
                  WHERE s.sol_id = ?`,
                 [sol_id]
             );
@@ -432,12 +432,13 @@ class SolicitacaoController {
         try {
             // PASSO 1: Busca a solicitação e verifica se o usuário autenticado é o motorista desta carona
             // car_status IN (1, 2): impede resposta a solicitações de caronas já finalizadas ou canceladas
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [sol] = await db.query(
                 `SELECT s.sol_vaga_soli, s.car_id, s.usu_id_passageiro,
-                        cu.usu_id AS usu_id_motorista
+                        v.usu_id AS usu_id_motorista
                  FROM SOLICITACOES_CARONA s
-                 INNER JOIN CARONAS        c  ON s.car_id        = c.car_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id   = cu.cur_usu_id
+                 INNER JOIN CARONAS  c ON s.car_id = c.car_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE s.sol_id = ? AND c.car_status IN (1, 2)`,
                 [sol_id]
             );
@@ -521,8 +522,8 @@ class SolicitacaoController {
                 dados:    { car_id: sol[0].car_id, sol_id: parseInt(sol_id) }
             }).catch(() => {});
 
-            // Registra auditoria — ação mais crítica do sistema: aceite/recusa de carona
-            registrarAudit({
+            // Registra auditoria — await garante que o INSERT conclua antes da resposta (evita race condition nos testes)
+            await registrarAudit({
                 tabela: 'SOLICITACOES_CARONA', registroId: parseInt(sol_id),
                 acao:   statusCodigo === 2 ? 'SOL_ACEITAR' : 'SOL_RECUSAR',
                 usuId:  req.user.id, ip: req.ip
@@ -653,11 +654,12 @@ class SolicitacaoController {
         let conn;
         try {
             // PASSO 1: Verifica se o usuário autenticado é o motorista desta carona
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [sol] = await db.query(
-                `SELECT s.car_id, s.sol_status, s.sol_vaga_soli, cu.usu_id AS usu_id_motorista
+                `SELECT s.car_id, s.sol_status, s.sol_vaga_soli, v.usu_id AS usu_id_motorista
                  FROM SOLICITACOES_CARONA s
-                 INNER JOIN CARONAS c         ON s.car_id       = c.car_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
+                 INNER JOIN CARONAS  c ON s.car_id = c.car_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE s.sol_id = ?`,
                 [sol_id]
             );
@@ -698,6 +700,59 @@ class SolicitacaoController {
             return res.status(500).json({ error: "Erro ao deletar solicitação." });
         } finally {
             if (conn) conn.release();
+        }
+    }
+    /**
+     * MÉTODO: listarPendentes
+     * Lista solicitações com sol_status = 1 (Enviado) das caronas ativas do motorista autenticado.
+     * ENR-05 — o motorista vê de imediato quem quer carona sem precisar filtrar por carona.
+     *
+     * Tabelas: SOLICITACOES_CARONA + CARONAS + VEICULOS + USUARIOS
+     */
+    async listarPendentes(req, res) {
+        try {
+            const usu_id = req.user.id;
+
+            const page   = Math.max(1, parseInt(req.query.page)  || 1);
+            const limit  = Math.min(50,  Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 1: Busca solicitações pendentes das caronas abertas/em-espera do motorista
+            const [solicitacoes] = await db.query(
+                `SELECT s.sol_id, s.car_id, s.sol_vaga_soli, s.sol_status,
+                        u.usu_id AS passageiro_id, u.usu_nome AS passageiro, u.usu_foto AS passageiro_foto,
+                        c.car_data, c.car_hor_saida, c.car_desc
+                 FROM SOLICITACOES_CARONA s
+                 INNER JOIN CARONAS  c ON s.car_id = c.car_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
+                 WHERE v.usu_id = ? AND s.sol_status = 1 AND c.car_status IN (1, 2)
+                 ORDER BY s.sol_id ASC
+                 LIMIT ? OFFSET ?`,
+                [usu_id, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral
+                 FROM SOLICITACOES_CARONA s
+                 INNER JOIN CARONAS  c ON s.car_id = c.car_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 WHERE v.usu_id = ? AND s.sol_status = 1 AND c.car_status IN (1, 2)`,
+                [usu_id]
+            );
+
+            return res.status(200).json({
+                message:    'Solicitações pendentes listadas.',
+                totalGeral,
+                total:      solicitacoes.length,
+                page,
+                limit,
+                solicitacoes
+            });
+
+        } catch (error) {
+            console.error('[ERRO] listarPendentes:', error);
+            return res.status(500).json({ error: 'Erro ao listar solicitações pendentes.' });
         }
     }
 }

@@ -22,7 +22,7 @@ API REST para sistema de compartilhamento de caronas entre alunos de instituiç�
 | pdf-to-img          | Renderização de página PDF como PNG para o Tesseract         |
 | socket.io           | WebSocket para mensagens em tempo real                       |
 | nodemailer          | Envio de e-mail (OTP, reset de senha)                        |
-| jest + supertest    | Testes (413 testes, 14 suites — 2026-04-28)                  |
+| jest + supertest    | Testes (15 suites — 2026-05-02)                              |
 | fetch (Node nativo) | Requisições HTTP ao Nominatim (geocodificação OpenStreetMap) |
 
 ---
@@ -90,7 +90,7 @@ cd api-caronas
 NODE_ENV=test npx jest --forceExit
 ```
 
-> **413 testes** em 14 suites (última atualização: 2026-04-28).
+> **15 suites** (última atualização: 2026-05-02).
 
 ---
 
@@ -134,11 +134,13 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | POST   | `/login`           | —    | Autentica e retorna `access_token` + `refresh_token`        |
 | POST   | `/refresh`         | —    | Troca refresh token válido por novo par de tokens           |
 | POST   | `/logout`          | JWT  | Invalida o refresh token server-side                        |
+| GET    | `/me`              | JWT  | Perfil do próprio usuário autenticado (sem precisar de `:id`) [v14]             |
 | GET    | `/perfil/:id`      | JWT  | Dados do perfil (inclui `usu_verificacao`, `per_tipo`)      |
-| PUT    | `/:id`             | JWT  | Atualiza dados do próprio usuário                           |
+| PUT    | `/:id`             | JWT  | Atualiza dados do próprio usuário (nome, e-mail, senha, telefone)               |
 | PUT    | `/:id/endereco`    | JWT  | Atualiza endereço e regeocodifica via Nominatim             |
 | PUT    | `/:id/foto`        | JWT  | Atualiza foto de perfil (multipart/form-data, campo `foto`) |
 | DELETE | `/:id`             | JWT  | Soft-delete da conta                                        |
+| GET    | `/:id/penalidades` | JWT  | Penalidades ativas do próprio usuário (sem acesso Admin) [v14]                  |
 
 ### Caronas — `/api/caronas`
 
@@ -146,7 +148,8 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 |--------|-----------------------|------|----------------------------------------------------------------------------------|
 | GET    | `/`                   | JWT  | Lista caronas abertas (paginação cursor: `?cursor=<car_id>&limit=<n>`)           |
 | GET    | `/buscar`             | JWT  | Busca com filtros: `?car_status=`, `?data=YYYY-MM-DD`, `?esc_id=`, `?cur_id=`, `?page=`, `?limit=` |
-| GET    | `/minhas`             | JWT  | Lista caronas do motorista autenticado (`?status=` opcional)                     |
+| GET    | `/minhas`             | JWT  | Lista caronas do motorista autenticado (`?status=` opcional)                      |
+| GET    | `/:car_id/resumo`     | JWT  | Resumo completo: pontos, passageiros, avaliações em uma chamada [v14 — ENR-03]   |
 | GET    | `/passageiro`         | JWT  | Lista caronas onde o usuário é passageiro confirmado (`?status=` opcional)       |
 | POST   | `/oferecer`           | JWT  | Cria nova carona                                                                 |
 | GET    | `/:car_id`            | JWT  | Detalhes de uma carona                                                           |
@@ -163,6 +166,7 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | Método | Rota                 | Auth | Descrição                                    |
 |--------|----------------------|------|----------------------------------------------|
 | POST   | `/criar`             | JWT  | Passageiro solicita vaga em uma carona       |
+| GET    | `/pendentes`         | JWT  | Solicitações pendentes das caronas do motorista autenticado [v14 — ENR-05] |
 | GET    | `/:sol_id`           | JWT  | Detalhes de uma solicitação                  |
 | GET    | `/carona/:car_id`    | JWT  | Lista solicitações de uma carona (motorista) |
 | GET    | `/usuario/:usu_id`   | JWT  | Lista solicitações feitas pelo usuário       |
@@ -462,6 +466,48 @@ Após a extração, o backend valida o curso contra o banco:
 | v11    | Contrato de escola: `esc_contrato_duracao`, `esc_contrato_inicio`, `esc_contrato_expira` |
 | v12    | Tabela NOTIFICACOES: persistência de notificações automáticas e manuais |
 | v13    | `cur_usu_id` nullable em CARONAS; extração OCR de matrícula/curso/período; `usu_curso_nome` + `usu_periodo` em USUARIOS; `doc_matricula` + `doc_curso` + `doc_periodo` em DOCUMENTOS_VERIFICACAO; validação de curso contra escola pelo domínio do e-mail |
+| v14    | 5 índices de performance (DB-02/03/04/05/09); `noti_tipo` ENUM em NOTIFICACOES (DB-06); `doc_status DEFAULT 1` em DOCUMENTOS_VERIFICACAO (DB-08); joins null-safe via VEICULOS em todos os controllers; novos endpoints: `GET /me`, `GET /:id/penalidades`, `GET /caronas/:id/resumo`, `GET /solicitacoes/pendentes`; validações VAL-01/02/04 |
+
+---
+
+## Auditoria Técnica (v14)
+
+Resultado da auditoria realizada em 2026-05-02. Itens implementados nesta versão:
+
+### Performance — índices adicionados
+
+| Índice                     | Tabela               | Benefício                                          |
+|----------------------------|----------------------|----------------------------------------------------|
+| `idx_car_status_data`      | CARONAS              | Query principal: caronas abertas futuras (DB-02)   |
+| `idx_sol_car_id`           | SOLICITACOES_CARONA  | Busca de solicitações por carona (DB-03)            |
+| `idx_men_car_id`           | MENSAGENS            | Carregamento da conversa de uma carona (DB-04)     |
+| `idx_car_pes_usu_id`       | CARONA_PESSOAS       | Caronas de um passageiro (DB-05)                   |
+| `idx_car_vei_id`           | CARONAS              | Caronas ativas por veículo (DB-09)                 |
+
+### Correções de schema
+
+- **DB-06:** `NOTIFICACOES.noti_tipo` alterado de `VARCHAR(40)` para `ENUM` — garante integridade dos valores
+- **DB-08:** `DOCUMENTOS_VERIFICACAO.doc_status` DEFAULT alterado de `0` (aprovado) para `1` (pendente) — estado correto ao inserir
+
+### Correções de controllers
+
+- **Joins null-safe:** todos os controllers que usavam `INNER JOIN CURSOS_USUARIOS ON c.cur_usu_id = cu.cur_usu_id` foram corrigidos para `INNER JOIN VEICULOS` (motorista via veículo), tornando-os compatíveis com `cur_usu_id = NULL` [v13]
+- **VAL-01:** `car_vagas_dispo` agora é explicitamente convertido com `parseInt` antes da validação
+- **VAL-02:** `men_id_resposta` validado contra mensagens existentes na mesma carona
+- **VAL-04:** `usu_telefone` aceito no endpoint `PUT /:id` com validação de 10–11 dígitos
+- **HTTP-07:** `AvaliacaoController` já tratava `ER_DUP_ENTRY` e retornava `409` ✓
+
+### Débito técnico documentado (REST-01 a REST-06)
+
+Os seguintes endpoints não-RESTful foram identificados mas não alterados (clientes existentes dependem dessas URIs). Corrigir requer versionamento `/api/v2/`:
+
+| Endpoint atual                        | URI sugerida                          |
+|---------------------------------------|---------------------------------------|
+| `POST /api/solicitacoes/criar`        | `POST /api/solicitacoes`              |
+| `PUT /api/solicitacoes/:id/responder` | `PATCH /api/solicitacoes/:id/status`  |
+| `PUT /api/solicitacoes/:id/cancelar`  | `PATCH /api/solicitacoes/:id/status`  |
+| `PUT /api/sugestoes/:id/analisar`     | `PATCH /api/sugestoes/:id/status`     |
+| `PUT /api/sugestoes/:id/responder`    | `PATCH /api/sugestoes/:id/resposta`   |
 
 ---
 

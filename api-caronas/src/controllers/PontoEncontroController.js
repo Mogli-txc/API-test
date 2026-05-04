@@ -153,10 +153,11 @@ class PontoEncontroController {
             }
 
             // PASSO 2b: Verifica existência da carona e se o usuário autenticado é o motorista
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [caronaInfo] = await db.query(
-                `SELECT cu.usu_id AS motorista_id, c.car_status
+                `SELECT v.usu_id AS motorista_id, c.car_status
                  FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -315,11 +316,12 @@ class PontoEncontroController {
             }
 
             // PASSO 2: Busca o ponto e verifica existência + propriedade
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [pontos] = await db.query(
-                `SELECT pe.pon_id, CAST(pe.pon_status AS UNSIGNED) AS pon_status, cu.usu_id AS motorista_id
+                `SELECT pe.pon_id, CAST(pe.pon_status AS UNSIGNED) AS pon_status, v.usu_id AS motorista_id
                  FROM PONTO_ENCONTROS pe
-                 INNER JOIN CARONAS c         ON pe.car_id     = c.car_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 INNER JOIN CARONAS c   ON pe.car_id = c.car_id
+                 INNER JOIN VEICULOS v  ON c.vei_id  = v.vei_id
                  WHERE pe.pon_id = ?`,
                 [pon_id]
             );
@@ -391,11 +393,12 @@ class PontoEncontroController {
 
             // PASSO 2: Busca o ponto e verifica existência
             // CAST(pon_status AS UNSIGNED) garante retorno numérico — BIT(1) pode vir como Buffer em mysql2
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [pontos] = await db.query(
-                `SELECT pe.pon_id, CAST(pe.pon_status AS UNSIGNED) AS pon_status, cu.usu_id AS motorista_id
+                `SELECT pe.pon_id, CAST(pe.pon_status AS UNSIGNED) AS pon_status, v.usu_id AS motorista_id
                  FROM PONTO_ENCONTROS pe
-                 INNER JOIN CARONAS c         ON pe.car_id      = c.car_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id  = cu.cur_usu_id
+                 INNER JOIN CARONAS c  ON pe.car_id = c.car_id
+                 INNER JOIN VEICULOS v ON c.vei_id  = v.vei_id
                  WHERE pe.pon_id = ?`,
                 [pon_id]
             );

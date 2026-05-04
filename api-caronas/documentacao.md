@@ -36,7 +36,7 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.4.0
+  version: 1.5.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -5016,4 +5016,149 @@ paths:
       responses:
         '204': { description: Notificação deletada }
         '404': { description: Notificação não encontrada }
+
+  # ─── Novos endpoints v14 ────────────────────────────────────────────────────
+
+  /api/usuarios/me:
+    get:
+      tags: [Usuários]
+      summary: Perfil do próprio usuário autenticado [v14 — ENR-01]
+      description: |
+        Atalho para `GET /api/usuarios/perfil/{id}` usando o ID extraído do JWT.
+        Elimina a necessidade de o cliente mobile armazenar o `usu_id` para a primeira consulta.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dados do perfil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/Usuario'
+        '401':
+          description: Não autenticado
+
+  /api/usuarios/{id}/penalidades:
+    get:
+      tags: [Usuários]
+      summary: Penalidades ativas do próprio usuário [v14 — ENR-13]
+      description: |
+        Lista penalidades ativas (não expiradas, `pen_ativo = 1`) do próprio usuário.
+        O Desenvolvedor (`per_tipo = 2`) pode consultar qualquer usuário.
+        Útil para o app exibir mensagens de bloqueio sem precisar de acesso Admin.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Lista de penalidades ativas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  penalidades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Penalidade'
+        '403':
+          description: Sem permissão para ver penalidades de outro usuário
+
+  /api/caronas/{car_id}/resumo:
+    get:
+      tags: [Caronas]
+      summary: Resumo completo da carona em uma chamada [v14 — ENR-03]
+      description: |
+        Retorna dados da carona + pontos de encontro + passageiros confirmados + avaliações (se finalizada).
+        Reduz round-trips do cliente mobile — substitui 4 chamadas separadas por uma só.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: car_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Resumo completo da carona
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  carona:
+                    $ref: '#/components/schemas/Carona'
+                  pontos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PontoResponse'
+                  passageiros:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        usu_id:
+                          type: integer
+                        usu_nome:
+                          type: string
+                        usu_foto:
+                          type: string
+                          nullable: true
+                        origem:
+                          type: string
+                          enum: [solicitacao, direto]
+                  avaliacoes:
+                    type: array
+                    description: Preenchido apenas se car_status = 3 (Finalizada)
+                    items:
+                      $ref: '#/components/schemas/Avaliacao'
+        '404':
+          description: Carona não encontrada
+
+  /api/solicitacoes/pendentes:
+    get:
+      tags: [Solicitações]
+      summary: Solicitações pendentes das caronas do motorista [v14 — ENR-05]
+      description: |
+        Lista todas as solicitações com `sol_status = 1` (Enviado) nas caronas abertas
+        ou em espera do motorista autenticado. Permite ao motorista ver de imediato quem
+        quer carona sem precisar navegar carona por carona.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        '200':
+          description: Solicitações pendentes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalGeral:
+                    type: integer
+                  total:
+                    type: integer
+                  solicitacoes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Solicitacao'
+        '401':
+          description: Não autenticado
 ```

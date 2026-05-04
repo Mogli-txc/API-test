@@ -545,7 +545,9 @@ class UsuarioController {
                 return res.status(403).json({ error: "Sem permissão para alterar este usuário." });
             }
 
-            if (!usu_nome && !usu_email && !usu_senha) {
+            const { usu_telefone } = req.body;
+
+            if (!usu_nome && !usu_email && !usu_senha && !usu_telefone) {
                 return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
             }
 
@@ -592,6 +594,19 @@ class UsuarioController {
             const campos  = [];
             const valores = [];
 
+            if (usu_telefone !== undefined) {
+                if (usu_telefone !== null && usu_telefone !== '') {
+                    const tel = String(usu_telefone).replace(/\D/g, '');
+                    if (tel.length < 10 || tel.length > 11) {
+                        return res.status(400).json({ error: "usu_telefone deve ter 10 ou 11 dígitos numéricos." });
+                    }
+                    campos.push('usu_telefone = ?');
+                    valores.push(tel);
+                } else {
+                    campos.push('usu_telefone = ?');
+                    valores.push(null);
+                }
+            }
             if (usu_nome)  { campos.push('usu_nome = ?');  valores.push(stripHtml(usu_nome.trim())); }
             if (usu_email) { campos.push('usu_email = ?'); valores.push(usu_email); }
             if (usu_senha) {
@@ -623,7 +638,7 @@ class UsuarioController {
 
             // Whitelist: apenas colunas conhecidas podem entrar na query
             const COLUNAS_PERMITIDAS = [
-                'usu_nome = ?', 'usu_email = ?', 'usu_senha = ?',
+                'usu_nome = ?', 'usu_email = ?', 'usu_senha = ?', 'usu_telefone = ?',
                 'usu_verificacao = ?', 'usu_otp_hash = ?',
                 'usu_otp_expira = DATE_ADD(NOW(), INTERVAL 10 MINUTE)',
                 'usu_otp_tentativas = ?', 'usu_otp_bloqueado_ate = ?',
@@ -1068,6 +1083,58 @@ class UsuarioController {
         } catch (error) {
             console.error("[ERRO] refreshToken:", error);
             return res.status(500).json({ error: "Erro ao renovar token." });
+        }
+    }
+    /**
+     * MÉTODO: me
+     * Retorna o perfil do próprio usuário autenticado sem precisar informar o ID na URL.
+     * ENR-01 — elimina a necessidade de o cliente mobile armazenar o usu_id para a primeira chamada.
+     */
+    me = async (req, res) => {
+        req.params.id = String(req.user.id);
+        return this.perfil(req, res);
+    }
+
+    /**
+     * MÉTODO: minhasPenalidades
+     * Lista as penalidades ativas do próprio usuário autenticado.
+     * ENR-13 — o usuário pode ver por quanto tempo está bloqueado sem precisar de acesso Admin.
+     *
+     * Tabela: PENALIDADES
+     * Parâmetro: id (via URL — deve ser o próprio usu_id ou Dev)
+     */
+    minhasPenalidades = async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            if (!id || isNaN(id)) {
+                return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+
+            if (!await checkDevOrOwner(req.user.id, id)) {
+                return res.status(403).json({ error: "Sem permissão para ver as penalidades deste usuário." });
+            }
+
+            // PASSO 1: Query — apenas penalidades ativas (não removidas e não expiradas)
+            const [penalidades] = await db.query(
+                `SELECT pen_id, pen_tipo, pen_motivo, pen_aplicado_em, pen_expira_em, pen_ativo
+                 FROM PENALIDADES
+                 WHERE usu_id = ?
+                   AND pen_ativo = 1
+                   AND (pen_expira_em IS NULL OR pen_expira_em > NOW())
+                 ORDER BY pen_aplicado_em DESC`,
+                [id]
+            );
+
+            return res.status(200).json({
+                message:     `Penalidades ativas do usuário ${id}.`,
+                total:       penalidades.length,
+                penalidades
+            });
+
+        } catch (error) {
+            console.error('[ERRO] minhasPenalidades:', error);
+            return res.status(500).json({ error: 'Erro ao listar penalidades.' });
         }
     }
 }

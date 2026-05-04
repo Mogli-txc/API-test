@@ -206,9 +206,9 @@ class CaronaController {
                         ${selecaoCoordenadas}
                  FROM CARONAS c
                  INNER JOIN VEICULOS        v   ON c.vei_id     = v.vei_id
-                 INNER JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
-                 INNER JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
-                 INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
+                 INNER JOIN USUARIOS        u   ON v.usu_id     = u.usu_id
+                 LEFT  JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
+                 LEFT  JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
                  ${joinEscola}
                  ${joinPontos}
                  WHERE c.car_status = 1
@@ -246,8 +246,8 @@ class CaronaController {
             const [[{ totalGeral }]] = await db.query(
                 `SELECT COUNT(*) AS totalGeral
                  FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 INNER JOIN CURSOS cur ON cu.cur_id = cur.cur_id
+                 LEFT  JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
+                 LEFT  JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
                  ${joinEscola}
                  ${joinPontos}
                  WHERE c.car_status = 1
@@ -295,11 +295,10 @@ class CaronaController {
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
                         c.car_vagas_dispo, c.car_status, c.vei_id, c.cur_usu_id,
                         v.vei_marca_modelo, v.vei_placa, v.vei_tipo, v.vei_vagas,
-                        u.usu_nome AS motorista, cu.usu_id AS motorista_id
+                        u.usu_nome AS motorista, v.usu_id AS motorista_id
                  FROM CARONAS c
-                 INNER JOIN VEICULOS        v  ON c.vei_id     = v.vei_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -348,7 +347,8 @@ class CaronaController {
                 if (car_desc_limpa.length === 0) car_desc_limpa = null;
             }
 
-            if (isNaN(car_vagas_dispo) || car_vagas_dispo <= 0) {
+            const vagasNum = parseInt(car_vagas_dispo);
+            if (isNaN(vagasNum) || vagasNum <= 0) {
                 return res.status(400).json({ error: "Vagas disponíveis devem ser maior que zero." });
             }
 
@@ -411,7 +411,7 @@ class CaronaController {
 
             // car_vagas_dispo não pode exceder a capacidade real do veículo
             const capacidade = veiculo[0].vei_vagas;
-            if (parseInt(car_vagas_dispo) > capacidade) {
+            if (vagasNum > capacidade) {
                 return res.status(400).json({
                     error: `Vagas disponíveis não podem exceder a capacidade do veículo (${capacidade} vagas).`
                 });
@@ -437,7 +437,7 @@ class CaronaController {
                 `INSERT INTO CARONAS
                     (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status)
                  VALUES (?, ?, ?, ?, ?, ?, 1)`,
-                [vei_id, curUsuIdFinal, car_desc_limpa, car_data, car_hor_saida, car_vagas_dispo]
+                [vei_id, curUsuIdFinal, car_desc_limpa, car_data, car_hor_saida, vagasNum]
             );
 
             await registrarAudit({ tabela: 'CARONAS', registroId: resultado.insertId, acao: 'CARONA_CRIAR', usuId: usu_id, ip: req.ip });
@@ -486,12 +486,12 @@ class CaronaController {
             }
 
             // Verifica se o motorista autenticado é o dono desta carona
-            // Apenas o motorista que criou pode alterar os dados
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [dono] = await db.query(
-                `SELECT cu.usu_id, c.car_data AS data_atual, c.car_hor_saida AS hora_atual,
+                `SELECT v.usu_id, c.car_data AS data_atual, c.car_hor_saida AS hora_atual,
                         c.car_status AS status_atual
                  FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -626,10 +626,10 @@ class CaronaController {
                         v.vei_marca_modelo AS veiculo,
                         cur.cur_nome       AS curso_motorista
                  FROM CARONAS c
-                 INNER JOIN VEICULOS       v   ON c.vei_id     = v.vei_id
-                 INNER JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
-                 INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
-                 WHERE cu.usu_id = ?${filtroStatus}
+                 INNER JOIN VEICULOS        v   ON c.vei_id     = v.vei_id
+                 LEFT  JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
+                 LEFT  JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
+                 WHERE v.usu_id = ?${filtroStatus}
                  ORDER BY c.car_id DESC
                  LIMIT ? OFFSET ?`,
                 [...params, limit, offset]
@@ -638,8 +638,8 @@ class CaronaController {
             const [[{ totalGeral }]] = await db.query(
                 `SELECT COUNT(*) AS totalGeral
                  FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 WHERE cu.usu_id = ?${filtroStatus}`,
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 WHERE v.usu_id = ?${filtroStatus}`,
                 params
             );
 
@@ -755,9 +755,10 @@ class CaronaController {
             }
 
             // PASSO 1: Verifica existência, propriedade e status atual
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [dono] = await db.query(
-                `SELECT cu.usu_id, c.car_status FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                `SELECT v.usu_id, c.car_status FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -841,9 +842,10 @@ class CaronaController {
             }
 
             // Verifica se o motorista autenticado é o dono desta carona
+            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [dono] = await db.query(
-                `SELECT cu.usu_id, c.car_status FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                `SELECT v.usu_id, c.car_status FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -1073,6 +1075,95 @@ class CaronaController {
         } catch (error) {
             console.error("[ERRO] buscar caronas:", error);
             return res.status(500).json({ error: "Erro ao buscar caronas." });
+        }
+    }
+
+    /**
+     * MÉTODO: resumo
+     * Retorna dados completos de uma carona em uma única chamada:
+     * detalhes da carona, motorista, veículo, pontos, passageiros confirmados e avaliações.
+     * ENR-03 — reduz round-trips do cliente mobile.
+     *
+     * Parâmetro: car_id (via URL)
+     */
+    async resumo(req, res) {
+        try {
+            const { car_id } = req.params;
+
+            if (!car_id || isNaN(car_id)) {
+                return res.status(400).json({ error: "ID de carona inválido." });
+            }
+
+            // PASSO 1: Dados principais da carona + motorista via VEICULOS (null-safe para cur_usu_id)
+            const [rows] = await db.query(
+                `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
+                        c.car_vagas_dispo, c.car_status, c.vei_id, c.cur_usu_id,
+                        v.vei_marca_modelo, v.vei_placa, v.vei_tipo, v.vei_cor, v.vei_vagas,
+                        u.usu_id AS motorista_id, u.usu_nome AS motorista, u.usu_foto AS motorista_foto,
+                        cur.cur_nome AS curso_motorista
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS        v   ON c.vei_id     = v.vei_id
+                 INNER JOIN USUARIOS        u   ON v.usu_id     = u.usu_id
+                 LEFT  JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
+                 LEFT  JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
+                 WHERE c.car_id = ?`,
+                [car_id]
+            );
+
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+
+            const carona = rows[0];
+
+            // PASSO 2: Pontos de encontro
+            const [pontos] = await db.query(
+                `SELECT pon_id, pon_nome, pon_endereco, pon_tipo, pon_ordem, pon_lat, pon_lon, pon_status
+                 FROM PONTO_ENCONTROS
+                 WHERE car_id = ? AND pon_status = 1
+                 ORDER BY pon_tipo ASC, pon_ordem ASC`,
+                [car_id]
+            );
+
+            // PASSO 3: Passageiros confirmados (SOLICITACOES aceitas + CARONA_PESSOAS aceitas)
+            const [passageiros] = await db.query(
+                `SELECT u.usu_id, u.usu_nome, u.usu_foto, 'solicitacao' AS origem
+                 FROM SOLICITACOES_CARONA sc
+                 INNER JOIN USUARIOS u ON sc.usu_id_passageiro = u.usu_id
+                 WHERE sc.car_id = ? AND sc.sol_status = 2
+                 UNION
+                 SELECT u.usu_id, u.usu_nome, u.usu_foto, 'direto' AS origem
+                 FROM CARONA_PESSOAS cp
+                 INNER JOIN USUARIOS u ON cp.usu_id = u.usu_id
+                 WHERE cp.car_id = ? AND cp.car_pes_status = 1`,
+                [car_id, car_id]
+            );
+
+            // PASSO 4: Avaliações da carona (apenas se finalizada)
+            const [avaliacoes] = carona.car_status === 3
+                ? await db.query(
+                    `SELECT a.ava_id, a.usu_id_avaliador, a.usu_id_avaliado,
+                            a.ava_nota, a.ava_comentario, a.ava_criado_em,
+                            u.usu_nome AS avaliador
+                     FROM AVALIACOES a
+                     INNER JOIN USUARIOS u ON a.usu_id_avaliador = u.usu_id
+                     WHERE a.car_id = ?
+                     ORDER BY a.ava_id ASC`,
+                    [car_id]
+                )
+                : [[]];
+
+            return res.status(200).json({
+                message: "Resumo da carona recuperado.",
+                carona,
+                pontos,
+                passageiros,
+                avaliacoes
+            });
+
+        } catch (error) {
+            console.error("[ERRO] resumo:", error);
+            return res.status(500).json({ error: "Erro ao obter resumo da carona." });
         }
     }
 

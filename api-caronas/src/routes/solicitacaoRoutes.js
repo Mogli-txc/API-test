@@ -22,6 +22,14 @@ const authMiddleware = require('../middlewares/authMiddleware');
 router.post('/criar', authMiddleware, SolicitacaoController.solicitarCarona);
 
 /**
+ * ROTA: GET /api/solicitacoes/pendentes
+ * Descrição: Lista solicitações pendentes (sol_status=1) das caronas ativas do motorista autenticado.
+ * Acesso: PROTEGIDO - Requer JWT
+ * ENR-05
+ */
+router.get('/pendentes', authMiddleware, SolicitacaoController.listarPendentes);
+
+/**
  * ROTA: GET /api/solicitacoes/:sol_id
  * Descrição: Recupera os detalhes de uma solicitação específica
  * Acesso: PROTEGIDO - Apenas motorista ou passageiro envolvido

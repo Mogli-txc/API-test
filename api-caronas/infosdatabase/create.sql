@@ -22,6 +22,8 @@
 --   v12  — migration-notificacoes.sql: tabela NOTIFICACOES (persistência + Socket.io)
 --   v13  — migration-ocr-extract.sql: cur_usu_id nullable em CARONAS; doc_matricula/doc_curso/doc_periodo
 --           em DOCUMENTOS_VERIFICACAO; usu_curso_nome/usu_periodo em USUARIOS
+--   v14  — migration-audit-indexes.sql: índices de performance em CARONAS, SOLICITACOES_CARONA,
+--           MENSAGENS, CARONA_PESSOAS; ENUM em NOTIFICACOES.noti_tipo; DEFAULT 1 em doc_status
 -- =====================================================
 
 USE bd_tcc_des_125_caronas;
@@ -227,9 +229,11 @@ CREATE TABLE CARONAS (
     car_deletado_em DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de cancelamento com timestamp (NULL = ativo); car_status=0 mantido para compatibilidade',
 
     PRIMARY KEY (car_id),
-    INDEX idx_car_deletado_em (car_deletado_em),        -- filtro de registros ativos  [v3]
-    INDEX idx_car_status      (car_status),             -- filtro por status (listagem principal)
-    INDEX idx_car_data        (car_data)                -- filtro por data (/buscar?data=)
+    INDEX idx_car_deletado_em  (car_deletado_em),        -- filtro de registros ativos  [v3]
+    INDEX idx_car_status       (car_status),             -- filtro por status (listagem principal)
+    INDEX idx_car_data         (car_data),               -- filtro por data (/buscar?data=)
+    INDEX idx_car_status_data  (car_status, car_data),   -- query principal: abertas futuras  [v14 — DB-02]
+    INDEX idx_car_vei_id       (vei_id)                  -- verificação de caronas ativas por veículo  [v14 — DB-09]
 ) ENGINE = InnoDB;
 
 
@@ -282,7 +286,8 @@ CREATE TABLE MENSAGENS (
     men_deletado_em     DATETIME                            COMMENT 'Soft delete — data de remoção (NULL = ativo)',
     men_id_resposta     INT                                 COMMENT 'Mensagem respondida (auto-referência, NULL)',
     PRIMARY KEY (men_id),
-    INDEX idx_men_deletado_em (men_deletado_em)             -- filtro de soft-delete nas listagens
+    INDEX idx_men_deletado_em (men_deletado_em),            -- filtro de soft-delete nas listagens
+    INDEX idx_men_car_id      (car_id)                      -- conversa de uma carona  [v14 — DB-04]
 ) ENGINE = InnoDB;
 
 
@@ -297,7 +302,8 @@ CREATE TABLE SOLICITACOES_CARONA (
     sol_status        TINYINT NOT NULL               COMMENT '1=Enviado, 2=Aceito, 3=Negado, 0=Cancelado',
     sol_vaga_soli     INT     NOT NULL               COMMENT 'Quantidade de vagas solicitadas (1 a 4)',
     PRIMARY KEY (sol_id),
-    UNIQUE KEY UQ_Solicitacao (usu_id_passageiro, car_id) -- Uma solicitação por passageiro por carona
+    UNIQUE KEY UQ_Solicitacao (usu_id_passageiro, car_id), -- Uma solicitação por passageiro por carona
+    INDEX idx_sol_car_id (car_id)                          -- busca de solicitações por carona  [v14 — DB-03]
 ) ENGINE = InnoDB;
 
 
@@ -312,7 +318,8 @@ CREATE TABLE CARONA_PESSOAS (
     car_pes_data   DATETIME NOT NULL               COMMENT 'Data de Inclusão na Carona',
     car_pes_status TINYINT  NOT NULL               COMMENT '1=Aceito, 2=Negado, 0=Cancelado',
     PRIMARY KEY (car_pes_id),
-    UNIQUE KEY UQ_CaronaPessoa (car_id, usu_id)   -- Passageiro só pode estar uma vez por carona
+    UNIQUE KEY UQ_CaronaPessoa (car_id, usu_id),  -- Passageiro só pode estar uma vez por carona
+    INDEX idx_car_pes_usu_id (usu_id)             -- caronas de um passageiro  [v14 — DB-05]
 ) ENGINE = InnoDB;
 
 
@@ -355,7 +362,7 @@ CREATE TABLE DOCUMENTOS_VERIFICACAO (
     doc_tipo          TINYINT          NOT NULL               COMMENT '0=Comprovante de matrícula, 1=CNH',
     doc_arquivo       VARCHAR(255)     NOT NULL               COMMENT 'Nome do arquivo PDF salvo em /public/documentos/',
     doc_ocr_confianca TINYINT UNSIGNED NULL                   COMMENT 'Confiança média do OCR Tesseract (0-100). NULL = pré-OCR.',
-    doc_status        TINYINT          NOT NULL DEFAULT 0     COMMENT '0=aprovado_ocr, 1=pendente, 2=reprovado_ocr',
+    doc_status        TINYINT          NOT NULL DEFAULT 1     COMMENT '0=aprovado_ocr, 1=pendente, 2=reprovado_ocr — DEFAULT 1 (pendente) é o estado correto ao inserir  [v14 — DB-08]',
     doc_enviado_em    DATETIME         NOT NULL               COMMENT 'Data e hora do envio',
 
     -- Dados extraídos pelo OCR do comprovante de matrícula  [v13]
@@ -570,7 +577,11 @@ DROP TABLE IF EXISTS NOTIFICACOES;
 CREATE TABLE NOTIFICACOES (
     noti_id        BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Identificador da notificação (PK)',
     usu_id         INT          NOT NULL               COMMENT 'Destinatário (FK → USUARIOS)',
-    noti_tipo      VARCHAR(40)  NOT NULL               COMMENT 'Código do tipo de notificação',
+    noti_tipo      ENUM(
+                       'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
+                       'CARONA_CANCELADA','CARONA_FINALIZADA','AVALIACAO_RECEBIDA',
+                       'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL'
+                   )            NOT NULL               COMMENT 'Tipo de notificação — ENUM garante integridade  [v14 — DB-06]',
     noti_titulo    VARCHAR(100) NOT NULL               COMMENT 'Título curto',
     noti_mensagem  VARCHAR(255) NOT NULL               COMMENT 'Texto da notificação',
     noti_lida      TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '0=Não lida, 1=Lida',

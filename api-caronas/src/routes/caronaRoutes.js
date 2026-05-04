@@ -55,6 +55,14 @@ router.get('/buscar', authMiddleware, CaronaController.buscar);
 // Solicitações de carona: use POST /api/solicitacoes/criar (SolicitacaoController)
 
 /**
+ * ROTA: GET /api/caronas/:car_id/resumo
+ * Descrição: Resumo completo da carona — pontos, passageiros, avaliações em uma chamada.
+ * Acesso: PROTEGIDO - Requer autenticação
+ * ENR-03
+ */
+router.get('/:car_id/resumo', authMiddleware, CaronaController.resumo);
+
+/**
  * ROTA: GET /api/caronas/:car_id
  * Descrição: Recupera detalhes de uma carona específica
  * Acesso: PROTEGIDO - Requer autenticação

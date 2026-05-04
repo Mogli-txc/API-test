@@ -82,12 +82,27 @@ class MensagemController {
                 return res.status(403).json({ error: "O destinatário não é participante desta carona." });
             }
 
-            // PASSO 8: Inserção da mensagem no banco (usa o texto já trimado)
+            // PASSO 8: Valida men_id_resposta quando fornecido — deve existir na mesma carona
+            let respostaId = null;
+            if (men_id_resposta) {
+                respostaId = parseInt(men_id_resposta);
+                if (isNaN(respostaId)) {
+                    return res.status(400).json({ error: "men_id_resposta deve ser numérico." });
+                }
+                const [msgReferenciada] = await db.query(
+                    'SELECT men_id FROM MENSAGENS WHERE men_id = ? AND car_id = ? AND men_deletado_em IS NULL',
+                    [respostaId, car_id]
+                );
+                if (msgReferenciada.length === 0) {
+                    return res.status(400).json({ error: "Mensagem referenciada não encontrada nesta carona." });
+                }
+            }
+
+            // PASSO 9: Inserção da mensagem no banco (usa o texto já trimado)
             const [resultado] = await db.query(
                 `INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta)
                  VALUES (?, ?, ?, ?, ?)`,
-                [car_id, usu_id_remetente, usu_id_destinatario, men_texto_trim,
-                 men_id_resposta ? parseInt(men_id_resposta) : null]
+                [car_id, usu_id_remetente, usu_id_destinatario, men_texto_trim, respostaId]
             );
 
             const mensagem = {
@@ -97,7 +112,7 @@ class MensagemController {
                 usu_id_destinatario: parseInt(usu_id_destinatario),
                 men_texto:           men_texto_trim,
                 men_status:          1, // Enviada
-                men_id_resposta:     men_id_resposta ? parseInt(men_id_resposta) : null
+                men_id_resposta:     respostaId
             };
 
             // PASSO 9: Notifica via Socket.io os participantes na sala (se houver sessão ativa)

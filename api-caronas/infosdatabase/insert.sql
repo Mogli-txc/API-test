@@ -76,6 +76,37 @@
 --     ADD COLUMN doc_curso     VARCHAR(255) NULL DEFAULT NULL AFTER doc_matricula,
 --     ADD COLUMN doc_periodo   VARCHAR(50)  NULL DEFAULT NULL AFTER doc_curso;
 
+-- =====================================================
+-- MIGRATION v14 — Índices de performance + fixes de schema
+-- Execute em bancos existentes antes de usar a v14.
+-- Bancos criados do zero com create.sql já incluem todas as mudanças.
+-- =====================================================
+-- DB-02: Índice composto para query principal (caronas abertas futuras)
+-- ALTER TABLE CARONAS ADD INDEX idx_car_status_data (car_status, car_data);
+--
+-- DB-03: Índice para busca de solicitações por carona (leftmost da UNIQUE é usu_id_passageiro)
+-- ALTER TABLE SOLICITACOES_CARONA ADD INDEX idx_sol_car_id (car_id);
+--
+-- DB-04: Índice para carregamento da conversa de uma carona
+-- ALTER TABLE MENSAGENS ADD INDEX idx_men_car_id (car_id);
+--
+-- DB-05: Índice para busca das caronas de um passageiro
+-- ALTER TABLE CARONA_PESSOAS ADD INDEX idx_car_pes_usu_id (usu_id);
+--
+-- DB-09: Índice para verificação de caronas ativas por veículo (DELETE /api/veiculos/:vei_id)
+-- ALTER TABLE CARONAS ADD INDEX idx_car_vei_id (vei_id);
+--
+-- DB-06: ENUM em noti_tipo — garante integridade dos tipos de notificação
+-- ALTER TABLE NOTIFICACOES MODIFY COLUMN noti_tipo
+--   ENUM('SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
+--        'CARONA_CANCELADA','CARONA_FINALIZADA','AVALIACAO_RECEBIDA',
+--        'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL') NOT NULL;
+--
+-- DB-08: DEFAULT correto para doc_status (1=pendente, não 0=aprovado)
+-- ALTER TABLE DOCUMENTOS_VERIFICACAO
+--   MODIFY COLUMN doc_status TINYINT NOT NULL DEFAULT 1
+--   COMMENT '0=aprovado_ocr, 1=pendente, 2=reprovado_ocr';
+
 
 -- =====================================================
 -- 1. ESCOLAS

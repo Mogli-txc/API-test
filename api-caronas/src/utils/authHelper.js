@@ -49,16 +49,16 @@ async function checkDevOrOwner(requesterId, targetId) {
 }
 
 /**
- * Retorna o usu_id do motorista de uma carona consultando a tabela CARONAS + CURSOS_USUARIOS.
- * Usado para verificar se o usuário autenticado é o motorista antes de permitir ações restritas.
+ * Retorna o usu_id do motorista de uma carona consultando CARONAS + VEICULOS.
+ * Usa VEICULOS em vez de CURSOS_USUARIOS porque cur_usu_id pode ser NULL [v13].
  *
  * @param {number|string} caronaId - ID da carona (car_id)
  * @returns {Promise<number|null>} usu_id do motorista, ou null se a carona não existir
  */
 async function getMotoristaId(caronaId) {
     const [motorista] = await db.query(
-        `SELECT cu.usu_id FROM CARONAS c
-         INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+        `SELECT v.usu_id FROM CARONAS c
+         INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
          WHERE c.car_id = ?`,
         [caronaId]
     );
@@ -101,11 +101,12 @@ async function checkAdminOrOwner(requesterId, targetId) {
  * @returns {Promise<boolean>} true se participante, false caso contrário
  */
 async function isParticipanteCarona(caronaId, usuId) {
-    // PASSO 1: Verifica se a carona existe e se o usuário é o motorista
+    // PASSO 1: Verifica se a carona existe e se o usuário é o motorista.
+    // Usa VEICULOS em vez de CURSOS_USUARIOS porque cur_usu_id pode ser NULL [v13].
     // Retorna null quando a carona não existe — permite ao caller distinguir 404 de 403.
     const [motorista] = await db.query(
-        `SELECT cu.usu_id FROM CARONAS c
-         INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+        `SELECT v.usu_id FROM CARONAS c
+         INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
          WHERE c.car_id = ?`,
         [caronaId]
     );

@@ -97,6 +97,14 @@ router.post('/refresh', UsuarioController.refreshToken);
 // ========== ROTAS PROTEGIDAS (REQUEREM AUTENTICAÇÃO JWT) ==========
 
 /**
+ * ROTA: GET /api/usuarios/me
+ * Descrição: Retorna o perfil do próprio usuário autenticado sem precisar do ID na URL.
+ * Acesso: PROTEGIDO - Requer JWT
+ * ENR-01
+ */
+router.get('/me', authMiddleware, UsuarioController.me);
+
+/**
  * ROTA: POST /api/usuarios/logout
  * Descrição: Invalida o refresh token do usuário no banco (logout server-side).
  *   O access token JWT atual permanece válido até expirar (máx. 24h),
@@ -155,6 +163,14 @@ router.put('/:id/foto', authMiddleware, uploadFotoMiddleware, validarImagem, Usu
  * OBS: Recomenda-se usar soft delete para manter histórico de dados
  */
 router.delete('/:id', authMiddleware, UsuarioController.deletar);
+
+/**
+ * ROTA: GET /api/usuarios/:id/penalidades
+ * Descrição: Lista penalidades ativas do próprio usuário (sem acesso Admin).
+ * Acesso: PROTEGIDO - Apenas o próprio usuário ou Desenvolvedor
+ * ENR-13
+ */
+router.get('/:id/penalidades', authMiddleware, UsuarioController.minhasPenalidades);
 
 module.exports = router;
 
