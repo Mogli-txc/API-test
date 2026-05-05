@@ -213,7 +213,9 @@ INSERT INTO USUARIOS (usu_nome, usu_telefone, usu_matricula, usu_senha, usu_veri
     (NULL,             NULL,          NULL,           '$2b$12$btvRPk.B5l74/9Jp4.JIouE4dgUSGhaB4Zt5iSkgxcNWXvyOFOGAu', 0, NULL,                              1, 'pendente.otp@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=8  senha: Senha@123
     ('Fábio Suspenso', '11900000009', 'MAT2023099',  '$2b$12$WvlgrZZgujOfqmsbsdELWuMuMS9njS/t6k.nDixdZSB48miKvJPza', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'fabio.suspenso@aluno.inova.br', NULL,                                               'Rua Bloqueada, 99, São Paulo - SP',           '-23.5000,-46.6500', NULL,        -23.5000, -46.6500),  -- usu_id=9  senha: Senha@123
     (NULL,             NULL,          NULL,           '$2b$12$bpICjGCMprMLEOh7IPDpxuzQhKjOsOWg3.EJQqc.wLjMdsFUk/lNm', 6, DATE_ADD(NOW(), INTERVAL 5 DAY),  1, 'temp.veiculo@aluno.inova.br',   NULL,                                               NULL,                                          NULL,                NULL,        NULL,    NULL),           -- usu_id=10 senha: Senha@123
-    ('Admin Escola',   '11900000011', 'ADESC000011', '$2b$12$IG1G1Al0Qd/ndqaJgrySNOLrLG69gXpaaCdGDsqRrdTf/H3s0UjTO', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin.escola@inova.edu.br',     'Administrador da Faculdade Tecnológica Inova.',    'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560);  -- usu_id=11 senha: Admin@123
+    ('Admin Escola',   '11900000011', 'ADESC000011', '$2b$12$IG1G1Al0Qd/ndqaJgrySNOLrLG69gXpaaCdGDsqRrdTf/H3s0UjTO', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin.escola@inova.edu.br',     'Administrador da Faculdade Tecnológica Inova.',    'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560),  -- usu_id=11 senha: Admin@123
+    ('Dev Teste',      '11900000012', 'DEV0000012',  '$2b$12$eS08hbAKluJJ4.pZhAMwD.7abuUE1L2GEnvdwtzkyjhUM72MHPvV.', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'dev.teste@sistema.inova.br',    'Desenvolvedor de testes.',                        'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560),  -- usu_id=12 senha: Dev@5678
+    ('Admin Teste',    '11900000013', 'ADESC000013', '$2b$12$Kh.Hvu6Pitam9IsXeehjnuO1RI/JtYg1KcnGpYcDrkySZUP0tqiOa', 1, DATE_ADD(NOW(), INTERVAL 6 MONTH), 1, 'admin.teste@inova.edu.br',      'Administrador de testes da Faculdade Inova.',     'Av. Paulista, 1000, São Paulo - SP',           '-23.5616,-46.6560', NULL,        -23.5616, -46.6560);  -- usu_id=13 senha: Admin@456
 
 
 -- =====================================================
@@ -243,7 +245,9 @@ INSERT INTO USUARIOS_REGISTROS (usu_id, usu_data_login, usu_criado_em, usu_atual
     (8,  NULL,                       NOW(),                 NULL),                    -- OTP pendente: nunca logou (bloqueado até verificar)
     (9,  NULL,                       NOW(),                 NULL),                    -- Fábio: conta ativa e verificada, mas suspenso pelo admin
     (10, NULL,                       NOW(),                 NULL),                    -- temporário com veículo: nunca logou ainda
-    (11, NULL,                       NOW(),                 NULL);                    -- Admin Escola: conta nova, ainda não logou
+    (11, NULL,                       NOW(),                 NULL),                    -- Admin Escola: conta nova, ainda não logou
+    (12, NULL,                       NOW(),                 NULL),                    -- Dev Teste: conta nova, ainda não logou
+    (13, NULL,                       NOW(),                 NULL);                    -- Admin Teste: conta nova, ainda não logou
 
 
 -- =====================================================
@@ -276,7 +280,9 @@ INSERT INTO PERFIL (usu_id, per_nome, per_data, per_tipo, per_habilitado, per_es
     (8,  NULL,             NOW(), 0, 0, NULL),  -- usu_id=8:  Pendente → OTP não confirmado (per_habilitado=0 correto)
     (9,  'Fábio Suspenso', NOW(), 0, 0, NULL),  -- usu_id=9:  Suspenso → usu_status=1 + verificacao=1, mas per_habilitado=0 → testa C2
     (10, NULL,             NOW(), 0, 1, NULL),  -- usu_id=10: TempVei     → temporário com veículo, per_habilitado=1
-    (11, 'Admin Escola',  NOW(), 1, 1, 1);    -- usu_id=11: Admin Escola → Administrador escopo esc_id=1 (Inova)
+    (11, 'Admin Escola',  NOW(), 1, 1, 1),    -- usu_id=11: Admin Escola → Administrador escopo esc_id=1 (Inova)
+    (12, 'Dev Teste',    NOW(), 2, 1, NULL), -- usu_id=12: Dev Teste   → Desenvolvedor (acesso total)
+    (13, 'Admin Teste',  NOW(), 1, 1, 1);    -- usu_id=13: Admin Teste → Administrador escopo esc_id=1 (Inova)
 
 
 -- =====================================================
