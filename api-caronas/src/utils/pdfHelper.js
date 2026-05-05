@@ -16,10 +16,45 @@
 
 const fsp = require('fs').promises;
 
+// Polyfill de DOMMatrix para Node.js — pdfjs-dist v5+ exige esta API de browser para
+// cálculos de matrix de texto mesmo sem renderização. Stub mínimo suficiente para extração.
+if (typeof globalThis.DOMMatrix === 'undefined') {
+    globalThis.DOMMatrix = class DOMMatrix {
+        constructor() {
+            Object.assign(this, {
+                a:1, b:0, c:0, d:1, e:0, f:0,
+                m11:1, m12:0, m13:0, m14:0,
+                m21:0, m22:1, m23:0, m24:0,
+                m31:0, m32:0, m33:1, m34:0,
+                m41:0, m42:0, m43:0, m44:1,
+                is2D: true, isIdentity: true,
+            });
+        }
+        static fromMatrix()       { return new globalThis.DOMMatrix(); }
+        static fromFloat32Array() { return new globalThis.DOMMatrix(); }
+        static fromFloat64Array() { return new globalThis.DOMMatrix(); }
+        multiply()       { return new globalThis.DOMMatrix(); }
+        translate()      { return new globalThis.DOMMatrix(); }
+        scale()          { return new globalThis.DOMMatrix(); }
+        rotate()         { return new globalThis.DOMMatrix(); }
+        skewX()          { return new globalThis.DOMMatrix(); }
+        skewY()          { return new globalThis.DOMMatrix(); }
+        flipX()          { return new globalThis.DOMMatrix(); }
+        flipY()          { return new globalThis.DOMMatrix(); }
+        inverse()        { return new globalThis.DOMMatrix(); }
+        transformPoint(p = {}) { return { x: p.x || 0, y: p.y || 0, z: p.z || 0, w: p.w || 1 }; }
+        toFloat32Array() { return new Float32Array(16); }
+        toFloat64Array() { return new Float64Array(16); }
+        toString()       { return 'matrix(1, 0, 0, 1, 0, 0)'; }
+    };
+}
+
 /**
  * Extrai texto nativo de um PDF usando pdfjs-dist.
  * Não requer canvas — funciona puramente em Node.js para PDFs com texto embutido.
  * Processa as 2 primeiras páginas (suficiente para comprovantes e CNH em PDF).
+ *
+ * Compatível com pdfjs-dist v3.x (CommonJS) e v5.x (ESM via dynamic import).
  *
  * @param {string} caminhoPdf — caminho absoluto para o arquivo PDF
  * @returns {Promise<string>} texto extraído (pode ser vazio para PDFs escaneados)
@@ -27,24 +62,40 @@ const fsp = require('fs').promises;
 async function extrairTextoPdf(caminhoPdf) {
     let getDocument, GlobalWorkerOptions;
 
-    // PASSO 1: Importa pdfjs-dist — tenta caminhos compatíveis com v3.x e v4.x
-    try {
-        const lib = require('pdfjs-dist/legacy/build/pdf.js');
-        getDocument         = lib.getDocument;
-        GlobalWorkerOptions = lib.GlobalWorkerOptions;
-    } catch (e1) {
+    // PASSO 1: Importa pdfjs-dist — v5 usa ESM (.mjs), v3 usa CommonJS (.js)
+    // Dynamic import() permite carregar módulos ESM dentro de contextos CommonJS.
+    let importErr;
+    for (const caminho of [
+        'pdfjs-dist/legacy/build/pdf.mjs',  // v5 legacy (ESM)
+        'pdfjs-dist/legacy/build/pdf.js',   // v3 legacy (CommonJS)
+        'pdfjs-dist',                        // qualquer versão via entry point
+    ]) {
         try {
-            const lib = require('pdfjs-dist');
+            // Dynamic import funciona tanto para .mjs quanto para .js no Node.js 18+
+            const lib       = await import(caminho).catch(() => require(caminho)); // eslint-disable-line
             getDocument         = lib.getDocument;
             GlobalWorkerOptions = lib.GlobalWorkerOptions;
-        } catch (e2) {
-            throw new Error(`pdfjs-dist não encontrado. Tente: npm install pdfjs-dist. Detalhes: [legacy] ${e1.message} | [padrão] ${e2.message}`);
+            if (getDocument) break; // encontrou
+        } catch (e) {
+            importErr = e;
         }
     }
 
-    // PASSO 2: Desabilita o worker do pdfjs — em Node.js o worker roda no thread principal
+    if (!getDocument) {
+        throw new Error(`pdfjs-dist não pôde ser carregado. Detalhes: ${importErr?.message}`);
+    }
+
+    // PASSO 2: Configura o worker do pdfjs para Node.js
+    // v5+ exige workerSrc com caminho real; '' não funciona mais como no v3.
+    // Usamos o arquivo .mjs do legacy build (Node.js resolve via worker_threads).
     if (GlobalWorkerOptions) {
-        GlobalWorkerOptions.workerSrc = '';
+        try {
+            const path = require('path');
+            const workerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+            GlobalWorkerOptions.workerSrc = `file:///${workerPath.replace(/\\/g, '/')}`;
+        } catch (_) {
+            GlobalWorkerOptions.workerSrc = '';
+        }
     }
 
     // PASSO 3: Carrega o PDF em memória
