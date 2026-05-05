@@ -153,7 +153,8 @@ INSERT INTO CURSOS (cur_semestre, cur_nome, esc_id) VALUES
     (3, 'Análise e Desenvolvimento de Sistemas', 1),    -- cur_id = 1 (Escola Inova)
     (5, 'Engenharia de Produção',                1),    -- cur_id = 2 (Escola Inova)
     (2, 'Direito',                               2),    -- cur_id = 3 (Univ. Saber)
-    (1, 'Administração',                         2);    -- cur_id = 4 (Univ. Saber, 1° semestre)
+    (1, 'Administração',                         2),    -- cur_id = 4 (Univ. Saber, 1° semestre)
+    (3, 'Técnico em Desenvolvimento de Sistemas', 4);    -- cur_id = 5 (ETEC CPS, 3° módulo)
 
 
 -- =====================================================
