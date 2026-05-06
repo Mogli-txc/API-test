@@ -42,7 +42,8 @@ const solicitacaoRoutes  = require('./routes/solicitacaoRoutes');
 const caronaPessoasRoutes = require('./routes/caronaPessoasRoutes'); // Passageiros confirmados na carona
 const sugestaoRoutes     = require('./routes/sugestaoRoutes');       // Sugestões e denúncias
 const matriculaRoutes    = require('./routes/matriculaRoutes');      // Matrículas em cursos
-const adminRoutes        = require('./routes/adminRoutes');           // Estatísticas admin
+const adminRoutes        = require('./routes/adminRoutes');           // Gestão Admin+Dev compartilhada
+const devRoutes          = require('./routes/devRoutes');             // Operações exclusivas de Desenvolvedor
 const avaliacaoRoutes    = require('./routes/avaliacaoRoutes');        // Avaliações pós-carona
 const documentoRoutes    = require('./routes/documentoRoutes');         // Comprovante de matrícula e CNH
 const notificacaoRoutes  = require('./routes/notificacaoRoutes');
@@ -302,10 +303,16 @@ app.use('/api/sugestoes', sugestaoRoutes);
 app.use('/api/matriculas', matriculaRoutes);
 
 /**
- * Rotas Admin: Estatísticas do sistema (apenas Admin e Desenvolvedor)
+ * Rotas Admin: Gestão compartilhada entre Administrador e Desenvolvedor
  * Base URL: /api/admin
  */
 app.use('/api/admin', adminRoutes);
+
+/**
+ * Rotas Dev: Operações exclusivas do Desenvolvedor (per_tipo = 2)
+ * Base URL: /api/dev
+ */
+app.use('/api/dev', devRoutes);
 
 /**
  * Rotas de Avaliações: Motorista ↔ Passageiro pós-carona
