@@ -54,9 +54,9 @@ const checkRole = (tiposPermitidos) => async (req, res, next) => {
         next();
 
     } catch (error) {
-        console.error("[ERRO] roleMiddleware:", error);
-        // Princípio de default-deny: falha de banco não deve conceder acesso
-        return res.status(403).json({ error: "Não foi possível verificar permissões." });
+        // Falha de infraestrutura ≠ falta de permissão — retorna 503, não 403 [v15 — CODE-B01]
+        console.error(`[ERRO] roleMiddleware — ${req.method} ${req.path} — usu_id ${req.user?.id}:`, error.message);
+        return res.status(503).json({ error: "Serviço temporariamente indisponível. Tente novamente." });
     }
 };
 

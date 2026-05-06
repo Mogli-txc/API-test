@@ -36,16 +36,32 @@ const db = require('../config/database');
  * @param {number|string} targetId  - ID do recurso alvo (parâmetro de rota)
  * @returns {Promise<boolean>} true se permitido, false se bloqueado
  */
-async function checkDevOrOwner(requesterId, targetId) {
-    // PASSO 1: Dono do recurso — acesso imediato sem consulta ao banco
+/**
+ * Verifica permissão combinando propriedade do recurso com papel mínimo exigido.
+ * Usa per_tipo já injetado em req.user pelo roleMiddleware (cachedTipo) quando disponível,
+ * evitando query extra ao banco. [v15 — CODE-B02]
+ *
+ * @param {number}        requesterId  - req.user.id
+ * @param {number|string} targetId     - ID do recurso alvo
+ * @param {number}        minPerTipo   - papel mínimo aceito (1=Admin, 2=Dev)
+ * @param {number|null}   cachedTipo   - req.user.per_tipo se já disponível
+ */
+async function checkPermission(requesterId, targetId, minPerTipo = 2, cachedTipo = null) {
     if (requesterId === parseInt(targetId)) return true;
+    const perTipo = cachedTipo !== null ? cachedTipo : await _fetchPerTipo(requesterId);
+    return perTipo !== null && perTipo >= minPerTipo;
+}
 
-    // PASSO 2: Não é o dono — verifica se é Desenvolvedor (per_tipo = 2)
-    const [perfil] = await db.query(
+async function _fetchPerTipo(usu_id) {
+    const [rows] = await db.query(
         'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
-        [requesterId]
+        [usu_id]
     );
-    return perfil.length > 0 && perfil[0].per_tipo === 2;
+    return rows.length > 0 ? rows[0].per_tipo : null;
+}
+
+async function checkDevOrOwner(requesterId, targetId, cachedTipo = null) {
+    return checkPermission(requesterId, targetId, 2, cachedTipo);
 }
 
 /**
@@ -76,16 +92,8 @@ async function getMotoristaId(caronaId) {
  * @param {number|string} targetId  - ID do recurso alvo
  * @returns {Promise<boolean>} true se permitido, false se bloqueado
  */
-async function checkAdminOrOwner(requesterId, targetId) {
-    // PASSO 1: Dono do recurso — acesso imediato sem consulta ao banco
-    if (requesterId === parseInt(targetId)) return true;
-
-    // PASSO 2: Não é o dono — verifica se é Admin (1) ou Desenvolvedor (2)
-    const [perfil] = await db.query(
-        'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
-        [requesterId]
-    );
-    return perfil.length > 0 && perfil[0].per_tipo >= 1;
+async function checkAdminOrOwner(requesterId, targetId, cachedTipo = null) {
+    return checkPermission(requesterId, targetId, 1, cachedTipo);
 }
 
 /**
@@ -114,12 +122,14 @@ async function isParticipanteCarona(caronaId, usuId) {
     if (motorista[0].usu_id === usuId) return true; // é o motorista → participante confirmado
 
     // PASSO 2: Carona existe, usuário não é motorista — verifica se é passageiro confirmado
+    // LIMIT 1 evita leitura desnecessária quando ambas as tabelas retornam resultado [v15 — CODE-B03]
     const [passageiro] = await db.query(
         `SELECT 1 FROM CARONA_PESSOAS
          WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
          UNION
          SELECT 1 FROM SOLICITACOES_CARONA
-         WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+         WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2
+         LIMIT 1`,
         [caronaId, usuId, caronaId, usuId]
     );
     return passageiro.length > 0; // true = passageiro confirmado | false = não participante
@@ -200,4 +210,11 @@ async function verificarContratoEscola(usu_id, usu_email) {
     }
 }
 
-module.exports = { checkDevOrOwner, checkAdminOrOwner, getMotoristaId, isParticipanteCarona, verificarContratoEscola };
+module.exports = {
+    checkPermission,
+    checkDevOrOwner,
+    checkAdminOrOwner,
+    getMotoristaId,
+    isParticipanteCarona,
+    verificarContratoEscola
+};

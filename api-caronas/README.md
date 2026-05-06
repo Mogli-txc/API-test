@@ -22,7 +22,7 @@ API REST para sistema de compartilhamento de caronas entre alunos de instituiç�
 | pdf-to-img          | Renderização de página PDF como PNG para o Tesseract         |
 | socket.io           | WebSocket para mensagens em tempo real                       |
 | nodemailer          | Envio de e-mail (OTP, reset de senha)                        |
-| jest + supertest    | Testes (15 suites — 2026-05-02)                              |
+| jest + supertest    | Testes (18 suites — 2026-05-06)                              |
 | fetch (Node nativo) | Requisições HTTP ao Nominatim (geocodificação OpenStreetMap) |
 
 ---
@@ -112,11 +112,11 @@ O `access_token` é obtido no login e válido por **24 horas**. Quando expirar, 
 | 1          | Administrador | Stats e gestão — escopo limitado à sua escola  |
 | 2          | Desenvolvedor | Acesso total ao sistema                        |
 
-Administradores e Desenvolvedores são criados exclusivamente via `POST /api/admin/cadastrar` (requer Dev autenticado). Não passam pelo fluxo de OTP — conta nasce verificada e habilitada.
+Administradores e Desenvolvedores são criados exclusivamente via `POST /api/dev/cadastrar` (requer Dev autenticado). Não passam pelo fluxo de OTP — conta nasce verificada e habilitada.
 
 ### Bloqueio por contrato de escola [v11]
 
-Se o contrato de uma escola expirar, **todos os usuários vinculados** (por domínio de e-mail ou `per_escola_id`) são bloqueados no login e na renovação de token até que um Desenvolvedor renove o contrato via `POST /api/admin/escolas/:esc_id/contrato`.
+Se o contrato de uma escola expirar, **todos os usuários vinculados** (por domínio de e-mail ou `per_escola_id`) são bloqueados no login e na renovação de token até que um Desenvolvedor renove o contrato via `POST /api/dev/escolas/:esc_id/contrato`.
 
 ---
 
@@ -141,6 +141,8 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | PUT    | `/:id/foto`        | JWT  | Atualiza foto de perfil (multipart/form-data, campo `foto`) |
 | DELETE | `/:id`             | JWT  | Soft-delete da conta                                        |
 | GET    | `/:id/penalidades` | JWT  | Penalidades ativas do próprio usuário (sem acesso Admin) [v14]                  |
+| GET    | `/:id/reputacao`   | JWT  | Reputação: média de avaliações, total de caronas, ranking global [v15]          |
+| GET    | `/:id/exportar`    | JWT  | Exportação de dados pessoais em JSON — portabilidade LGPD Art. 18 [v15]         |
 
 ### Caronas — `/api/caronas`
 
@@ -311,28 +313,24 @@ Rota **pública** (sem autenticação). Necessário na tela de cadastro, antes d
 
 ### Admin — `/api/admin`
 
-Exige JWT + Admin (1) ou Desenvolvedor (2). Operações marcadas **Dev** exigem `per_tipo = 2`.
+Exige JWT + Admin (1) ou Desenvolvedor (2). Administrador tem escopo restrito à sua escola; Desenvolvedor acessa o sistema inteiro.
 
 #### Estatísticas
 
-| Método | Rota                | Acesso    | Descrição                                                               |
-|--------|---------------------|-----------|-------------------------------------------------------------------------|
-| GET    | `/stats/usuarios`   | Admin/Dev | Totais de usuários por status e verificação                             |
-| GET    | `/stats/caronas`    | Admin/Dev | Totais de caronas por status                                            |
-| GET    | `/stats/sugestoes`  | Admin/Dev | Totais de sugestões/denúncias por tipo e status                         |
-| GET    | `/stats/documentos` | Admin/Dev | Totais de documentos por tipo e status OCR                              |
-| GET    | `/stats/sistema`    | **Dev**   | Resumo consolidado de todos os módulos                                  |
-| GET    | `/stats/contratos`  | **Dev**   | Contratos: ativos, expirados, sem contrato, alertas de vencimento (90d) |
+| Método | Rota                        | Acesso    | Descrição                                                               |
+|--------|-----------------------------|-----------|-------------------------------------------------------------------------|
+| GET    | `/stats/usuarios`           | Admin/Dev | Totais de usuários por status e verificação                             |
+| GET    | `/stats/caronas`            | Admin/Dev | Totais de caronas por status                                            |
+| GET    | `/stats/sugestoes`          | Admin/Dev | Totais de sugestões/denúncias por tipo e status                         |
+| GET    | `/stats/documentos`         | Admin/Dev | Totais de documentos por tipo e status OCR                              |
+| GET    | `/relatorios/atividade`     | Admin/Dev | Relatório consolidado: caronas, usuários, avaliações no período [v15]   |
 
 #### Gestão de usuários
 
 | Método | Rota                                | Acesso    | Descrição                                                                |
 |--------|-------------------------------------|-----------|--------------------------------------------------------------------------|
-| POST   | `/cadastrar`                        | **Dev**   | Cria conta Admin/Dev sem OTP — login imediato com e-mail+senha           |
 | GET    | `/usuarios`                         | Admin/Dev | Lista usuários com busca (`?q=`) e cursor (`?cursor=`, `?esc_id=`)       |
 | GET    | `/usuarios/:usu_id`                 | Admin/Dev | Dados completos de um usuário                                            |
-| PUT    | `/usuarios/:usu_id/perfil`          | **Dev**   | Atualiza papel e escola do usuário                                       |
-| POST   | `/usuarios/:usu_id/redefinir-senha` | **Dev**   | Redefine senha de Admin/Dev sem e-mail, invalida sessões                 |
 | PATCH  | `/usuarios/:usu_id/status`          | Admin/Dev | Ativa/inativa conta sem penalidade (não opera sobre Admin/Dev)           |
 | GET    | `/usuarios/:usu_id/penalidades`     | Admin/Dev | Histórico de penalidades (`?ativas=1` = vigentes)                        |
 | POST   | `/usuarios/:usu_id/penalidades`     | Admin/Dev | Aplica penalidade (tipos 1–4, durações 1semana a 6meses)                 |
@@ -346,28 +344,54 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Operações marcadas **Dev** exigem 
 | GET    | `/avaliacoes` | Admin/Dev | Lista avaliações com nomes dos participantes (`?esc_id=`)               |
 | GET    | `/veiculos`   | Admin/Dev | Lista veículos com dados do proprietário (`?esc_id=`, `?vei_status=`)   |
 
-#### Audit log
+#### Escolas e cursos (somente leitura)
 
-| Método | Rota             | Acesso  | Descrição                                                                          |
-|--------|------------------|---------|------------------------------------------------------------------------------------|
-| GET    | `/logs`          | **Dev** | Leitura do AUDIT_LOG (`?acao=`, `?tabela=`, `?usu_id=`)                           |
-| GET    | `/logs/exportar` | **Dev** | Exporta AUDIT_LOG como CSV (máx. 10.000 registros; `?data_inicio=`, `?data_fim=`) |
+| Método | Rota               | Acesso    | Descrição                                                       |
+|--------|--------------------|-----------|-----------------------------------------------------------------|
+| GET    | `/escolas`         | Admin/Dev | Lista escolas (Admin: apenas a própria; `?q=`)                  |
+| GET    | `/escolas/:esc_id` | Admin/Dev | Dados da escola com cursos vinculados                           |
+| GET    | `/cursos`          | Admin/Dev | Lista cursos (Admin: escola; Dev: todos; `?esc_id=`)            |
 
-#### Escolas e cursos
+---
 
-| Método | Rota                        | Acesso    | Descrição                                              |
-|--------|-----------------------------|-----------|--------------------------------------------------------|
-| GET    | `/escolas`                  | Admin/Dev | Lista escolas (Admin: apenas a própria; `?q=`)         |
-| GET    | `/escolas/:esc_id`          | Admin/Dev | Dados da escola com cursos vinculados                  |
-| POST   | `/escolas`                  | **Dev**   | Cria escola                                            |
-| PUT    | `/escolas/:esc_id`          | **Dev**   | Atualiza dados da escola                               |
-| DELETE | `/escolas/:esc_id`          | **Dev**   | Remove escola (bloqueado se houver cursos vinculados)  |
-| POST   | `/escolas/:esc_id/contrato` | **Dev**   | Define/renova contrato. Body: `{ duracao, data_inicio? }` — durações: `1ano`, `2anos`, `5anos` |
-| DELETE | `/escolas/:esc_id/contrato` | **Dev**   | Cancela contrato (zera os três campos de contrato)     |
-| GET    | `/cursos`                   | Admin/Dev | Lista cursos (Admin: escola; Dev: todos; `?esc_id=`)   |
-| POST   | `/escolas/:esc_id/cursos`   | **Dev**   | Cria curso vinculado a uma escola                      |
-| PUT    | `/cursos/:cur_id`           | **Dev**   | Atualiza dados do curso                                |
-| DELETE | `/cursos/:cur_id`           | **Dev**   | Remove curso (bloqueado se houver matrículas)          |
+### Dev — `/api/dev`
+
+Exclusivo para Desenvolvedor (`per_tipo = 2`). Admins recebem 403.
+
+#### Estatísticas globais
+
+| Método | Rota                | Acesso | Descrição                                                               |
+|--------|---------------------|--------|-------------------------------------------------------------------------|
+| GET    | `/stats/sistema`    | Dev    | Resumo consolidado de todos os módulos                                  |
+| GET    | `/stats/contratos`  | Dev    | Contratos: ativos, expirados, sem contrato, alertas de vencimento (90d) |
+
+#### Audit Log
+
+| Método | Rota             | Acesso | Descrição                                                                          |
+|--------|------------------|--------|------------------------------------------------------------------------------------|
+| GET    | `/logs`          | Dev    | Leitura do AUDIT_LOG (`?acao=`, `?tabela=`, `?usu_id=`)                           |
+| GET    | `/logs/exportar` | Dev    | Exporta AUDIT_LOG como CSV (máx. 10.000 registros; `?data_inicio=`, `?data_fim=`) |
+
+#### Gestão de contas
+
+| Método | Rota                                | Acesso | Descrição                                                                |
+|--------|-------------------------------------|--------|--------------------------------------------------------------------------|
+| POST   | `/cadastrar`                        | Dev    | Cria conta Admin/Dev sem OTP — login imediato com e-mail+senha           |
+| PUT    | `/usuarios/:usu_id/perfil`          | Dev    | Atualiza papel e escola do usuário                                       |
+| POST   | `/usuarios/:usu_id/redefinir-senha` | Dev    | Redefine senha de Admin/Dev sem e-mail, invalida sessões                 |
+
+#### CRUD de Escolas e Cursos
+
+| Método | Rota                        | Acesso | Descrição                                              |
+|--------|-----------------------------|--------|--------------------------------------------------------|
+| POST   | `/escolas`                  | Dev    | Cria escola                                            |
+| PUT    | `/escolas/:esc_id`          | Dev    | Atualiza dados da escola                               |
+| DELETE | `/escolas/:esc_id`          | Dev    | Remove escola (bloqueado se houver cursos vinculados)  |
+| POST   | `/escolas/:esc_id/contrato` | Dev    | Define/renova contrato (`1ano`, `2anos`, `5anos`)      |
+| DELETE | `/escolas/:esc_id/contrato` | Dev    | Cancela contrato (zera campos de contrato)             |
+| POST   | `/escolas/:esc_id/cursos`   | Dev    | Cria curso vinculado a uma escola                      |
+| PUT    | `/cursos/:cur_id`           | Dev    | Atualiza dados do curso                                |
+| DELETE | `/cursos/:cur_id`           | Dev    | Remove curso (bloqueado se houver matrículas)          |
 
 ---
 
@@ -375,12 +399,13 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Operações marcadas **Dev** exigem 
 
 ### Middlewares
 
-| Arquivo            | Função                                                                    |
-|--------------------|---------------------------------------------------------------------------|
-| `authMiddleware.js` | Valida JWT, injeta `req.user.id` e `req.user.email`                      |
-| `roleMiddleware.js` | Valida `per_tipo` e `per_habilitado`; injeta `per_tipo` e `per_escola_id` em `req.user` |
-| `uploadHelper.js`  | Multer para imagens (5 MB) e documentos PDF (10 MB); valida magic bytes   |
-| `ocrValidator.js`  | Pipeline OCR — texto nativo (pdfjs-dist) → fallback Tesseract.js; critérios por grupo de palavras-chave |
+| Arquivo               | Função                                                                    |
+|-----------------------|---------------------------------------------------------------------------|
+| `authMiddleware.js`   | Valida JWT, injeta `req.user.id` e `req.user.email`                      |
+| `roleMiddleware.js`   | Valida `per_tipo` e `per_habilitado`; injeta `per_tipo` e `per_escola_id` em `req.user`; retorna 503 em falha de infraestrutura [v15] |
+| `penaltyMiddleware.js`| Verifica penalidades ativas antes de oferecer/solicitar caronas [v15]    |
+| `uploadHelper.js`     | Multer para imagens (5 MB) e documentos PDF (10 MB); valida magic bytes   |
+| `ocrValidator.js`     | Pipeline OCR — texto nativo (pdfjs-dist) → fallback Tesseract.js; critérios por grupo de palavras-chave |
 
 #### Critérios OCR — comprovante de matrícula
 
@@ -467,6 +492,7 @@ Após a extração, o backend valida o curso contra o banco:
 | v12    | Tabela NOTIFICACOES: persistência de notificações automáticas e manuais |
 | v13    | `cur_usu_id` nullable em CARONAS; extração OCR de matrícula/curso/período; `usu_curso_nome` + `usu_periodo` em USUARIOS; `doc_matricula` + `doc_curso` + `doc_periodo` em DOCUMENTOS_VERIFICACAO; validação de curso contra escola pelo domínio do e-mail |
 | v14    | 5 índices de performance (DB-02/03/04/05/09); `noti_tipo` ENUM em NOTIFICACOES (DB-06); `doc_status DEFAULT 1` em DOCUMENTOS_VERIFICACAO (DB-08); joins null-safe via VEICULOS em todos os controllers; novos endpoints: `GET /me`, `GET /:id/penalidades`, `GET /caronas/:id/resumo`, `GET /solicitacoes/pendentes`; validações VAL-01/02/04 |
+| v15    | `CHECK` constraints em colunas críticas (DB-A01); `utf8mb4` explícito em todas as tabelas (DB-A02); `PERFIL` refatorada com `usu_id` como PK (DB-A03); índices explícitos em `VEICULOS.usu_id` e `PONTO_ENCONTROS.car_id` (DB-A04); FK auto-referencial em `MENSAGENS.men_id_resposta` (DB-A05); `roleMiddleware` retorna 503 em falha de infra (CODE-B01); `authHelper` otimizado com `checkPermission` unificado (CODE-B02); `penaltyMiddleware` centralizado (CODE-B05); separação `AdminController`/`DevController` e `adminRoutes`/`devRoutes`; novos endpoints: `GET /:id/reputacao`, `GET /:id/exportar` (LGPD), `GET /admin/relatorios/atividade`; alias RESTful `PATCH /:sol_id/status` (REST-C01); `LGPD_EXPORTAR` no audit log |
 
 ---
 
@@ -508,6 +534,56 @@ Os seguintes endpoints não-RESTful foram identificados mas não alterados (clie
 | `PUT /api/solicitacoes/:id/cancelar`  | `PATCH /api/solicitacoes/:id/status`  |
 | `PUT /api/sugestoes/:id/analisar`     | `PATCH /api/sugestoes/:id/status`     |
 | `PUT /api/sugestoes/:id/responder`    | `PATCH /api/sugestoes/:id/resposta`   |
+
+Os aliases RESTful foram adicionados em v15 via `PATCH /:sol_id/status` (mantendo as rotas legadas para retrocompatibilidade).
+
+---
+
+## Auditoria Técnica (v15)
+
+Resultado da auditoria realizada em 2026-05-06. Auditoria técnica rigorosa em banco de dados, código, endpoints e testes.
+
+### Banco de Dados
+
+| ID      | Severidade | Correção                                                                           |
+|---------|------------|------------------------------------------------------------------------------------|
+| DB-A01  | Crítico    | `CHECK` constraints adicionadas: `ava_nota`, `sol_vaga_soli`, `car_vagas_dispo`, `vei_tipo`, `pen_tipo` |
+| DB-A02  | Alto       | `utf8mb4 COLLATE utf8mb4_unicode_ci` explícito em todas as tabelas                |
+| DB-A03  | Alto       | `PERFIL` refatorada: `per_id` removido, `usu_id` promovido a PK (1:1 correto)     |
+| DB-A04  | Médio      | Índices explícitos em `VEICULOS.usu_id` e `PONTO_ENCONTROS.car_id`                |
+| DB-A05  | Médio      | FK `MENSAGENS.men_id_resposta → MENSAGENS.men_id` declarada (auto-referência)     |
+| DB-A06  | Baixo      | Índices em `SUGESTAO_DENUNCIA.sug_status` e `sug_deletado_em`                     |
+
+### Middlewares
+
+| ID       | Severidade | Correção                                                                           |
+|----------|------------|------------------------------------------------------------------------------------|
+| CODE-B01 | Alto       | `roleMiddleware` retorna 503 (não 403) em falha de banco                           |
+| CODE-B02 | Médio      | `authHelper`: `checkPermission()` unificado elimina query duplicada ao banco       |
+| CODE-B03 | Médio      | `isParticipanteCarona` com `LIMIT 1` na UNION evita leitura desnecessária          |
+| CODE-B04 | Médio      | `statsCaronas` Admin usa `COUNT(DISTINCT)` para evitar dupla contagem              |
+| CODE-B05 | Médio      | `penaltyMiddleware.js` centraliza verificação de penalidades por rota              |
+| CODE-B06 | Baixo      | `DevController`: verificações internas redundantes podem ser removidas             |
+
+### Novos Endpoints
+
+| Endpoint                             | Acesso    | Descrição                                          |
+|--------------------------------------|-----------|----------------------------------------------------|
+| `GET /api/usuarios/:id/reputacao`    | JWT       | Média de avaliações, total de caronas, ranking     |
+| `GET /api/usuarios/:id/exportar`     | JWT/Dev   | Portabilidade LGPD — exporta todos os dados        |
+| `GET /api/admin/relatorios/atividade`| Admin/Dev | Atividade consolidada no período (`?dias=30`)      |
+| `PATCH /api/solicitacoes/:id/status` | JWT       | Alias RESTful para responder/cancelar solicitação  |
+
+### Cobertura de Testes (v15)
+
+**Arquivo novo:** `tests/auditoria_v15.test.js` — 14 novos cenários:
+- Separação Admin vs Dev (rotas cruzadas bloqueadas)
+- Dev acessa `/api/admin` e `/api/dev`
+- Refresh token rotativo + invalidação após logout
+- Bloqueio por contrato de escola expirado
+- Endpoint de reputação (estrutura e validação)
+- Exportação LGPD (dados sem `usu_senha`)
+- Relatório de atividade Admin/Dev
 
 ---
 

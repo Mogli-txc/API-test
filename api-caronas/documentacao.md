@@ -36,7 +36,7 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.5.0
+  version: 1.6.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -3857,7 +3857,9 @@ tags:
   - name: Infraestrutura
     description: Dados estáticos de escolas e cursos (rotas públicas)
   - name: Admin
-    description: Estatísticas do sistema e gestão de penalidades — acesso restrito a Admin e Dev
+    description: Estatísticas, penalidades e gestão de usuários — acesso restrito a Admin (1) e Dev (2)
+  - name: Dev
+    description: Operações exclusivas do Desenvolvedor (per_tipo=2) — logs, CRUD de escolas/cursos, gestão de contas
 ```
 
 ---
@@ -5161,4 +5163,531 @@ paths:
                       $ref: '#/components/schemas/Solicitacao'
         '401':
           description: Não autenticado
+```
+
+---
+
+## Auditoria v15 — Novos Endpoints e Correções (2026-05-06)
+
+Separação Admin/Dev, novos endpoints de reputação, LGPD e relatórios gerenciais.
+Ver `README.md` para changelog completo e relação de bugs corrigidos.
+
+```yaml
+paths:
+
+  # ─── REPUTAÇÃO (/api/usuarios/:id/reputacao) ─────────────────────────────
+  /api/usuarios/{id}/reputacao:
+    get:
+      summary: Reputação do usuário [v15 — ENR-R01]
+      tags: [Usuários]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Retorna média de avaliações recebidas, distribuição de notas (5/4/≤3),
+        total de caronas como motorista e como passageiro (finalizadas), e posição
+        no ranking global (usuários com ≥ 3 avaliações recebidas).
+
+        `ranking_global` é `null` quando o usuário tem menos de 3 avaliações.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Estatísticas de reputação
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usu_id:
+                    type: integer
+                  avaliacoes:
+                    type: object
+                    properties:
+                      total:         { type: integer }
+                      media:         { type: number, format: float }
+                      distribuicao:
+                        type: object
+                        properties:
+                          cinco:  { type: integer }
+                          quatro: { type: integer }
+                          baixas: { type: integer }
+                  atividade:
+                    type: object
+                    properties:
+                      caronas_motorista:  { type: integer }
+                      caronas_passageiro: { type: integer }
+                  ranking_global:
+                    type: integer
+                    nullable: true
+                    description: "Posição no ranking global por média. NULL se < 3 avaliações."
+        '400': { description: ID inválido }
+        '401': { description: Não autenticado }
+        '404': { description: Usuário não encontrado }
+
+  # ─── LGPD EXPORT (/api/usuarios/:id/exportar) ────────────────────────────
+  /api/usuarios/{id}/exportar:
+    get:
+      summary: Exportar dados pessoais — portabilidade LGPD Art. 18 [v15]
+      tags: [Usuários]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Retorna todos os dados do usuário em JSON para download.
+        Campos sensíveis (`usu_senha`, `usu_otp_hash`, `usu_refresh_hash`) são removidos.
+        A ação é registrada no `AUDIT_LOG` com código `LGPD_EXPORTAR`.
+
+        **Acesso:** apenas o próprio usuário ou Desenvolvedor (`per_tipo=2`).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: JSON com todos os dados pessoais do usuário (sem campos sensíveis)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gerado_em:    { type: string, format: date-time }
+                  base_legal:   { type: string, example: "LGPD Art. 18, III — Portabilidade de dados pessoais" }
+                  usuario:      { $ref: '#/components/schemas/Usuario' }
+                  caronas_motorista:
+                    type: array
+                    items: { $ref: '#/components/schemas/Carona' }
+                  solicitacoes:
+                    type: array
+                    items: { $ref: '#/components/schemas/Solicitacao' }
+                  avaliacoes_dadas:
+                    type: array
+                    items: { $ref: '#/components/schemas/Avaliacao' }
+                  veiculos:
+                    type: array
+                    items: { $ref: '#/components/schemas/Veiculo' }
+                  penalidades:
+                    type: array
+                    items: { $ref: '#/components/schemas/Penalidade' }
+        '400': { description: ID inválido }
+        '401': { description: Não autenticado }
+        '403': { description: Apenas o próprio usuário ou Desenvolvedor }
+        '404': { description: Usuário não encontrado }
+
+  # ─── ALIAS RESTful (/api/solicitacoes/:id/status) ────────────────────────
+  /api/solicitacoes/{sol_id}/status:
+    patch:
+      summary: Alterar status da solicitação — alias RESTful [v15 — REST-C01]
+      tags: [Solicitações]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Unifica `PUT /responder` (motorista aceita/recusa) e `PUT /cancelar` (passageiro cancela)
+        em um único endpoint RESTful. As rotas anteriores continuam funcionando para retrocompatibilidade.
+
+        **acao = 'aceitar' ou 'recusar':** apenas o motorista da carona.
+        **acao = 'cancelar':** apenas o passageiro solicitante.
+      parameters:
+        - in: path
+          name: sol_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [acao]
+              properties:
+                acao:
+                  type: string
+                  enum: [aceitar, recusar, cancelar]
+                  description: "Ação a executar sobre a solicitação"
+                  example: aceitar
+      responses:
+        '200': { description: Status alterado com sucesso }
+        '400': { description: acao inválida }
+        '403': { description: Sem permissão para esta ação }
+        '404': { description: Solicitação não encontrada }
+        '409': { description: Solicitação já está no status final }
+
+  # ─── RELATÓRIO ADMIN (/api/admin/relatorios/atividade) ───────────────────
+  /api/admin/relatorios/atividade:
+    get:
+      summary: Relatório consolidado de atividade por período [v15 — REST-C04]
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      description: |
+        Retorna métricas de atividade do período selecionado:
+        - Caronas criadas (total, finalizadas, canceladas, em andamento)
+        - Novos usuários registrados
+        - Avaliações realizadas e média geral do período
+
+        **Admin:** escopo limitado à escola (`per_escola_id`).
+        **Dev:** visão global, pode filtrar por `?esc_id=`.
+      parameters:
+        - in: query
+          name: dias
+          schema: { type: integer, default: 30, minimum: 1, maximum: 365 }
+          description: "Número de dias retroativos. Padrão: 30. Máximo: 365."
+        - in: query
+          name: esc_id
+          schema: { type: integer }
+          description: "Filtra por escola (Dev apenas)"
+      responses:
+        '200':
+          description: Relatório de atividade
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  periodo:
+                    type: object
+                    properties:
+                      inicio: { type: string, format: date }
+                      dias:   { type: integer }
+                  esc_id:
+                    type: integer
+                    nullable: true
+                  caronas:
+                    type: object
+                    properties:
+                      total:          { type: integer }
+                      finalizadas:    { type: integer }
+                      canceladas:     { type: integer }
+                      em_andamento:   { type: integer }
+                  usuarios:
+                    type: object
+                    properties:
+                      novos_usuarios: { type: integer }
+                  avaliacoes:
+                    type: object
+                    properties:
+                      total:      { type: integer }
+                      media_nota: { type: number, format: float }
+        '401': { description: Não autenticado }
+        '403': { description: Requer papel Admin ou Dev }
+
+  # ─── DEV — /api/dev ───────────────────────────────────────────────────────
+  /api/dev/stats/sistema:
+    get:
+      summary: Resumo global de todos os módulos (Dev only) [v15 — separação Admin/Dev]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      description: Movido de `/api/admin/stats/sistema`. Apenas `per_tipo=2`.
+      responses:
+        '200':
+          description: Resumo consolidado
+          content:
+            application/json:
+              example:
+                sistema:
+                  usuarios:     { total: 150, ativos: 140 }
+                  caronas:      { total: 300, abertas: 12 }
+                  solicitacoes: { total: 800, aceitas: 600 }
+                  mensagens:    { total: 2000 }
+                  veiculos:     { total: 85 }
+        '403': { description: Apenas Desenvolvedor }
+
+  /api/dev/stats/contratos:
+    get:
+      summary: Resumo de contratos de escolas (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Stats + alertas de vencimento nos próximos 90 dias }
+        '403': { description: Apenas Desenvolvedor }
+
+  /api/dev/logs:
+    get:
+      summary: Leitura do AUDIT_LOG (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: acao
+          schema: { type: string }
+        - in: query
+          name: tabela
+          schema: { type: string }
+        - in: query
+          name: usu_id
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        '200': { description: Registros paginados do audit log }
+        '403': { description: Apenas Desenvolvedor }
+
+  /api/dev/logs/exportar:
+    get:
+      summary: Exportar AUDIT_LOG como CSV (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: acao
+          schema: { type: string }
+        - in: query
+          name: tabela
+          schema: { type: string }
+        - in: query
+          name: usu_id
+          schema: { type: integer }
+        - in: query
+          name: data_inicio
+          schema: { type: string, format: date }
+        - in: query
+          name: data_fim
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: CSV com até 10.000 registros
+          content:
+            text/csv:
+              schema: { type: string }
+        '403': { description: Apenas Desenvolvedor }
+
+  /api/dev/cadastrar:
+    post:
+      summary: Cria conta Admin ou Dev sem OTP (Dev only) [v15 — movido de /api/admin/cadastrar]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_email, usu_senha, per_tipo]
+              properties:
+                usu_email:    { type: string, format: email }
+                usu_senha:    { type: string, minLength: 8 }
+                usu_nome:     { type: string }
+                per_tipo:     { type: integer, enum: [1, 2] }
+                per_escola_id: { type: integer, description: "Obrigatório quando per_tipo=1" }
+      responses:
+        '201': { description: Conta criada com login imediato }
+        '400': { description: Dados inválidos }
+        '403': { description: Apenas Desenvolvedor }
+        '409': { description: E-mail já cadastrado }
+
+  /api/dev/usuarios/{usu_id}/perfil:
+    put:
+      summary: Atualizar papel e escola de um usuário (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: usu_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                per_tipo:      { type: integer, enum: [0, 1, 2] }
+                per_escola_id: { type: integer, nullable: true }
+                per_habilitado: { type: integer, enum: [0, 1] }
+      responses:
+        '200': { description: Perfil atualizado }
+        '403': { description: Apenas Desenvolvedor }
+        '404': { description: Usuário não encontrado }
+
+  /api/dev/usuarios/{usu_id}/redefinir-senha:
+    post:
+      summary: Redefinir senha de conta Admin/Dev (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: usu_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nova_senha]
+              properties:
+                nova_senha: { type: string, minLength: 8 }
+      responses:
+        '200': { description: Senha redefinida e sessões invalidadas }
+        '403': { description: Apenas Desenvolvedor ou alvo não é Admin/Dev }
+        '404': { description: Usuário não encontrado }
+
+  /api/dev/escolas:
+    post:
+      summary: Criar escola (Dev only) [v15 — movido de /api/admin/escolas POST]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [esc_nome, esc_endereco]
+              properties:
+                esc_nome:        { type: string }
+                esc_endereco:    { type: string }
+                esc_dominio:     { type: string, nullable: true }
+                esc_max_usuarios: { type: integer, nullable: true }
+      responses:
+        '201': { description: Escola criada com geocodificação automática }
+        '403': { description: Apenas Desenvolvedor }
+
+  /api/dev/escolas/{esc_id}:
+    put:
+      summary: Atualizar escola (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                esc_nome:         { type: string }
+                esc_endereco:     { type: string }
+                esc_dominio:      { type: string, nullable: true }
+                esc_max_usuarios: { type: integer, nullable: true }
+      responses:
+        '200': { description: Escola atualizada }
+        '403': { description: Apenas Desenvolvedor }
+        '404': { description: Escola não encontrada }
+    delete:
+      summary: Remover escola (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Escola removida }
+        '403': { description: Apenas Desenvolvedor }
+        '409': { description: Escola tem cursos vinculados }
+
+  /api/dev/escolas/{esc_id}/contrato:
+    post:
+      summary: Definir ou renovar contrato de escola (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [duracao]
+              properties:
+                duracao:
+                  type: string
+                  enum: [1ano, 2anos, 5anos]
+                data_inicio:
+                  type: string
+                  format: date
+                  description: "YYYY-MM-DD — padrão: hoje"
+      responses:
+        '200': { description: Contrato definido com sucesso }
+        '403': { description: Apenas Desenvolvedor }
+        '404': { description: Escola não encontrada }
+    delete:
+      summary: Cancelar contrato de escola (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Contrato cancelado — campos redefinidos para NULL }
+        '403': { description: Apenas Desenvolvedor }
+        '409': { description: Escola não possui contrato }
+
+  /api/dev/escolas/{esc_id}/cursos:
+    post:
+      summary: Criar curso em escola (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cur_nome, cur_semestre]
+              properties:
+                cur_nome:     { type: string }
+                cur_semestre: { type: integer, minimum: 1 }
+      responses:
+        '201': { description: Curso criado }
+        '403': { description: Apenas Desenvolvedor }
+        '404': { description: Escola não encontrada }
+
+  /api/dev/cursos/{cur_id}:
+    put:
+      summary: Atualizar curso (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: cur_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cur_nome:     { type: string }
+                cur_semestre: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Curso atualizado }
+        '403': { description: Apenas Desenvolvedor }
+        '404': { description: Curso não encontrado }
+    delete:
+      summary: Remover curso (Dev only) [v15]
+      tags: [Dev]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: cur_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Curso removido }
+        '403': { description: Apenas Desenvolvedor }
+        '409': { description: Curso tem matrículas ativas }
 ```
