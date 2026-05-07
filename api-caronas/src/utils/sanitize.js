@@ -36,8 +36,10 @@ const HTML_ENTITIES = {
 function stripHtml(str) {
     if (typeof str !== 'string') return '';
     return str
-        .replace(/<[^>]*>/g, '')                          // remove tags
-        .replace(/&[#\w]+;/gi, m => HTML_ENTITIES[m] ?? m); // decodifica entidades conhecidas
+        .replace(/<[^>]*>/g, '')                           // remove tags HTML
+        .replace(/&[#\w]+;/gi, m => HTML_ENTITIES[m] ?? m) // decodifica entidades conhecidas
+        .replace(/\s+/g, ' ')                              // colapsa espaços múltiplos  [v16 — CODE-A07]
+        .trim();
 }
 
 module.exports = { stripHtml };

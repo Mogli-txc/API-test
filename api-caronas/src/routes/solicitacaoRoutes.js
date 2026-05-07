@@ -22,6 +22,12 @@ const authMiddleware = require('../middlewares/authMiddleware');
 router.post('/criar', authMiddleware, SolicitacaoController.solicitarCarona);
 
 /**
+ * ROTA: POST /api/solicitacoes
+ * Alias RESTful de /criar — mantém retrocompatibilidade com /criar  [v16 — REST-A01]
+ */
+router.post('/', authMiddleware, SolicitacaoController.solicitarCarona);
+
+/**
  * ROTA: GET /api/solicitacoes/pendentes
  * Descrição: Lista solicitações pendentes (sol_status=1) das caronas ativas do motorista autenticado.
  * Acesso: PROTEGIDO - Requer JWT

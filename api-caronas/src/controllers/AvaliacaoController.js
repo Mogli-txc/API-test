@@ -159,14 +159,14 @@ class AvaliacaoController {
             );
 
             return res.status(200).json({
-                message:           `Avaliações do usuário ${usu_id} listadas.`,
-                totalGeral:        parseInt(total_avaliacoes),
-                total:             avaliacoes.length,
+                message:          `Avaliações do usuário ${usu_id} listadas.`,
+                totalGeral:       parseInt(total_avaliacoes),
+                total:            avaliacoes.length,
                 page,
                 limit,
-                media_geral:       media ? parseFloat(media) : null,
-                total_avaliacoes:  parseInt(total_avaliacoes),
-                usu_id:            parseInt(usu_id),
+                media_geral:      media ? parseFloat(media) : null,
+                total_avaliacoes: parseInt(total_avaliacoes), // mantido por retrocompatibilidade — igual a totalGeral
+                usu_id:           parseInt(usu_id),
                 avaliacoes
             });
 

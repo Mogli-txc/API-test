@@ -31,23 +31,53 @@
  */
 
 const db = require('../config/database');
-const { stripHtml }      = require('../utils/sanitize');
-const { registrarAudit } = require('../utils/auditLog');
-const { DURACAO_SQL }    = require('../utils/penaltyHelper');
-const { notificar, TIPOS } = require('../utils/notificar');
+const { stripHtml }                      = require('../utils/sanitize');
+const { registrarAudit }                 = require('../utils/auditLog');
+const { DURACAO_SQL }                    = require('../utils/penaltyHelper');
+const { notificar, TIPOS }               = require('../utils/notificar');
+const { parsePagination, parseCursorPagination } = require('../utils/queryHelpers');
 
-// Calcula a data de expiração da penalidade em JS para evitar interpolação SQL
+// Mensagem padrão para Admin sem escola — evita string duplicada em 4 métodos
+const ERRO_ADMIN_SEM_ESCOLA = {
+    error: "Perfil de Administrador sem escola associada. Contate o Desenvolvedor."
+};
+
+// Lookup substitui switch — adicionar nova duração é O(1) sem alterar fluxo de controle
+const DURACAO_OFFSET = {
+    '1semana':  d => d.setDate(d.getDate() + 7),
+    '2semanas': d => d.setDate(d.getDate() + 14),
+    '1mes':     d => d.setMonth(d.getMonth() + 1),
+    '3meses':   d => d.setMonth(d.getMonth() + 3),
+    '6meses':   d => d.setMonth(d.getMonth() + 6),
+};
+
+/** Calcula expiry da penalidade em JS — evita DATE_ADD interpolado no SQL. */
 function calcularExpiraPenalidade(pen_duracao) {
+    const mutate = DURACAO_OFFSET[pen_duracao];
+    if (!mutate) return null;
     const d = new Date();
-    switch (pen_duracao) {
-        case '1semana':  d.setDate(d.getDate() + 7);   break;
-        case '2semanas': d.setDate(d.getDate() + 14);  break;
-        case '1mes':     d.setMonth(d.getMonth() + 1); break;
-        case '3meses':   d.setMonth(d.getMonth() + 3); break;
-        case '6meses':   d.setMonth(d.getMonth() + 6); break;
-        default: return null;
-    }
+    mutate(d);
     return d;
+}
+
+/**
+ * Aplica filtro de escola nos arrays de filtros/params.
+ * Admin → força escola do perfil. Dev → aceita ?esc_id= opcional.
+ * @returns {string|null} mensagem de erro se ?esc_id= inválido, null se ok
+ */
+function aplicarFiltroEscola(req, filtros, params, { per_tipo, per_escola_id }) {
+    if (per_tipo === 1) {
+        filtros.push('e.esc_id = ?');
+        params.push(per_escola_id);
+        return null;
+    }
+    if (req.query.esc_id !== undefined) {
+        const esc_id = parseInt(req.query.esc_id);
+        if (isNaN(esc_id)) return 'esc_id deve ser um número inteiro.';
+        filtros.push('e.esc_id = ?');
+        params.push(esc_id);
+    }
+    return null;
 }
 
 class AdminController {
@@ -67,7 +97,7 @@ class AdminController {
 
             // PASSO 0: Administrador sem escola associada não pode filtrar
             if (per_tipo === 1 && !per_escola_id) {
-                return res.status(403).json({ error: "Perfil de Administrador sem escola associada. Contate o Desenvolvedor." });
+                return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
             }
 
             let rows;
@@ -300,10 +330,7 @@ class AdminController {
             const { per_tipo, per_escola_id } = req.user;
 
             // PASSO 1: Paginação cursor-based ou offset
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const cursor = req.query.cursor ? parseInt(req.query.cursor) : null;
-            const page   = !cursor ? Math.max(1, parseInt(req.query.page) || 1) : null;
-            const offset = page ? (page - 1) * limit : null;
+            const { limit, cursor, page, offset } = parseCursorPagination(req);
 
             if (cursor !== null && isNaN(cursor)) {
                 return res.status(400).json({ error: "cursor deve ser um número inteiro." });
@@ -317,7 +344,17 @@ class AdminController {
             const filtros      = [];
             const filtroParams = [];
 
-            filtros.push('u.usu_status = 1');
+            // Filtro por status: padrão ativos (1); ?status=0 lista inativos para auditoria  [v17 — CODE-B05]
+            if (req.query.status !== undefined) {
+                const st = parseInt(req.query.status);
+                if (![0, 1].includes(st)) {
+                    return res.status(400).json({ error: "status deve ser 0 (inativos) ou 1 (ativos)." });
+                }
+                filtros.push('u.usu_status = ?');
+                filtroParams.push(st);
+            } else {
+                filtros.push('u.usu_status = 1');
+            }
 
             if (q) {
                 filtros.push('(u.usu_nome LIKE ? OR u.usu_email LIKE ?)');
@@ -592,9 +629,7 @@ class AdminController {
             }
 
             // PASSO 3: Paginação
-            const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const offset = (page - 1) * limit;
+            const { page, limit, offset } = parsePagination(req);
 
             // PASSO 4: Busca as penalidades — filtra por ativas se solicitado
             let whereExtra = '';
@@ -922,23 +957,14 @@ class AdminController {
             const { per_tipo, per_escola_id } = req.user;
 
             // PASSO 1: Paginação
-            const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const offset = (page - 1) * limit;
+            const { page, limit, offset } = parsePagination(req);
 
             // PASSO 2: Filtros
             const filtros = [];
             const params  = [];
 
-            if (per_tipo === 1) {
-                filtros.push('e.esc_id = ?');
-                params.push(per_escola_id);
-            } else if (req.query.esc_id !== undefined) {
-                const esc_id = parseInt(req.query.esc_id);
-                if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser um número inteiro." });
-                filtros.push('e.esc_id = ?');
-                params.push(esc_id);
-            }
+            const erroEscMat = aplicarFiltroEscola(req, filtros, params, req.user);
+            if (erroEscMat) return res.status(400).json({ error: erroEscMat });
 
             if (req.query.cur_id !== undefined) {
                 const cur_id = parseInt(req.query.cur_id);
@@ -997,11 +1023,10 @@ class AdminController {
             const { per_tipo, per_escola_id } = req.user;
 
             // PASSO 1: Paginação
-            const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const offset = (page - 1) * limit;
+            const { page, limit, offset } = parsePagination(req);
 
             // PASSO 2: Define se filtra por escola (via avaliado)
+            // Usa alias 'c' (CURSOS), não 'e' — não pode usar aplicarFiltroEscola
             const filtros = [];
             const params  = [];
 
@@ -1069,23 +1094,14 @@ class AdminController {
             const { per_tipo, per_escola_id } = req.user;
 
             // PASSO 1: Paginação
-            const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const offset = (page - 1) * limit;
+            const { page, limit, offset } = parsePagination(req);
 
             // PASSO 2: Filtros
             const filtros = [];
             const params  = [];
 
-            if (per_tipo === 1) {
-                filtros.push('e.esc_id = ?');
-                params.push(per_escola_id);
-            } else if (req.query.esc_id !== undefined) {
-                const esc_id = parseInt(req.query.esc_id);
-                if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser um número inteiro." });
-                filtros.push('e.esc_id = ?');
-                params.push(esc_id);
-            }
+            const erroEscVei = aplicarFiltroEscola(req, filtros, params, req.user);
+            if (erroEscVei) return res.status(400).json({ error: erroEscVei });
 
             if (req.query.vei_status !== undefined) {
                 const vst = parseInt(req.query.vei_status);
@@ -1149,9 +1165,7 @@ class AdminController {
             const { per_tipo, per_escola_id } = req.user;
 
             // PASSO 1: Paginação
-            const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const offset = (page - 1) * limit;
+            const { page, limit, offset } = parsePagination(req);
 
             // PASSO 2: Filtro opcional por nome
             const filtros = [];
@@ -1241,11 +1255,11 @@ class AdminController {
     }
 
     /**
-     * MÉTODO: listarCursos
-     * Lista todos os cursos com filtro opcional por escola (?esc_id=).
-     * Administrador: apenas cursos da própria escola. Desenvolvedor: todos.
-     *
-     * Query params: ?esc_id=, ?page=, ?limit=
+     * MÉTODO: relatorioAtividade
+     * Retorna resumo de caronas, novos usuários e avaliações em um período.
+     * Administrador filtra por escola; Desenvolvedor vê dados globais.
+     * Query: ?dias= (1–365, padrão 30)
+     * [v17 — CODE-B04]
      */
     async relatorioAtividade(req, res) {
         try {
@@ -1260,48 +1274,52 @@ class AdminController {
 
             const esc_id = req.user.per_tipo === 1 ? req.user.per_escola_id : null;
 
-            // PASSO 1: Caronas no período filtradas por car_data (1=aberta,2=em espera,0=cancelada,3=finalizada)
-            const caronasWhere = esc_id
+            // PASSO 1: Caronas no período filtradas por car_data.
+            // Usa ? para esc_id em vez de db.escape() — mantém padrão paramétrico uniforme.  [v17 — CODE-B02]
+            const caronasJoin = esc_id
                 ? `INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                    INNER JOIN CURSOS_USUARIOS cu ON v.usu_id = cu.usu_id
                    INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id
-                   WHERE cr.esc_id = ${db.escape(esc_id)} AND c.car_data >= ?`
+                   WHERE cr.esc_id = ? AND c.car_data >= ?`
                 : `WHERE c.car_data >= ?`;
+            const caronasParams = esc_id ? [esc_id, inicioStr] : [inicioStr];
 
             const [[caronas]] = await db.query(
                 `SELECT COUNT(*) AS total,
                         SUM(c.car_status = 3) AS finalizadas,
                         SUM(c.car_status = 0) AS canceladas,
                         SUM(c.car_status = 1) AS abertas
-                 FROM CARONAS c ${caronasWhere}`,
-                [inicioStr]
+                 FROM CARONAS c ${caronasJoin}`,
+                caronasParams
             );
 
             // PASSO 2: Usuários novos no período
-            const usuariosWhere = esc_id
+            const usuariosJoin = esc_id
                 ? `INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id
                    INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
                    INNER JOIN USUARIOS_REGISTROS ur ON u.usu_id = ur.usu_id
-                   WHERE c.esc_id = ${db.escape(esc_id)} AND u.usu_status = 1 AND ur.usu_criado_em >= ?`
+                   WHERE c.esc_id = ? AND u.usu_status = 1 AND ur.usu_criado_em >= ?`
                 : `INNER JOIN USUARIOS_REGISTROS ur ON u.usu_id = ur.usu_id
                    WHERE u.usu_status = 1 AND ur.usu_criado_em >= ?`;
+            const usuariosParams = esc_id ? [esc_id, inicioStr] : [inicioStr];
 
             const [[usuarios]] = await db.query(
-                `SELECT COUNT(DISTINCT u.usu_id) AS novos FROM USUARIOS u ${usuariosWhere}`,
-                [inicioStr]
+                `SELECT COUNT(DISTINCT u.usu_id) AS novos FROM USUARIOS u ${usuariosJoin}`,
+                usuariosParams
             );
 
             // PASSO 3: Avaliações no período
-            const avaliacoesWhere = esc_id
+            const avaliacoesJoin = esc_id
                 ? `INNER JOIN CURSOS_USUARIOS cu ON a.usu_id_avaliado = cu.usu_id
                    INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
-                   WHERE c.esc_id = ${db.escape(esc_id)} AND a.ava_criado_em >= ?`
+                   WHERE c.esc_id = ? AND a.ava_criado_em >= ?`
                 : `WHERE a.ava_criado_em >= ?`;
+            const avaliacoesParams = esc_id ? [esc_id, inicioStr] : [inicioStr];
 
             const [[avaliacoes]] = await db.query(
                 `SELECT COUNT(*) AS total, ROUND(AVG(ava_nota), 2) AS media
-                 FROM AVALIACOES a ${avaliacoesWhere}`,
-                [inicioStr]
+                 FROM AVALIACOES a ${avaliacoesJoin}`,
+                avaliacoesParams
             );
 
             return res.status(200).json({
@@ -1317,21 +1335,24 @@ class AdminController {
         }
     }
 
+    /**
+     * MÉTODO: listarCursos
+     * Lista todos os cursos com filtro opcional por escola (?esc_id=).
+     * Administrador: apenas cursos da própria escola. Desenvolvedor: todos.
+     * Query params: ?esc_id=, ?page=, ?limit=
+     */
     async listarCursos(req, res) {
         try {
-            const { per_tipo, per_escola_id } = req.user;
-
-            const page   = Math.max(1, parseInt(req.query.page)  || 1);
-            const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const offset = (page - 1) * limit;
+            const { page, limit, offset } = parsePagination(req);
 
             const filtros = [];
             const params  = [];
 
             // Administrador restrito à própria escola
-            if (per_tipo === 1) {
+            // Usa alias 'c' (CURSOS) em vez de 'e' — não pode usar aplicarFiltroEscola
+            if (req.user.per_tipo === 1) {
                 filtros.push('c.esc_id = ?');
-                params.push(per_escola_id);
+                params.push(req.user.per_escola_id);
             } else if (req.query.esc_id !== undefined) {
                 const esc_id = parseInt(req.query.esc_id);
                 if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser inteiro." });

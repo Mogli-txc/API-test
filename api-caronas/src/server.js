@@ -17,6 +17,18 @@
  * - /api/documentos   → Comprovante de matrícula e CNH (validação automática)
  */
 
+// Guard de variáveis de ambiente obrigatórias  [v16 — CODE-A06]
+// Encerra o processo imediatamente se alguma variável crítica estiver ausente,
+// evitando falhas silenciosas na primeira requisição de autenticação.
+require('dotenv').config();
+const REQUIRED_ENV = ['JWT_SECRET', 'REFRESH_SECRET', 'OTP_SECRET', 'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
+const missingEnv   = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length > 0) {
+    console.error(`[FATAL] Variáveis de ambiente obrigatórias ausentes: ${missingEnv.join(', ')}`);
+    console.error('[FATAL] Crie o arquivo .env com todas as variáveis listadas no README.');
+    process.exit(1);
+}
+
 // Importação das dependências externas
 const http      = require('http');
 const express   = require('express');
@@ -24,7 +36,6 @@ const cors      = require('cors');
 const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { Server: SocketIOServer } = require('socket.io');
-require('dotenv').config(); // Carrega variáveis de ambiente do arquivo .env
 
 const { registrarMensagensSocket } = require('./sockets/mensagensSocket');
 const { setIo }                    = require('./sockets/io');

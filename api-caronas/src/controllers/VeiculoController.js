@@ -88,13 +88,41 @@ class VeiculoController {
                 [usu_id, placa_limpa, marca_limpa, tipoNum, cor_limpa, vagasNum]
             );
 
-            // PASSO 6: Promove usuário temporário sem veículo (5) para temporário com veículo (6)
-            // Mantém o usu_verificacao_expira original (os 5 dias contam da verificação do email)
-            await db.query(
-                `UPDATE USUARIOS SET usu_verificacao = 6
-                 WHERE usu_id = ? AND usu_verificacao = 5`,
+            // PASSO 6: Promove nível de verificação do usuário  [v16 — CODE-A03]
+            //   Nível 5 → 6: temporário sem veículo passa a ter veículo (5 dias)
+            //   Nível 1 + CNH aprovada → 2: matrícula verificada + CNH + novo veículo = completo
+            const [cnhAprovada] = await db.query(
+                `SELECT doc_id FROM DOCUMENTOS_VERIFICACAO
+                 WHERE usu_id = ? AND doc_tipo = 1 AND doc_status = 0
+                 LIMIT 1`,
                 [usu_id]
             );
+
+            if (cnhAprovada.length > 0) {
+                // CNH já aprovada e agora tem veículo: promove 1→2 renovando prazo semestral
+                const novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+                await db.query(
+                    `UPDATE USUARIOS
+                     SET usu_verificacao = CASE
+                         WHEN usu_verificacao = 5 THEN 6
+                         WHEN usu_verificacao = 1 THEN 2
+                         ELSE usu_verificacao
+                     END,
+                     usu_verificacao_expira = CASE
+                         WHEN usu_verificacao = 1 THEN ?
+                         ELSE usu_verificacao_expira
+                     END
+                     WHERE usu_id = ?`,
+                    [novaExpira, usu_id]
+                );
+            } else {
+                // Sem CNH aprovada: apenas sobe 5→6 (temporário com veículo)
+                await db.query(
+                    `UPDATE USUARIOS SET usu_verificacao = 6
+                     WHERE usu_id = ? AND usu_verificacao = 5`,
+                    [usu_id]
+                );
+            }
 
             await registrarAudit({
                 tabela: 'VEICULOS', registroId: resultado.insertId,

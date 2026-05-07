@@ -36,7 +36,7 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.6.0
+  version: 1.7.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -1872,6 +1872,28 @@ paths:
   # ────────────────────────────────────────────────────────────────────────────
   # SOLICITAÇÕES — /api/solicitacoes
   # ────────────────────────────────────────────────────────────────────────────
+  /api/solicitacoes:
+    post:
+      tags: [Solicitações]
+      summary: Solicitar participação em carona (alias RESTful) [v16 — REST-A01]
+      description: Alias RESTful de `/api/solicitacoes/criar`. Comportamento idêntico.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [car_id, sol_vaga_soli]
+              properties:
+                car_id:        { type: integer }
+                sol_vaga_soli: { type: integer, minimum: 1, maximum: 4 }
+      responses:
+        '201': { description: Solicitação criada }
+        '403': { description: Sem permissão, nível de verificação inválido ou penalidade ativa }
+        '404': { description: Carona não encontrada }
+        '409': { description: Solicitação já existe ou vagas insuficientes }
+
   /api/solicitacoes/criar:
     post:
       tags: [Solicitações]
@@ -4231,10 +4253,11 @@ paths:
   /api/caronas/{car_id}/resumo:
     get:
       tags: [Caronas]
-      summary: Resumo completo da carona em uma chamada [v14 — ENR-03]
+      summary: Resumo completo da carona em uma chamada [v14/v16 — ENR-03]
       description: |
-        Retorna dados da carona + pontos de encontro + passageiros confirmados + avaliações (se finalizada).
-        Reduz round-trips do cliente mobile — substitui 4 chamadas separadas por uma só.
+        Retorna dados da carona + pontos de encontro + passageiros confirmados + avaliações (se finalizada)
+        + `minha_solicitacao` do usuário autenticado [v16 — REST-A02].
+        Reduz round-trips do cliente mobile — substitui 5 chamadas separadas por uma só.
       security:
         - bearerAuth: []
       parameters:
@@ -4276,8 +4299,57 @@ paths:
                     description: Preenchido apenas se car_status = 3 (Finalizada)
                     items:
                       $ref: '#/components/schemas/Avaliacao'
+                  minha_solicitacao:
+                    description: "Solicitação ativa do usuário autenticado (sol_status 1 ou 2). NULL se não existe. [v16 — REST-A02]"
+                    nullable: true
+                    type: object
+                    properties:
+                      sol_id:        { type: integer }
+                      sol_status:    { type: integer, enum: [1, 2] }
+                      sol_vaga_soli: { type: integer }
         '404':
           description: Carona não encontrada
+
+  /api/caronas/{car_id}/vagas:
+    patch:
+      tags: [Caronas]
+      summary: Ajuste manual de vagas disponíveis [v16 — REST-A03]
+      description: |
+        Motorista ajusta `car_vagas_dispo` manualmente (ex: passageiro desistiu sem cancelar).
+        Bloqueia se o novo valor for menor que passageiros já aceitos (`sol_status = 2`).
+        Só opera em caronas com `car_status IN (1, 2)`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: car_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [car_vagas_dispo]
+              properties:
+                car_vagas_dispo:
+                  type: integer
+                  minimum: 0
+                  maximum: 6
+                  example: 2
+      responses:
+        '200':
+          description: Vagas atualizadas
+          content:
+            application/json:
+              example:
+                message: "Vagas atualizadas."
+                car_vagas_dispo: 2
+        '400': { description: car_vagas_dispo inválido (fora do intervalo 0-6) }
+        '403': { description: Sem permissão — apenas o motorista da carona }
+        '404': { description: Carona não encontrada }
+        '409': { description: Novo valor abaixo das vagas já ocupadas por passageiros aceitos }
 
   /api/solicitacoes/pendentes:
     get:

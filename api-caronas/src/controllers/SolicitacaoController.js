@@ -9,8 +9,8 @@
  */
 
 const db = require('../config/database'); // Pool de conexão MySQL
-const { getMotoristaId }           = require('../utils/authHelper');
-const { checkPenalidade }          = require('../utils/penaltyHelper');
+const { getMotoristaId, checkAdminOrOwner } = require('../utils/authHelper');
+const { checkPenalidade }                   = require('../utils/penaltyHelper');
 const { enqueue: enqueueEmail }    = require('../utils/emailQueue');
 const { registrarAudit }           = require('../utils/auditLog');
 const { notificar, TIPOS }         = require('../utils/notificar');
@@ -90,19 +90,18 @@ class SolicitacaoController {
             }
 
             // REGRA DE NEGÓCIO: Motorista não pode solicitar a própria carona
-            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
-            const [motorista] = await db.query(
-                `SELECT v.usu_id FROM CARONAS c
+            // Verificado antes da transação — mensagem específica tem precedência sobre "em andamento"
+            const [caronaMeta] = await db.query(
+                `SELECT v.usu_id AS usu_id_motorista FROM CARONAS c
                  INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
-            if (motorista.length > 0 && motorista[0].usu_id === usu_id) {
+            if (caronaMeta.length > 0 && caronaMeta[0].usu_id_motorista === usu_id) {
                 return res.status(403).json({ error: "Você não pode solicitar a sua própria carona." });
             }
 
             // REGRA DE NEGÓCIO: Não é possível solicitar carona enquanto tiver uma carona em andamento como motorista
-            // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [caronaAtiva] = await db.query(
                 `SELECT c.car_id FROM CARONAS c
                  INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
@@ -114,7 +113,6 @@ class SolicitacaoController {
             }
 
             // REGRA DE NEGÓCIO: Usuário não pode ser vinculado a mais de uma carona ao mesmo tempo
-            // Vinculado = solicitação aceita (sol_status = 2) em carona ainda ativa (car_status IN (1, 2))
             const [jaVinculado] = await db.query(
                 `SELECT s.sol_id FROM SOLICITACOES_CARONA s
                  INNER JOIN CARONAS c ON s.car_id = c.car_id
@@ -125,55 +123,63 @@ class SolicitacaoController {
                 return res.status(403).json({ error: "Você já está vinculado a uma carona ativa. Cancele ou aguarde a finalização antes de solicitar outra." });
             }
 
-            // Verifica as vagas disponíveis da carona e o tipo do veículo
-            // CAST garante retorno numérico — vei_tipo BIT(1) é devolvido como Buffer pelo mysql2
-            const [carona] = await db.query(
-                `SELECT c.car_vagas_dispo, CAST(v.vei_tipo AS UNSIGNED) AS vei_tipo
-                 FROM CARONAS c
-                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
-                 WHERE c.car_id = ? AND c.car_status = 1`,
-                [car_id]
-            );
-
-            if (carona.length === 0) {
-                return res.status(404).json({ error: "Carona não encontrada ou não está aberta." });
-            }
-
-            // Moto (vei_tipo=0): aceita no máximo 1 passageiro por corrida
-            if (carona[0].vei_tipo === 0 && sol_vaga_soli > 1) {
-                return res.status(400).json({ error: "Corridas de moto permitem no máximo 1 passageiro." });
-            }
-
-            // Número de vagas solicitadas não pode ultrapassar as vagas remanescentes (máx 4 para carro)
-            if (sol_vaga_soli > carona[0].car_vagas_dispo) {
-                return res.status(409).json({
-                    error: `Apenas ${carona[0].car_vagas_dispo} vaga(s) disponível(is) nesta carona.`
-                });
-            }
-
-            // Verifica duplicidade e insere em transação atômica para eliminar race condition:
-            // dois requests simultâneos poderiam passar o SELECT e ambos fazer o INSERT.
-            const conn = await db.getConnection();
+            // PASSO: Abre transação com FOR UPDATE — elimina race condition de overbooking  [v16 — CODE-A01]
+            // Todos os SELECTs críticos (vagas, duplicidade, motorista) são feitos DENTRO da transação
+            // com bloqueio de linha para impedir dois requests simultâneos de ultrapassar a capacidade.
+            let conn;
             let resultado;
+            let motoristaId;
             try {
+                conn = await db.getConnection();
                 await conn.beginTransaction();
 
-                // Verifica se o passageiro já tem uma solicitação ativa para essa carona
-                // sol_status 1 (Enviado) ou 2 (Aceito) = solicitação ativa
+                // FOR UPDATE bloqueia a linha da carona — impede leitura concorrente de vagas desatualizado
+                const [carona] = await conn.query(
+                    `SELECT c.car_vagas_dispo, c.car_status,
+                            CAST(v.vei_tipo AS UNSIGNED) AS vei_tipo,
+                            v.usu_id AS usu_id_motorista
+                     FROM CARONAS c
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     WHERE c.car_id = ? AND c.car_status = 1
+                     FOR UPDATE`,
+                    [car_id]
+                );
+
+                if (carona.length === 0) {
+                    await conn.rollback();
+                    return res.status(404).json({ error: "Carona não encontrada ou não está aberta." });
+                }
+
+                motoristaId = carona[0].usu_id_motorista;
+
+                if (motoristaId === usu_id) {
+                    await conn.rollback();
+                    return res.status(403).json({ error: "Você não pode solicitar a sua própria carona." });
+                }
+
+                if (carona[0].vei_tipo === 0 && sol_vaga_soli > 1) {
+                    await conn.rollback();
+                    return res.status(400).json({ error: "Corridas de moto permitem no máximo 1 passageiro." });
+                }
+
+                if (sol_vaga_soli > carona[0].car_vagas_dispo) {
+                    await conn.rollback();
+                    return res.status(409).json({
+                        error: `Apenas ${carona[0].car_vagas_dispo} vaga(s) disponível(is) nesta carona.`
+                    });
+                }
+
+                // Verifica duplicidade dentro da transação — evita INSERT duplo concorrente
                 const [jaExiste] = await conn.query(
                     `SELECT sol_id FROM SOLICITACOES_CARONA
                      WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status IN (1, 2)`,
                     [car_id, usu_id]
                 );
-
                 if (jaExiste.length > 0) {
                     await conn.rollback();
-                    return res.status(409).json({
-                        error: "Você já tem uma solicitação ativa para esta carona."
-                    });
+                    return res.status(409).json({ error: "Você já tem uma solicitação ativa para esta carona." });
                 }
 
-                // Insere a solicitação com status 1 (Enviado) — usu_id vem sempre do token JWT
                 [resultado] = await conn.query(
                     `INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli)
                      VALUES (?, ?, 1, ?)`,
@@ -182,20 +188,20 @@ class SolicitacaoController {
 
                 await conn.commit();
             } catch (err) {
-                await conn.rollback();
+                if (conn) await conn.rollback();
                 throw err;
             } finally {
-                conn.release();
+                if (conn) conn.release();
             }
 
-                // PASSO 4: Notifica o motorista sobre a nova solicitação (fire-and-forget)
-                notificar({
-                    usu_id:   motorista[0].usu_id,
-                    tipo:     TIPOS.SOLICITACAO_NOVA,
-                    titulo:   'Nova solicitação de carona',
-                    mensagem: `Um passageiro solicitou ${sol_vaga_soli} vaga(s) na sua carona.`,
-                    dados:    { car_id: parseInt(car_id), sol_id: resultado.insertId }
-                }).catch(() => {});
+            // Notifica o motorista (fire-and-forget — fora da transação)
+            notificar({
+                usu_id:   motoristaId,
+                tipo:     TIPOS.SOLICITACAO_NOVA,
+                titulo:   'Nova solicitação de carona',
+                mensagem: `Um passageiro solicitou ${sol_vaga_soli} vaga(s) na sua carona.`,
+                dados:    { car_id: parseInt(car_id), sol_id: resultado.insertId }
+            }).catch(() => {});
 
             return res.status(201).json({
                 message: "Solicitação de carona criada com sucesso!",
@@ -355,15 +361,9 @@ class SolicitacaoController {
             }
 
             // Usuário comum só pode ver as próprias solicitações; Admin e Dev podem ver de qualquer usuário
-            if (req.user.id !== parseInt(usu_id)) {
-                const [perfil] = await db.query(
-                    'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
-                    [req.user.id]
-                );
-                const isAdminOuDev = perfil.length > 0 && perfil[0].per_tipo >= 1;
-                if (!isAdminOuDev) {
-                    return res.status(403).json({ error: "Sem permissão para visualizar solicitações deste usuário." });
-                }
+            // Usa checkAdminOrOwner para evitar duplicação da lógica de RBAC  [v16 — CODE-A02]
+            if (!await checkAdminOrOwner(req.user.id, usu_id)) {
+                return res.status(403).json({ error: "Sem permissão para visualizar solicitações deste usuário." });
             }
 
             const page   = Math.max(1, parseInt(req.query.page)  || 1);

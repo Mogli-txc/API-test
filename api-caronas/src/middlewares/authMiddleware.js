@@ -36,6 +36,12 @@ module.exports = (req, res, next) => {
         req.user = decoded; // Disponibiliza id e email do usuário para os controllers
         next();
     } catch (err) {
-        return res.status(401).json({ error: 'Token inválido ou expirado.' });
+        // Distingue token expirado de token adulterado/inválido  [v16 — CODE-A04]
+        // O cliente mobile usa 'code' para decidir se aciona /refresh (TOKEN_EXPIRED)
+        // ou exige novo login (TOKEN_INVALID).
+        if (err.name === 'TokenExpiredError') {
+            return res.status(401).json({ error: 'Token expirado.', code: 'TOKEN_EXPIRED' });
+        }
+        return res.status(401).json({ error: 'Token inválido.', code: 'TOKEN_INVALID' });
     }
 };

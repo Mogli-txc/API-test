@@ -152,7 +152,8 @@ CREATE TABLE PERFIL (
     per_tipo       TINYINT      NOT NULL               COMMENT '0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)',
     per_habilitado TINYINT      NOT NULL               COMMENT '0=Não habilitado, 1=Habilitado',
     per_escola_id  INT                                 COMMENT 'Escola do Administrador (FK, NULL para Usuário e Desenvolvedor)',
-    PRIMARY KEY (per_id)
+    PRIMARY KEY (per_id),
+    UNIQUE KEY UQ_perfil_usu_id (usu_id)              -- garante relação 1:1 com USUARIOS — impede perfil duplicado  [v16 — DB-A01]
 ) ENGINE = InnoDB;
 
 
@@ -185,7 +186,9 @@ CREATE TABLE SUGESTAO_DENUNCIA (
     sug_id_resposta INT                                 COMMENT 'Usuário que respondeu (FK, NULL)',
     sug_resposta    VARCHAR(255)                        COMMENT 'Resposta da sugestão (NULL)',
     sug_deletado_em DATETIME                            COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
-    PRIMARY KEY (sug_id)
+    PRIMARY KEY (sug_id),
+    INDEX idx_sug_status      (sug_status),            -- filtro por status nas listagens Admin  [v16 — DB-A06]
+    INDEX idx_sug_deletado_em (sug_deletado_em)        -- filtro de soft-delete  [v16 — DB-A06]
 ) ENGINE = InnoDB;
 
 
@@ -206,7 +209,8 @@ CREATE TABLE VEICULOS (
     vei_atualizado_em DATETIME                            COMMENT 'Data de Atualização (NULL)',
     vei_apagado_em    DATETIME                            COMMENT 'Soft delete — data de remoção lógica (NULL = ativo)',
     PRIMARY KEY (vei_id),
-    UNIQUE KEY UQ_vei_placa (vei_placa)                  -- Impede cadastro de placa duplicada  [v9]
+    UNIQUE KEY UQ_vei_placa  (vei_placa),                -- Impede cadastro de placa duplicada  [v9]
+    INDEX idx_vei_usu_id     (usu_id)                   -- busca de veículos por proprietário (JOIN central em vários controllers)  [v16 — DB-A04]
 ) ENGINE = InnoDB;
 
 
@@ -513,6 +517,9 @@ ALTER TABLE MENSAGENS
         ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- SOLICITACOES_CARONA → USUARIOS e CARONAS
+-- DECISÃO DE DESIGN [v16 — DB-A05]: ON DELETE RESTRICT em usu_id_passageiro é intencional.
+-- Hard-delete de USUARIOS não é suportado — use exclusivamente soft-delete (usu_status=0,
+-- usu_deletado_em=NOW()). Isso preserva o histórico de solicitações e rastreabilidade de auditoria.
 ALTER TABLE SOLICITACOES_CARONA
     ADD CONSTRAINT FK_SolicitacoesCarona_Passageiro
         FOREIGN KEY (usu_id_passageiro) REFERENCES USUARIOS (usu_id)
@@ -604,3 +611,49 @@ ALTER TABLE NOTIFICACOES
         ON DELETE SET NULL ON UPDATE CASCADE;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- =====================================================
+-- CHECK Constraints (MySQL 8.0.16+)  [v16 — DB-A03]
+-- Garante integridade de valores via banco, independente da camada de aplicação.
+-- =====================================================
+ALTER TABLE AVALIACOES
+    ADD CONSTRAINT chk_ava_nota
+        CHECK (ava_nota BETWEEN 1 AND 5);
+
+ALTER TABLE SOLICITACOES_CARONA
+    ADD CONSTRAINT chk_sol_vaga_soli
+        CHECK (sol_vaga_soli BETWEEN 1 AND 4);
+
+ALTER TABLE CARONAS
+    ADD CONSTRAINT chk_car_vagas_dispo
+        CHECK (car_vagas_dispo BETWEEN 0 AND 6),
+    ADD CONSTRAINT chk_car_status
+        CHECK (car_status IN (0, 1, 2, 3));
+
+ALTER TABLE VEICULOS
+    ADD CONSTRAINT chk_vei_tipo
+        CHECK (vei_tipo IN (0, 1)),
+    ADD CONSTRAINT chk_vei_vagas
+        CHECK (vei_vagas BETWEEN 1 AND 4);
+
+ALTER TABLE PENALIDADES
+    ADD CONSTRAINT chk_pen_tipo
+        CHECK (pen_tipo IN (1, 2, 3, 4));
+
+-- =====================================================
+-- Charset utf8mb4 uniforme em todas as tabelas  [v16 — DB-A02]
+-- Previne ER_TRUNCATED_WRONG_VALUE para emojis e caracteres fora do BMP.
+-- =====================================================
+ALTER TABLE ESCOLAS           CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE CURSOS            CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE USUARIOS          CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE USUARIOS_REGISTROS CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE PERFIL            CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE CURSOS_USUARIOS   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE VEICULOS          CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE CARONAS           CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE PONTO_ENCONTROS   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE SOLICITACOES_CARONA CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE CARONA_PESSOAS    CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE MENSAGENS         CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE SUGESTAO_DENUNCIA CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

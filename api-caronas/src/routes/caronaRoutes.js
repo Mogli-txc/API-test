@@ -63,6 +63,15 @@ router.get('/buscar', authMiddleware, CaronaController.buscar);
 router.get('/:car_id/resumo', authMiddleware, CaronaController.resumo);
 
 /**
+ * ROTA: PATCH /api/caronas/:car_id/vagas
+ * Descrição: Motorista ajusta manualmente car_vagas_dispo (ex: passageiro desistiu sem cancelar)
+ * Acesso: PROTEGIDO - Apenas o motorista da carona
+ * Body: { car_vagas_dispo: 0-6 }
+ * [v16 — REST-A03]
+ */
+router.patch('/:car_id/vagas', authMiddleware, CaronaController.ajustarVagas);
+
+/**
  * ROTA: GET /api/caronas/:car_id
  * Descrição: Recupera detalhes de uma carona específica
  * Acesso: PROTEGIDO - Requer autenticação

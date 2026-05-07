@@ -22,7 +22,7 @@ API REST para sistema de compartilhamento de caronas entre alunos de instituiç�
 | pdf-to-img          | Renderização de página PDF como PNG para o Tesseract         |
 | socket.io           | WebSocket para mensagens em tempo real                       |
 | nodemailer          | Envio de e-mail (OTP, reset de senha)                        |
-| jest + supertest    | Testes (18 suites — 2026-05-06)                              |
+| jest + supertest    | Testes (19 suites, 505 testes — 2026-05-07 v17)              |
 | fetch (Node nativo) | Requisições HTTP ao Nominatim (geocodificação OpenStreetMap) |
 
 ---
@@ -68,9 +68,6 @@ mysql -u usuario -p caronas_db < infosdatabase/create.sql
 
 # Popular com dados de desenvolvimento
 mysql -u usuario -p caronas_db < infosdatabase/insert.sql
-
-# Bancos existentes: aplicar migration v11 (contratos)
-# Descomentar e executar o bloco ALTER TABLE no topo de insert.sql
 ```
 
 ### Instalação e execução
@@ -90,7 +87,7 @@ cd api-caronas
 NODE_ENV=test npx jest --forceExit
 ```
 
-> **18 suites, 494 testes** (última atualização: 2026-05-06).
+> **19 suites, 505 testes** (última atualização: 2026-05-07).
 
 ---
 
@@ -102,9 +99,9 @@ A maioria das rotas exige o header:
 Authorization: Bearer <access_token>
 ```
 
-O `access_token` é obtido no login e válido por **24 horas**. Quando expirar, use `/api/usuarios/refresh` com o `refresh_token` (válido por **30 dias**, rotacionado a cada uso).
+O `access_token` é obtido no login e válido por **24 horas**. Quando expirar, use `/api/usuarios/refresh` com o `refresh_token` (válido por **30 dias**, rotacionado a cada uso). Quando o token expirar, a API retorna `{ code: "TOKEN_EXPIRED" }` — o cliente mobile usa esse código para acionar `/refresh` automaticamente antes de repetir a requisição.
 
-### Papéis de acesso
+### Papéis de acesso (RBAC)
 
 | `per_tipo` | Papel         | Permissões                                     |
 |------------|---------------|------------------------------------------------|
@@ -114,7 +111,7 @@ O `access_token` é obtido no login e válido por **24 horas**. Quando expirar, 
 
 Administradores e Desenvolvedores são criados exclusivamente via `POST /api/dev/cadastrar` (requer Dev autenticado). Não passam pelo fluxo de OTP — conta nasce verificada e habilitada.
 
-### Bloqueio por contrato de escola [v11]
+### Bloqueio por contrato de escola
 
 Se o contrato de uma escola expirar, **todos os usuários vinculados** (por domínio de e-mail ou `per_escola_id`) são bloqueados no login e na renovação de token até que um Desenvolvedor renove o contrato via `POST /api/dev/escolas/:esc_id/contrato`.
 
@@ -134,28 +131,29 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | POST   | `/login`           | —    | Autentica e retorna `access_token` + `refresh_token`        |
 | POST   | `/refresh`         | —    | Troca refresh token válido por novo par de tokens           |
 | POST   | `/logout`          | JWT  | Invalida o refresh token server-side                        |
-| GET    | `/me`              | JWT  | Perfil do próprio usuário autenticado (sem precisar de `:id`) [v14]             |
+| GET    | `/me`              | JWT  | Perfil do próprio usuário autenticado                       |
 | GET    | `/perfil/:id`      | JWT  | Dados do perfil (inclui `usu_verificacao`, `per_tipo`)      |
-| PUT    | `/:id`             | JWT  | Atualiza dados do próprio usuário (nome, e-mail, senha, telefone)               |
+| PUT    | `/:id`             | JWT  | Atualiza dados do próprio usuário (nome, e-mail, senha, telefone) |
 | PUT    | `/:id/endereco`    | JWT  | Atualiza endereço e regeocodifica via Nominatim             |
 | PUT    | `/:id/foto`        | JWT  | Atualiza foto de perfil (multipart/form-data, campo `foto`) |
 | DELETE | `/:id`             | JWT  | Soft-delete da conta                                        |
-| GET    | `/:id/penalidades` | JWT  | Penalidades ativas do próprio usuário (sem acesso Admin) [v14]                  |
-| GET    | `/:id/reputacao`   | JWT  | Reputação: média de avaliações, total de caronas, ranking global [v15]          |
-| GET    | `/:id/exportar`    | JWT  | Exportação de dados pessoais em JSON — portabilidade LGPD Art. 18 [v15]         |
+| GET    | `/:id/penalidades` | JWT  | Penalidades ativas do próprio usuário                       |
+| GET    | `/:id/reputacao`   | JWT  | Reputação: média de avaliações, total de caronas e ranking  |
+| GET    | `/:id/exportar`    | JWT  | Exportação de dados pessoais em JSON — portabilidade LGPD   |
 
 ### Caronas — `/api/caronas`
 
 | Método | Rota                  | Auth | Descrição                                                                        |
 |--------|-----------------------|------|----------------------------------------------------------------------------------|
 | GET    | `/`                   | JWT  | Lista caronas abertas (paginação cursor: `?cursor=<car_id>&limit=<n>`)           |
-| GET    | `/buscar`             | JWT  | Busca com filtros: `?car_status=`, `?data=YYYY-MM-DD`, `?esc_id=`, `?cur_id=`, `?page=`, `?limit=` |
-| GET    | `/minhas`             | JWT  | Lista caronas do motorista autenticado (`?status=` opcional)                      |
-| GET    | `/:car_id/resumo`     | JWT  | Resumo completo: pontos, passageiros, avaliações em uma chamada [v14 — ENR-03]   |
+| GET    | `/buscar`             | JWT  | Busca com filtros: `?car_status=`, `?data=YYYY-MM-DD`, `?esc_id=`, `?cur_id=`   |
+| GET    | `/minhas`             | JWT  | Lista caronas do motorista autenticado (`?status=` opcional)                     |
 | GET    | `/passageiro`         | JWT  | Lista caronas onde o usuário é passageiro confirmado (`?status=` opcional)       |
-| POST   | `/oferecer`           | JWT  | Cria nova carona                                                                 |
 | GET    | `/:car_id`            | JWT  | Detalhes de uma carona                                                           |
+| GET    | `/:car_id/resumo`     | JWT  | Resumo completo: pontos, passageiros, avaliações e solicitação do usuário        |
+| POST   | `/oferecer`           | JWT  | Cria nova carona                                                                 |
 | PUT    | `/:car_id`            | JWT  | Atualiza carona (apenas o motorista; bloqueado se cancelada/finalizada)          |
+| PATCH  | `/:car_id/vagas`      | JWT  | Ajuste manual de vagas disponíveis — bloqueado se abaixo dos aceitos             |
 | POST   | `/:car_id/finalizar`  | JWT  | Finaliza uma carona (`car_status = 3`) — exclusivo para o motorista              |
 | DELETE | `/:car_id`            | JWT  | Cancela carona e solicitações ativas (apenas o motorista)                        |
 
@@ -167,8 +165,9 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 
 | Método | Rota                 | Auth | Descrição                                    |
 |--------|----------------------|------|----------------------------------------------|
-| POST   | `/criar`             | JWT  | Passageiro solicita vaga em uma carona       |
-| GET    | `/pendentes`         | JWT  | Solicitações pendentes das caronas do motorista autenticado [v14 — ENR-05] |
+| POST   | `/`                  | JWT  | Passageiro solicita vaga                     |
+| POST   | `/criar`             | JWT  | Passageiro solicita vaga (rota legada)       |
+| GET    | `/pendentes`         | JWT  | Solicitações pendentes das caronas do motorista autenticado |
 | GET    | `/:sol_id`           | JWT  | Detalhes de uma solicitação                  |
 | GET    | `/carona/:car_id`    | JWT  | Lista solicitações de uma carona (motorista) |
 | GET    | `/usuario/:usu_id`   | JWT  | Lista solicitações feitas pelo usuário       |
@@ -209,18 +208,6 @@ Regras: apenas participantes confirmados podem avaliar; nota de 1–5; um avalia
 
 Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no handshake.
 
-#### WebSocket — Canal de Notificações
-
-Conecte-se ao namespace `/notificacoes` com o mesmo JWT:
-```js
-const io = require('socket.io-client');
-const socket = io('http://localhost:3000/notificacoes', {
-    auth: { token: '<access_token>' }
-});
-socket.on('nova_notificacao', (notif) => console.log(notif));
-socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
-```
-
 | Evento cliente → servidor | Payload                                                        | Descrição               |
 |---------------------------|----------------------------------------------------------------|-------------------------|
 | `entrar_carona`           | `{ car_id }`                                                   | Entra na sala da carona |
@@ -233,25 +220,37 @@ socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
 | `entrou_carona`           | `{ car_id }`                                                                            | Confirmação de entrada          |
 | `erro`                    | `{ message }`                                                                           | Erro de validação               |
 
+#### WebSocket — Canal de Notificações
+
+Conecte-se ao namespace `/notificacoes` com o mesmo JWT:
+
+```js
+const socket = io('http://localhost:3000/notificacoes', {
+    auth: { token: '<access_token>' }
+});
+socket.on('nova_notificacao', (notif) => console.log(notif));
+socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
+```
+
 ### Notificações — `/api/notificacoes`
 
-| Método | Rota                      | Acesso    | Descrição                           |
-|--------|---------------------------|-----------|-------------------------------------|
-| GET    | `/api/notificacoes`       | JWT       | Lista notificações (`?lida=0/1`)   |
-| GET    | `/api/notificacoes/nao-lidas` | JWT   | Contagem de não lidas (badge)      |
-| PATCH  | `/api/notificacoes/ler-todas` | JWT   | Marca todas como lidas             |
-| PATCH  | `/api/notificacoes/:id/ler` | JWT     | Marca uma notificação como lida    |
-| POST   | `/api/notificacoes/enviar` | ADMIN/DEV | Envia notificação manual           |
-| DELETE | `/api/notificacoes/:id`   | JWT       | Deleta notificação própria         |
+| Método | Rota              | Acesso    | Descrição                           |
+|--------|-------------------|-----------|-------------------------------------|
+| GET    | `/`               | JWT       | Lista notificações (`?lida=0/1`)    |
+| GET    | `/nao-lidas`      | JWT       | Contagem de não lidas (badge)       |
+| PATCH  | `/ler-todas`      | JWT       | Marca todas como lidas              |
+| PATCH  | `/:id/ler`        | JWT       | Marca uma notificação como lida     |
+| POST   | `/enviar`         | ADMIN/DEV | Envia notificação manual            |
+| DELETE | `/:id`            | JWT       | Deleta notificação própria          |
 
 ### Documentos de Verificação — `/api/documentos`
 
-| Método | Rota           | Auth      | Descrição                                                          |
-|--------|----------------|-----------|--------------------------------------------------------------------|
-| POST   | `/comprovante` | JWT       | Envia comprovante (PDF, OCR automático) — extrai matrícula/curso/período, valida curso na escola, cria CURSOS_USUARIOS automaticamente — 5→1 ou 6→2 |
-| POST   | `/cnh`         | JWT       | Envia CNH (PDF, OCR automático) — 1→2 se tiver veículo ativo      |
-| GET    | `/historico`   | JWT       | Histórico de documentos do próprio usuário                         |
-| GET    | `/admin`       | ADMIN/DEV | Lista todos os documentos para revisão (`?doc_tipo=`, `?doc_status=`) |
+| Método | Rota           | Auth      | Descrição                                                                    |
+|--------|----------------|-----------|------------------------------------------------------------------------------|
+| POST   | `/comprovante` | JWT       | Envia comprovante de matrícula (PDF) — OCR automático, promove nível 5→1 ou 6→2 |
+| POST   | `/cnh`         | JWT       | Envia CNH (PDF) — OCR automático, promove nível 1→2 se veículo ativo        |
+| GET    | `/historico`   | JWT       | Histórico de documentos do próprio usuário                                   |
+| GET    | `/admin`       | ADMIN/DEV | Lista todos os documentos para revisão (`?doc_tipo=`, `?doc_status=`)        |
 
 ### Veículos — `/api/veiculos`
 
@@ -317,19 +316,19 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Administrador tem escopo restrito à
 
 #### Estatísticas
 
-| Método | Rota                        | Acesso    | Descrição                                                               |
-|--------|-----------------------------|-----------|-------------------------------------------------------------------------|
-| GET    | `/stats/usuarios`           | Admin/Dev | Totais de usuários por status e verificação                             |
-| GET    | `/stats/caronas`            | Admin/Dev | Totais de caronas por status                                            |
-| GET    | `/stats/sugestoes`          | Admin/Dev | Totais de sugestões/denúncias por tipo e status                         |
-| GET    | `/stats/documentos`         | Admin/Dev | Totais de documentos por tipo e status OCR                              |
-| GET    | `/relatorios/atividade`     | Admin/Dev | Relatório consolidado: caronas, usuários, avaliações no período [v15]   |
+| Método | Rota                    | Acesso    | Descrição                                                             |
+|--------|-------------------------|-----------|-----------------------------------------------------------------------|
+| GET    | `/stats/usuarios`       | Admin/Dev | Totais de usuários por status e verificação                           |
+| GET    | `/stats/caronas`        | Admin/Dev | Totais de caronas por status                                          |
+| GET    | `/stats/sugestoes`      | Admin/Dev | Totais de sugestões/denúncias por tipo e status                       |
+| GET    | `/stats/documentos`     | Admin/Dev | Totais de documentos por tipo e status OCR                            |
+| GET    | `/relatorios/atividade` | Admin/Dev | Relatório consolidado: caronas, usuários, avaliações no período       |
 
 #### Gestão de usuários
 
 | Método | Rota                                | Acesso    | Descrição                                                                |
 |--------|-------------------------------------|-----------|--------------------------------------------------------------------------|
-| GET    | `/usuarios`                         | Admin/Dev | Lista usuários com busca (`?q=`) e cursor (`?cursor=`, `?esc_id=`)       |
+| GET    | `/usuarios`                         | Admin/Dev | Lista usuários com busca (`?q=`), cursor e filtro `?status=0\|1`         |
 | GET    | `/usuarios/:usu_id`                 | Admin/Dev | Dados completos de um usuário                                            |
 | PATCH  | `/usuarios/:usu_id/status`          | Admin/Dev | Ativa/inativa conta sem penalidade (não opera sobre Admin/Dev)           |
 | GET    | `/usuarios/:usu_id/penalidades`     | Admin/Dev | Histórico de penalidades (`?ativas=1` = vigentes)                        |
@@ -401,9 +400,9 @@ Exclusivo para Desenvolvedor (`per_tipo = 2`). Admins recebem 403.
 
 | Arquivo               | Função                                                                    |
 |-----------------------|---------------------------------------------------------------------------|
-| `authMiddleware.js`   | Valida JWT, injeta `req.user.id` e `req.user.email`                      |
-| `roleMiddleware.js`   | Valida `per_tipo` e `per_habilitado`; injeta `per_tipo` e `per_escola_id` em `req.user`; retorna 503 em falha de infraestrutura [v15] |
-| `penaltyMiddleware.js`| Verifica penalidades ativas antes de oferecer/solicitar caronas [v15]    |
+| `authMiddleware.js`   | Valida JWT; diferencia token expirado (`TOKEN_EXPIRED`) de inválido (`TOKEN_INVALID`) |
+| `roleMiddleware.js`   | Valida `per_tipo` e `per_habilitado`; injeta `per_tipo` e `per_escola_id` em `req.user`; retorna 503 em falha de infraestrutura |
+| `penaltyMiddleware.js`| Verifica penalidades ativas antes de oferecer/solicitar caronas           |
 | `uploadHelper.js`     | Multer para imagens (5 MB) e documentos PDF (10 MB); valida magic bytes   |
 | `ocrValidator.js`     | Pipeline OCR — texto nativo (pdfjs-dist) → fallback Tesseract.js; critérios por grupo de palavras-chave |
 
@@ -413,60 +412,46 @@ O validador exige **≥ 2 de 3 grupos** de palavras-chave + confiança Tesseract
 
 | Grupo | Palavras monitoradas |
 |---|---|
-| `instituicao` | universidade, faculdade, instituto federal, usp, unicamp, unesp, fgv, puc, unifesp, escola, **etec, fatec, senac, senai, cps, centro paula souza, tecnico, tecnica, instituto, unidade de ensino** |
-| `matricula` | matricula, registro academico, ra: / ra (sem dois pontos), numero de matricula, aluno, estudante, discente, **declaracao, habilitacao, modulo, matriculado** |
-| `periodo` | 2024, 2025, 2026, 2027, semestre, periodo letivo, ano letivo, **1–4 modulo, bimestre, trimestre** |
+| `instituicao` | universidade, faculdade, instituto federal, usp, unicamp, unesp, fgv, puc, unifesp, escola, etec, fatec, senac, senai, cps, centro paula souza, tecnico, tecnica, instituto, unidade de ensino |
+| `matricula` | matricula, registro academico, ra: / ra (sem dois pontos), numero de matricula, aluno, estudante, discente, declaracao, habilitacao, modulo, matriculado |
+| `periodo` | 2024, 2025, 2026, 2027, semestre, periodo letivo, ano letivo, 1–4 modulo, bimestre, trimestre |
 
-> PDFs de sistemas governamentais (NSA, SIGAA) têm `TEXTO_MINIMO = 120` chars para forçar OCR quando a extração nativa retorna texto incompleto. Confiança mínima para CNH permanece em 75%.
-
-#### Extração e validação de dados [v13]
-
-Após a aprovação pelos critérios, o OCR extrai automaticamente:
-
-| Campo extraído | Padrões reconhecidos | Salvo em |
-|---|---|---|
-| Matrícula / RA | `RA 123456`, `matrícula: 123456`, `nº 123456`, `registro: 123456` | `doc_matricula`, `usu_matricula` |
-| Curso | Linha após `curso:`, `habilitação`, `técnico em`, `graduação em` | `doc_curso`, `usu_curso_nome` |
-| Período | `3º módulo`, `2º semestre`, `período letivo 2026/1` | `doc_periodo`, `usu_periodo` |
-
-Após a extração, o backend valida o curso contra o banco:
-1. Identifica a escola pelo **domínio do e-mail** do usuário (`@etec.sp.gov.br` → escola ETEC)
-2. Compara o nome do curso extraído com os cursos cadastrados na escola (matching por palavras-chave)
-3. **Curso não encontrado → documento recusado (`422`)** — o usuário deve enviar um comprovante do curso correto
-4. Curso encontrado → cria `CURSOS_USUARIOS` automaticamente (se não existir) e salva os dados em Opção A (histórico em `DOCUMENTOS_VERIFICACAO`) + Opção B (perfil em `USUARIOS`)
+Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e período letivo. O curso é então validado contra os cursos cadastrados na escola (identificada pelo domínio do e-mail). Se não houver correspondência, o documento é recusado com `422`.
 
 ### Utilitários
 
-| Arquivo                  | Função                                                                     |
-|--------------------------|----------------------------------------------------------------------------|
-| `authHelper.js`          | `checkDevOrOwner`, `checkAdminOrOwner`, `getMotoristaId`, `isParticipanteCarona`, `verificarContratoEscola` |
-| `auditLog.js`            | `registrarAudit()` — grava em AUDIT_LOG                                   |
-| `penaltyHelper.js`       | `checkPenalidade()` — verifica penalidade ativa antes de ação; `DURACAO_SQL` map |
-| `geocodingService.js`    | `geocodificarEndereco()` via Nominatim; `calcularDistanciaKm()` Haversine  |
-| `sanitize.js`            | `stripHtml()` — remove tags HTML de input textual                          |
-| `mailer.js + emailQueue.js` | Envio de e-mails (OTP, reset) com fila interna                          |
+| Arquivo                     | Função                                                                     |
+|-----------------------------|----------------------------------------------------------------------------|
+| `authHelper.js`             | `checkDevOrOwner`, `checkAdminOrOwner`, `getMotoristaId`, `isParticipanteCarona`, `verificarContratoEscola` |
+| `queryHelpers.js`           | `parsePagination`, `parseCursorPagination` — paginação offset e cursor     |
+| `auditLog.js`               | `registrarAudit()` — grava em AUDIT_LOG                                    |
+| `penaltyHelper.js`          | `checkPenalidade()` — verifica penalidade ativa antes de ação; `DURACAO_SQL` map |
+| `geocodingService.js`       | `geocodificarEndereco()` via Nominatim; `calcularDistanciaKm()` Haversine  |
+| `sanitize.js`               | `stripHtml()` — remove tags HTML, decodifica entidades e colapsa espaços   |
+| `mailer.js + emailQueue.js` | Envio de e-mails (OTP, reset) com fila interna                             |
 
 ### Banco de dados — Tabelas principais
 
-| Tabela                  | Descrição                                                          |
-|-------------------------|--------------------------------------------------------------------|
-| `ESCOLAS`               | Instituições (v9: domínio/quota; v10: lat/lon; v11: contrato)     |
-| `CURSOS`                | Cursos vinculados às escolas                                       |
-| `USUARIOS`              | Usuários (v2: OTP/reset; v3: soft-delete; v4: refresh token; v10: lat/lon; v13: usu_curso_nome, usu_periodo) |
-| `USUARIOS_REGISTROS`    | Datas de login e atualização (1:1 com USUARIOS)                    |
-| `PERFIL`                | Papel (`per_tipo`) e escola do usuário                             |
-| `CURSOS_USUARIOS`       | Matrículas (N:M entre usuários e cursos)                           |
-| `VEICULOS`              | Veículos cadastrados pelos motoristas (v9: placa UNIQUE)           |
-| `CARONAS`               | Caronas oferecidas (v3: soft-delete)                               |
-| `PONTO_ENCONTROS`       | Pontos de parada das caronas (v10: lat/lon)                        |
-| `SOLICITACOES_CARONA`   | Pedidos de participação em caronas                                 |
-| `CARONA_PESSOAS`        | Passageiros confirmados em caronas                                 |
-| `MENSAGENS`             | Chat entre motorista e passageiros                                 |
-| `AVALIACOES`            | Avaliações pós-carona (v5)                                         |
-| `DOCUMENTOS_VERIFICACAO`| Comprovantes e CNH com resultado de OCR; dados extraídos: matrícula, curso, período (v6/v7/v13) |
-| `PENALIDADES`           | Penalidades aplicadas por admins (v8)                              |
-| `AUDIT_LOG`             | Rastreabilidade de ações sensíveis                                 |
-| `SUGESTAO_DENUNCIA`     | Feedback e denúncias dos usuários                                  |
+| Tabela                   | Descrição                                                          |
+|--------------------------|--------------------------------------------------------------------|
+| `ESCOLAS`                | Instituições (domínio, quota, lat/lon, contrato)                   |
+| `CURSOS`                 | Cursos vinculados às escolas                                       |
+| `USUARIOS`               | Usuários (OTP, soft-delete, refresh token, lat/lon, dados OCR)    |
+| `USUARIOS_REGISTROS`     | Datas de login e atualização (1:1 com USUARIOS)                    |
+| `PERFIL`                 | Papel (`per_tipo`) e escola do usuário                             |
+| `CURSOS_USUARIOS`        | Matrículas (N:M entre usuários e cursos)                           |
+| `VEICULOS`               | Veículos cadastrados pelos motoristas (placa UNIQUE)               |
+| `CARONAS`                | Caronas oferecidas (soft-delete; `cur_usu_id` nullable para temporários) |
+| `PONTO_ENCONTROS`        | Pontos de parada das caronas (lat/lon)                             |
+| `SOLICITACOES_CARONA`    | Pedidos de participação em caronas                                 |
+| `CARONA_PESSOAS`         | Passageiros confirmados em caronas                                 |
+| `MENSAGENS`              | Chat entre motorista e passageiros                                 |
+| `AVALIACOES`             | Avaliações pós-carona                                              |
+| `DOCUMENTOS_VERIFICACAO` | Comprovantes e CNH com resultado de OCR e dados extraídos          |
+| `PENALIDADES`            | Penalidades aplicadas por admins                                   |
+| `AUDIT_LOG`              | Rastreabilidade de ações sensíveis                                 |
+| `SUGESTAO_DENUNCIA`      | Feedback e denúncias dos usuários                                  |
+| `NOTIFICACOES`           | Notificações persistidas (automáticas e manuais)                   |
 
 ### Audit Log — Códigos de ação registrados
 
@@ -476,207 +461,152 @@ Após a extração, o backend valida o curso contra o banco:
 
 ## Histórico de migrations
 
-| Versão | Alteração                                                                        |
-|--------|----------------------------------------------------------------------------------|
-| v1     | Schema inicial                                                                   |
-| v2     | OTP de verificação + redefinição de senha                                        |
-| v3     | Soft-delete em USUARIOS e CARONAS                                                |
-| v4     | Refresh token rotativo (30 dias)                                                 |
-| v5     | Tabela AVALIACOES                                                                |
-| v6     | Tabela DOCUMENTOS_VERIFICACAO                                                    |
-| v7     | `doc_ocr_confianca` em DOCUMENTOS_VERIFICACAO                                   |
-| v8     | Tabela PENALIDADES                                                               |
-| v9     | `esc_dominio`, `esc_max_usuarios` em ESCOLAS; `vei_placa` UNIQUE                 |
-| v10    | Lat/lon em ESCOLAS, USUARIOS e PONTO_ENCONTROS (Nominatim)                       |
-| v11    | Contrato de escola: `esc_contrato_duracao`, `esc_contrato_inicio`, `esc_contrato_expira` |
-| v12    | Tabela NOTIFICACOES: persistência de notificações automáticas e manuais |
-| v13    | `cur_usu_id` nullable em CARONAS; extração OCR de matrícula/curso/período; `usu_curso_nome` + `usu_periodo` em USUARIOS; `doc_matricula` + `doc_curso` + `doc_periodo` em DOCUMENTOS_VERIFICACAO; validação de curso contra escola pelo domínio do e-mail |
-| v14    | 5 índices de performance (DB-02/03/04/05/09); `noti_tipo` ENUM em NOTIFICACOES (DB-06); `doc_status DEFAULT 1` em DOCUMENTOS_VERIFICACAO (DB-08); joins null-safe via VEICULOS em todos os controllers; novos endpoints: `GET /me`, `GET /:id/penalidades`, `GET /caronas/:id/resumo`, `GET /solicitacoes/pendentes`; validações VAL-01/02/04 |
-| v15    | `CHECK` constraints em colunas críticas (DB-A01); `utf8mb4` explícito em todas as tabelas (DB-A02); `PERFIL` refatorada com `usu_id` como PK (DB-A03); índices explícitos em `VEICULOS.usu_id` e `PONTO_ENCONTROS.car_id` (DB-A04); FK auto-referencial em `MENSAGENS.men_id_resposta` (DB-A05); `roleMiddleware` retorna 503 em falha de infra (CODE-B01); `authHelper` otimizado com `checkPermission` unificado (CODE-B02); `penaltyMiddleware` centralizado (CODE-B05); separação `AdminController`/`DevController` e `adminRoutes`/`devRoutes`; novos endpoints: `GET /:id/reputacao`, `GET /:id/exportar` (LGPD), `GET /admin/relatorios/atividade`; alias RESTful `PATCH /:sol_id/status` (REST-C01); `LGPD_EXPORTAR` no audit log |
+| Versão | Alteração principal                                                                              |
+|--------|--------------------------------------------------------------------------------------------------|
+| v1     | Schema inicial                                                                                   |
+| v2     | OTP de verificação de e-mail + redefinição de senha                                              |
+| v3     | Soft-delete em USUARIOS e CARONAS                                                                |
+| v4     | Refresh token rotativo (30 dias)                                                                 |
+| v5     | Tabela AVALIACOES                                                                                |
+| v6–v7  | Tabela DOCUMENTOS_VERIFICACAO + campo `doc_ocr_confianca`                                        |
+| v8     | Tabela PENALIDADES (4 tipos, durações configuráveis)                                             |
+| v9     | `esc_dominio`, `esc_max_usuarios`; `vei_placa` UNIQUE                                            |
+| v10    | Lat/lon em ESCOLAS, USUARIOS e PONTO_ENCONTROS (integração Nominatim)                           |
+| v11    | Contratos de escola: `esc_contrato_duracao`, `esc_contrato_inicio`, `esc_contrato_expira`        |
+| v12    | Tabela NOTIFICACOES + entrega em tempo real via Socket.io                                        |
+| v13    | `cur_usu_id` nullable em CARONAS; extração OCR de matrícula/curso/período; validação por domínio |
+| v14    | 5 índices de performance; joins null-safe; endpoints: `/me`, `/:id/penalidades`, `resumo`, `/pendentes` |
+| v15    | `CHECK` constraints; `utf8mb4` explícito; `PERFIL` com `usu_id` como PK; separação Admin/Dev    |
+| v16    | Race condition em overbooking (`FOR UPDATE`); promoção 1→2 com CNH; `TOKEN_EXPIRED`/`TOKEN_INVALID`; guard de env vars |
+| v17    | `buscar()` e `listarCaronasComoPassageiro()` corrigidos para `cur_usu_id=NULL`; `COUNT(*)→SUM(sol_vaga_soli)`; `?status=` em listagem de usuários; helper `queryHelpers.js` |
 
 ---
 
-## Auditoria Técnica (v14)
+## Visão Geral do Sistema
 
-Resultado da auditoria realizada em 2026-05-02. Itens implementados nesta versão:
+### Fluxo de verificação do usuário
 
-### Performance — índices adicionados
+Cada usuário passa por um pipeline de verificação progressiva antes de poder oferecer caronas. O nível `usu_verificacao` controla o que é permitido em cada etapa:
 
-| Índice                     | Tabela               | Benefício                                          |
-|----------------------------|----------------------|----------------------------------------------------|
-| `idx_car_status_data`      | CARONAS              | Query principal: caronas abertas futuras (DB-02)   |
-| `idx_sol_car_id`           | SOLICITACOES_CARONA  | Busca de solicitações por carona (DB-03)            |
-| `idx_men_car_id`           | MENSAGENS            | Carregamento da conversa de uma carona (DB-04)     |
-| `idx_car_pes_usu_id`       | CARONA_PESSOAS       | Caronas de um passageiro (DB-05)                   |
-| `idx_car_vei_id`           | CARONAS              | Caronas ativas por veículo (DB-09)                 |
+```
+Cadastro
+  │  usu_verificacao = 0 (aguardando OTP)
+  ▼
+Verificação de e-mail (OTP de 6 dígitos, válido 10 min, máx. 3 tentativas)
+  │  usu_verificacao = 5 (acesso temporário por 5 dias, sem veículo)
+  │  usu_verificacao = 6 (acesso temporário por 5 dias, com veículo)
+  ▼
+Envio de comprovante de matrícula (PDF → OCR automático)
+  │  5 → 1  (matrícula verificada, sem veículo, prazo semestral)
+  │  6 → 2  (matrícula + veículo verificados, prazo semestral)
+  ▼
+Envio de CNH (PDF → OCR automático) + veículo ativo
+  │  1 → 2  (habilitado para oferecer caronas)
+  ▼
+usu_verificacao = 2 — acesso completo (solicitar e oferecer caronas)
+```
 
-### Correções de schema
+> O prazo semestral (`usu_verificacao_expira`) expira automaticamente. O usuário precisa reenviar o comprovante de matrícula a cada semestre para manter o acesso ativo.
 
-- **DB-06:** `NOTIFICACOES.noti_tipo` alterado de `VARCHAR(40)` para `ENUM` — garante integridade dos valores
-- **DB-08:** `DOCUMENTOS_VERIFICACAO.doc_status` DEFAULT alterado de `0` (aprovado) para `1` (pendente) — estado correto ao inserir
+### Ciclo de vida de uma carona
 
-### Correções de controllers
+```
+Motorista cria carona  →  car_status = 1 (Aberta)
+  │
+  ├─ Passageiro solicita  →  sol_status = 1 (Enviada)
+  │     │
+  │     ├─ Motorista aceita   →  sol_status = 2 (Aceita)  |  car_vagas_dispo −N
+  │     └─ Motorista recusa   →  sol_status = 3 (Recusada)
+  │
+  ├─ car_vagas_dispo = 0  →  car_status = 2 (Em espera)
+  │
+  └─ Motorista finaliza  →  car_status = 3 (Finalizada)
+        │
+        └─ Avaliações mútuas habilitadas (ava_nota 1–5)
+```
 
-- **Joins null-safe:** todos os controllers que usavam `INNER JOIN CURSOS_USUARIOS ON c.cur_usu_id = cu.cur_usu_id` foram corrigidos para `INNER JOIN VEICULOS` (motorista via veículo), tornando-os compatíveis com `cur_usu_id = NULL` [v13]
-- **VAL-01:** `car_vagas_dispo` agora é explicitamente convertido com `parseInt` antes da validação
-- **VAL-02:** `men_id_resposta` validado contra mensagens existentes na mesma carona
-- **VAL-04:** `usu_telefone` aceito no endpoint `PUT /:id` com validação de 10–11 dígitos
-- **HTTP-07:** `AvaliacaoController` já tratava `ER_DUP_ENTRY` e retornava `409` ✓
+Cancelamento em qualquer etapa define `car_status = 0` e libera todos os passageiros vinculados para solicitar outras caronas.
 
-### Débito técnico documentado (REST-01 a REST-06)
+### Modelo de segurança em camadas
 
-Os seguintes endpoints não-RESTful foram identificados mas não alterados (clientes existentes dependem dessas URIs). Corrigir requer versionamento `/api/v2/`:
+```
+Requisição HTTP
+  │
+  ├─ 1. Rate Limiting (express-rate-limit)
+  │     ├─ Global:     100 req / 15 min por IP
+  │     ├─ Auth:        10 req / 15 min (login, OTP, refresh)
+  │     ├─ Escrita:     30 req / min (criar carona, enviar mensagem)
+  │     └─ Geocode:     20 req / min (autocompletar endereço)
+  │
+  ├─ 2. authMiddleware — valida JWT (assina com JWT_SECRET)
+  │     └─ TOKEN_EXPIRED → cliente aciona /refresh automaticamente
+  │     └─ TOKEN_INVALID → cliente exige novo login
+  │
+  ├─ 3. roleMiddleware — verifica per_tipo e per_habilitado
+  │     └─ Injeta per_tipo e per_escola_id em req.user
+  │
+  ├─ 4. Bloqueio por contrato de escola
+  │     └─ Login e /refresh verificam esc_contrato_expira
+  │
+  └─ 5. Controller — verifica penalidades e regras de negócio
+        └─ Penalidade tipo 4 bloqueia login imediatamente (usu_verificacao = 9)
+```
 
-| Endpoint atual                        | URI sugerida                          |
-|---------------------------------------|---------------------------------------|
-| `POST /api/solicitacoes/criar`        | `POST /api/solicitacoes`              |
-| `PUT /api/solicitacoes/:id/responder` | `PATCH /api/solicitacoes/:id/status`  |
-| `PUT /api/solicitacoes/:id/cancelar`  | `PATCH /api/solicitacoes/:id/status`  |
-| `PUT /api/sugestoes/:id/analisar`     | `PATCH /api/sugestoes/:id/status`     |
-| `PUT /api/sugestoes/:id/responder`    | `PATCH /api/sugestoes/:id/resposta`   |
+### Prevenção de race conditions
 
-Os aliases RESTful foram adicionados em v15 via `PATCH /:sol_id/status` (mantendo as rotas legadas para retrocompatibilidade).
+Duas operações críticas usam `SELECT ... FOR UPDATE` dentro de transações para garantir consistência sob carga concorrente:
 
----
+**1. Solicitação de carona (`solicitarCarona`):** bloqueia a linha da carona antes de verificar vagas disponíveis e inserir a solicitação. Sem o lock, duas requisições simultâneas podem ler "1 vaga disponível" e ambas inserirem — resultado: overbooking.
 
-## Auditoria Técnica (v15)
+**2. Aceite de solicitação (`responderSolicitacao`):** bloqueia a linha da carona ao aceitar e re-verifica vagas antes de decrementar. Também verifica se o passageiro já está vinculado a outra carona ativa, evitando que dois motoristas aceitem o mesmo passageiro ao mesmo tempo.
 
-Resultado da auditoria realizada em 2026-05-06. Auditoria técnica rigorosa em banco de dados, código, endpoints e testes.
+### Validação de documentos por OCR
 
-### Banco de Dados
+O pipeline de OCR funciona em dois estágios:
 
-| ID      | Severidade | Correção                                                                           |
-|---------|------------|------------------------------------------------------------------------------------|
-| DB-A01  | Crítico    | `CHECK` constraints adicionadas: `ava_nota`, `sol_vaga_soli`, `car_vagas_dispo`, `vei_tipo`, `pen_tipo` |
-| DB-A02  | Alto       | `utf8mb4 COLLATE utf8mb4_unicode_ci` explícito em todas as tabelas                |
-| DB-A03  | Alto       | `PERFIL` refatorada: `per_id` removido, `usu_id` promovido a PK (1:1 correto)     |
-| DB-A04  | Médio      | Índices explícitos em `VEICULOS.usu_id` e `PONTO_ENCONTROS.car_id`                |
-| DB-A05  | Médio      | FK `MENSAGENS.men_id_resposta → MENSAGENS.men_id` declarada (auto-referência)     |
-| DB-A06  | Baixo      | Índices em `SUGESTAO_DENUNCIA.sug_status` e `sug_deletado_em`                     |
+1. **Extração de texto:** tenta extração nativa via `pdfjs-dist` (PDFs digitais têm texto embutido). Se o texto for insuficiente (< 120 chars para PDFs governamentais), aciona o `tesseract.js` para OCR em imagem.
+2. **Validação por palavras-chave:** o texto é avaliado contra 3 grupos temáticos (instituição, matrícula, período). Aprovação exige ≥ 2 grupos + confiança Tesseract ≥ 60% (CNH exige ≥ 75%). Se aprovado, extrai automaticamente matrícula/RA, nome do curso e período, e valida o curso contra o banco pelo domínio do e-mail do usuário.
 
-### Middlewares
+### Geocodificação e filtro de proximidade
 
-| ID       | Severidade | Correção                                                                           |
-|----------|------------|------------------------------------------------------------------------------------|
-| CODE-B01 | Alto       | `roleMiddleware` retorna 503 (não 403) em falha de banco                           |
-| CODE-B02 | Médio      | `authHelper`: `checkPermission()` unificado elimina query duplicada ao banco       |
-| CODE-B03 | Médio      | `isParticipanteCarona` com `LIMIT 1` na UNION evita leitura desnecessária          |
-| CODE-B04 | Médio      | `statsCaronas` Admin usa `COUNT(DISTINCT)` para evitar dupla contagem              |
-| CODE-B05 | Médio      | `penaltyMiddleware.js` centraliza verificação de penalidades por rota              |
-| CODE-B06 | Baixo      | `DevController`: verificações internas redundantes podem ser removidas             |
+Endereços (de usuários, escolas e pontos de encontro) são convertidos em coordenadas via **Nominatim** (OpenStreetMap). A operação é *best-effort*: falha no serviço não bloqueia o cadastro — `lat/lon` simplesmente ficam `NULL`.
 
-### Novos Endpoints
+O filtro de proximidade em caronas usa uma **estratégia em dois estágios** para performance:
 
-| Endpoint                             | Acesso    | Descrição                                          |
-|--------------------------------------|-----------|----------------------------------------------------|
-| `GET /api/usuarios/:id/reputacao`    | JWT       | Média de avaliações, total de caronas, ranking     |
-| `GET /api/usuarios/:id/exportar`     | JWT/Dev   | Portabilidade LGPD — exporta todos os dados        |
-| `GET /api/admin/relatorios/atividade`| Admin/Dev | Atividade consolidada no período (`?dias=30`)      |
-| `PATCH /api/solicitacoes/:id/status` | JWT       | Alias RESTful para responder/cancelar solicitação  |
+1. **Bounding box SQL** (`WHERE pon_lat BETWEEN ? AND ?`) — elimina a maioria dos registros distantes usando o índice `idx_pon_coords`. Rápido, mas impreciso (inclui cantos do quadrado).
+2. **Refinamento Haversine em JS** — descarta os falsos positivos dos cantos, calculando a distância real em linha reta para cada resultado remanescente.
 
-### Cobertura de Testes (v15)
-
-**Arquivo novo:** `tests/auditoria_v15.test.js` — 14 novos cenários:
-- Separação Admin vs Dev (rotas cruzadas bloqueadas)
-- Dev acessa `/api/admin` e `/api/dev`
-- Refresh token rotativo + invalidação após logout
-- Bloqueio por contrato de escola expirado
-- Endpoint de reputação (estrutura e validação)
-- Exportação LGPD (dados sem `usu_senha`)
-- Relatório de atividade Admin/Dev
-
----
-
-## Explicação detalhada do Projeto (para estudantes)
-
-Este projeto é uma **API REST** — ou seja, um servidor que recebe pedidos (requisições) de aplicativos móveis ou web e responde com dados em formato JSON. Pense nele como o "cérebro" de um aplicativo de caronas universitárias.
-
-### O que é uma API REST?
-
-Quando você usa um aplicativo no celular, ele se comunica com um servidor na internet. Essa comunicação segue regras definidas — isso é a API. O formato **REST** organiza essa comunicação usando os verbos do protocolo HTTP:
-
-- **GET** → Buscar informação ("me dê a lista de caronas")
-- **POST** → Criar algo novo ("crie uma nova carona para mim")
-- **PUT/PATCH** → Atualizar algo ("mude o horário desta carona")
-- **DELETE** → Remover algo ("cancele esta carona")
+O raio máximo permitido é **25 km** em `buscar()`. Em `listarTodas()`, o cliente define o raio até o máximo de 25 km.
 
 ---
 
-### Seções do projeto
+### Referência rápida de status
 
-#### `/api/usuarios` — Quem usa o sistema
+**`usu_verificacao`**
 
-Controla o cadastro e autenticação dos usuários. Quando alguém se cadastra, recebe um código por e-mail (OTP) para confirmar a identidade. Após confirmar, faz login e recebe dois tokens:
-- **Access token** (24h): usado em cada requisição para provar que está logado
-- **Refresh token** (30 dias): serve para gerar um novo access token sem precisar logar novamente
+| Valor | Significado                        | Pode solicitar | Pode oferecer |
+|-------|------------------------------------|:--------------:|:-------------:|
+| 0     | Aguardando OTP                     | ✗              | ✗             |
+| 5     | Acesso temporário (sem veículo)    | ✓ (5 dias)     | ✗             |
+| 6     | Acesso temporário (com veículo)    | ✓ (5 dias)     | ✓ (5 dias)    |
+| 1     | Matrícula verificada               | ✓ (semestral)  | ✗             |
+| 2     | Matrícula + veículo verificados    | ✓ (semestral)  | ✓ (semestral) |
+| 9     | Suspenso (penalidade tipo 4)       | ✗              | ✗             |
 
-Cada usuário tem um **nível de verificação** (`usu_verificacao`) que controla o que pode fazer no sistema — de 0 (recém cadastrado) até 2 (pode oferecer caronas).
+**`car_status`**
 
-#### `/api/caronas` — As caronas em si
+| Valor | Status      | Aceita solicitações | Pode finalizar |
+|-------|-------------|:-------------------:|:--------------:|
+| 0     | Cancelada   | ✗                   | ✗              |
+| 1     | Aberta      | ✓                   | ✓              |
+| 2     | Em espera   | ✗                   | ✓              |
+| 3     | Finalizada  | ✗                   | ✗              |
 
-Motoristas cadastram caronas informando data, horário e vagas disponíveis. Passageiros buscam e solicitam participação. O sistema controla status (Aberta → Em espera → Finalizada ou Cancelada).
+**Tipos de penalidade**
 
-O filtro de proximidade usa **Haversine** — uma fórmula matemática que calcula distância entre coordenadas geográficas — limitado a 25 km do usuário.
-
-#### `/api/solicitacoes` — Pedidos de vaga
-
-Passageiros enviam solicitações para participar de uma carona. O motorista aceita ou recusa. Se aceito, as vagas diminuem automaticamente. Toda a lógica usa **transações SQL** para evitar que duas pessoas ocupem a mesma vaga ao mesmo tempo (race condition).
-
-#### `/api/passageiros` — Confirmação direta
-
-Alternativa às solicitações: o motorista pode adicionar passageiros diretamente na carona, sem precisar de solicitação.
-
-#### `/api/veiculos` — Gestão de veículos
-
-Motoristas cadastram seus veículos. O sistema valida formato de placa (padrão brasileiro e Mercosul) e impede duplicatas. Veículos são desativados com soft-delete (não são apagados, apenas marcados como inativos).
-
-#### `/api/pontos` — Onde encontrar o motorista
-
-Cada carona pode ter pontos de partida e destino. O endereço digitado é convertido automaticamente em coordenadas (latitude/longitude) pelo serviço **Nominatim** (OpenStreetMap), sem custo de API.
-
-#### `/api/mensagens` — Chat da carona
-
-Motorista e passageiros podem trocar mensagens dentro do contexto de uma carona. Funciona tanto via API REST (para histórico) quanto via **WebSocket** (para tempo real). O WebSocket usa **Socket.io**, que mantém uma conexão aberta entre o app e o servidor para entrega instantânea de mensagens.
-
-#### `/api/notificacoes` — Alertas do sistema
-
-Notificações automáticas são disparadas quando algo importante acontece: nova solicitação, solicitação aceita, carona cancelada, penalidade aplicada, etc. Cada notificação é salva no banco (histórico) e entregue em tempo real via Socket.io para quem estiver conectado. Admin e Dev também podem enviar notificações manuais para usuários específicos.
-
-#### `/api/avaliacoes` — Reputação
-
-Após uma carona finalizada, motorista e passageiro podem se avaliar com notas de 1 a 5. Isso cria um sistema de reputação que ajuda outros usuários a decidir com quem viajar.
-
-#### `/api/documentos` — Verificação de identidade
-
-Usuários enviam PDFs (comprovante de matrícula, CNH). O sistema usa **OCR** (reconhecimento de texto em imagens) para verificar automaticamente se o documento é válido, promovendo o nível de acesso do usuário sem intervenção humana.
-
-#### `/api/sugestoes` — Feedback dos usuários
-
-Canal para usuários enviarem sugestões de melhoria ou denúncias. Administradores revisam e respondem.
-
-#### `/api/matriculas` — Vínculo com cursos
-
-Usuários se matriculam em cursos das escolas parceiras. Essa matrícula é usada ao criar uma carona — ela vincula a carona ao curso e escola do motorista.
-
-#### `/api/admin` — Painel de controle
-
-Rotas exclusivas para Administradores (de cada escola) e Desenvolvedores (acesso total). Incluem estatísticas do sistema, gestão de usuários, penalidades, contratos de escolas e exportação de logs em CSV para auditoria.
-
-#### `/api/infra` — Dados públicos
-
-Única rota sem autenticação. Lista escolas e cursos disponíveis — necessário para a tela de cadastro do app, quando o usuário ainda não tem token.
-
----
-
-### Conceitos técnicos importantes
-
-| Conceito | O que é | Onde é usado |
-|----------|---------|--------------|
-| **JWT** | Token criptografado que prova identidade sem consultar o banco | Autenticação em todas as rotas protegidas |
-| **Soft Delete** | Marca registro como deletado sem remover do banco | Usuários, caronas, mensagens |
-| **Transação SQL** | Garante que múltiplas operações ou acontecem todas ou nenhuma | Aceitação de solicitação, cancelamento |
-| **WebSocket** | Conexão persistente para comunicação bidirecional em tempo real | Chat e notificações |
-| **OCR** | Reconhecimento de texto em imagens/PDFs | Verificação de documentos |
-| **Haversine** | Fórmula para calcular distância entre coordenadas geográficas | Filtro de proximidade em caronas |
-| **Rate Limiting** | Limita número de requisições por IP em janela de tempo | Proteção contra ataques de força bruta |
-| **Audit Log** | Registro imutável de todas as ações sensíveis | Rastreabilidade e conformidade |
+| `pen_tipo` | Efeito                              | Duração                          |
+|------------|-------------------------------------|----------------------------------|
+| 1          | Bloqueado de oferecer caronas       | 1 semana a 6 meses               |
+| 2          | Bloqueado de solicitar caronas      | 1 semana a 6 meses               |
+| 3          | Bloqueado de oferecer e solicitar   | 1 semana a 6 meses               |
+| 4          | Conta suspensa — login bloqueado    | Permanente (até remoção manual)  |

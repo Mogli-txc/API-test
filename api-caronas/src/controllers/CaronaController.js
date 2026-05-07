@@ -24,6 +24,7 @@ const { stripHtml }        = require('../utils/sanitize');
 const { checkPenalidade }  = require('../utils/penaltyHelper');
 const { registrarAudit }   = require('../utils/auditLog');
 const { notificar, TIPOS } = require('../utils/notificar');
+const { getMotoristaId }   = require('../utils/authHelper'); // [v17 — CODE-B03]
 
 // Haversine para filtro de proximidade — sem custo de API, executado em memória  [v10]
 const { calcularDistanciaKm } = require('../services/geocodingService');
@@ -548,14 +549,16 @@ class CaronaController {
                         error: `Vagas não podem exceder a capacidade do veículo (${veiCarona[0].vei_vagas} vagas).`
                     });
                 }
-                // Garante que o novo valor não fique abaixo do número de passageiros já aceitos
+                // Garante que o novo valor não fique abaixo das vagas já ocupadas.
+                // Usa SUM(sol_vaga_soli) e não COUNT(*) — um passageiro pode ocupar N vagas.  [v17 — CODE-B01]
                 const [[{ aceitos }]] = await db.query(
-                    'SELECT COUNT(*) AS aceitos FROM SOLICITACOES_CARONA WHERE car_id = ? AND sol_status = 2',
+                    `SELECT COALESCE(SUM(sol_vaga_soli), 0) AS aceitos
+                     FROM SOLICITACOES_CARONA WHERE car_id = ? AND sol_status = 2`,
                     [car_id]
                 );
                 if (parseInt(car_vagas_dispo) < aceitos) {
                     return res.status(409).json({
-                        error: `Não é possível definir vagas abaixo do número de passageiros aceitos (${aceitos}).`
+                        error: `Há ${aceitos} vaga(s) já ocupada(s). Não é possível definir menos que isso.`
                     });
                 }
                 campos.push('car_vagas_dispo = ?');
@@ -685,17 +688,18 @@ class CaronaController {
                 params.push(statusFiltro);
             }
 
-            // PASSO 1: Caronas via SOLICITACOES_CARONA (aceitas) UNION CARONA_PESSOAS
-            // UNION elimina duplicatas caso o passageiro esteja em ambas as tabelas na mesma carona
+            // PASSO 1: Caronas via SOLICITACOES_CARONA (aceitas) UNION CARONA_PESSOAS.
+            // Motorista obtido via VEICULOS (null-safe para cur_usu_id=NULL — v13).
+            // UNION elimina duplicatas caso o passageiro esteja em ambas as tabelas na mesma carona.
+            // [v17 — DB-B02]
             const [caronas] = await db.query(
                 `SELECT DISTINCT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
                         c.car_vagas_dispo, c.car_status,
                         v.vei_marca_modelo AS veiculo,
                         u.usu_nome         AS motorista
                  FROM CARONAS c
-                 INNER JOIN VEICULOS        v  ON c.vei_id     = v.vei_id
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                 INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
+                 INNER JOIN VEICULOS v  ON c.vei_id  = v.vei_id
+                 INNER JOIN USUARIOS u  ON v.usu_id  = u.usu_id
                  WHERE c.car_id IN (
                      SELECT sc.car_id FROM SOLICITACOES_CARONA sc
                      WHERE sc.usu_id_passageiro = ? AND sc.sol_status = 2
@@ -1020,7 +1024,11 @@ class CaronaController {
                 ? ', pe.pon_lat AS partida_lat, pe.pon_lon AS partida_lon'
                 : '';
 
-            // PASSO 3: Busca caronas com dados de veículo, motorista, curso e escola
+            // PASSO 3: Busca caronas com dados de veículo, motorista, curso e escola.
+            // Motorista obtido via VEICULOS (null-safe para cur_usu_id=NULL — v13).
+            // LEFT JOIN em CURSOS_USUARIOS/CURSOS/ESCOLAS: caronas de motoristas temporários
+            // (cur_usu_id=NULL) aparecem nos resultados globais; quando ?esc_id= ou ?cur_id=
+            // estão ativos, o WHERE naturalmente exclui essas caronas pois e.esc_id = NULL.  [v17 — DB-B01]
             const [caronas] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
                         c.car_vagas_dispo, c.car_status,
@@ -1029,11 +1037,11 @@ class CaronaController {
                         cur.cur_id, cur.cur_nome, e.esc_id, e.esc_nome
                         ${selecaoCoordenadas}
                  FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id = cu_mot.cur_usu_id
-                 INNER JOIN USUARIOS        u      ON cu_mot.usu_id  = u.usu_id
                  INNER JOIN VEICULOS        v      ON c.vei_id       = v.vei_id
-                 INNER JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
-                 INNER JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
+                 INNER JOIN USUARIOS        u      ON v.usu_id       = u.usu_id
+                 LEFT  JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id  = cu_mot.cur_usu_id
+                 LEFT  JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
+                 LEFT  JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
                  ${joinPontos}
                  ${where}
                  ORDER BY c.car_data ASC, c.car_hor_saida ASC
@@ -1054,9 +1062,10 @@ class CaronaController {
             const [[{ totalGeral }]] = await db.query(
                 `SELECT COUNT(*) AS totalGeral
                  FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id = cu_mot.cur_usu_id
-                 INNER JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
-                 INNER JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
+                 INNER JOIN VEICULOS        v      ON c.vei_id       = v.vei_id
+                 LEFT  JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id  = cu_mot.cur_usu_id
+                 LEFT  JOIN CURSOS          cur    ON cu_mot.cur_id  = cur.cur_id
+                 LEFT  JOIN ESCOLAS         e      ON cur.esc_id     = e.esc_id
                  ${joinPontos}
                  ${where}`,
                 params
@@ -1086,6 +1095,69 @@ class CaronaController {
      *
      * Parâmetro: car_id (via URL)
      */
+    /**
+     * MÉTODO: ajustarVagas
+     * Motorista ajusta manualmente car_vagas_dispo (ex: passageiro desistiu sem cancelar).
+     * Bloqueia se o novo valor for menor que passageiros já aceitos.
+     *
+     * Tabela: CARONAS (UPDATE car_vagas_dispo)
+     * Parâmetro: car_id (via URL)
+     * Campo no body: car_vagas_dispo (0 a 6)
+     * [v16 — REST-A03]
+     */
+    async ajustarVagas(req, res) {
+        try {
+            const { car_id } = req.params;
+            const { car_vagas_dispo } = req.body;
+
+            if (!car_id || isNaN(car_id)) {
+                return res.status(400).json({ error: "ID de carona inválido." });
+            }
+
+            const vagasNum = parseInt(car_vagas_dispo);
+            if (car_vagas_dispo === undefined || isNaN(vagasNum) || vagasNum < 0 || vagasNum > 6) {
+                return res.status(400).json({ error: "car_vagas_dispo deve ser entre 0 e 6." });
+            }
+
+            // PASSO 1: Verifica se o usuário autenticado é o motorista
+            const motoristaId = await getMotoristaId(car_id);
+            if (motoristaId === null) {
+                return res.status(404).json({ error: "Carona não encontrada." });
+            }
+            if (motoristaId !== req.user.id) {
+                return res.status(403).json({ error: "Sem permissão para ajustar vagas desta carona." });
+            }
+
+            // PASSO 2: Verifica passageiros já aceitos — não pode reduzir abaixo do ocupado
+            const [[{ aceitos }]] = await db.query(
+                `SELECT COALESCE(SUM(sol_vaga_soli), 0) AS aceitos
+                 FROM SOLICITACOES_CARONA
+                 WHERE car_id = ? AND sol_status = 2`,
+                [car_id]
+            );
+            if (vagasNum < aceitos) {
+                return res.status(409).json({
+                    error: `Há ${aceitos} vaga(s) já ocupada(s). Não é possível definir menos que isso.`
+                });
+            }
+
+            // PASSO 3: Atualiza — apenas em caronas abertas ou em espera
+            const [upd] = await db.query(
+                'UPDATE CARONAS SET car_vagas_dispo = ? WHERE car_id = ? AND car_status IN (1, 2)',
+                [vagasNum, car_id]
+            );
+            if (upd.affectedRows === 0) {
+                return res.status(409).json({ error: "Carona não está aberta ou em espera." });
+            }
+
+            return res.status(200).json({ message: "Vagas atualizadas.", car_vagas_dispo: vagasNum });
+
+        } catch (error) {
+            console.error("[ERRO] ajustarVagas:", error);
+            return res.status(500).json({ error: "Erro ao ajustar vagas." });
+        }
+    }
+
     async resumo(req, res) {
         try {
             const { car_id } = req.params;
@@ -1153,12 +1225,23 @@ class CaronaController {
                 )
                 : [[]];
 
+            // PASSO 5: Solicitação do usuário autenticado nesta carona  [v16 — REST-A02]
+            // Permite ao app mobile saber de imediato se já solicitou vaga sem chamada extra.
+            const [minhasSol] = await db.query(
+                `SELECT sol_id, sol_status, sol_vaga_soli
+                 FROM SOLICITACOES_CARONA
+                 WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status IN (1, 2)
+                 LIMIT 1`,
+                [car_id, req.user.id]
+            );
+
             return res.status(200).json({
                 message: "Resumo da carona recuperado.",
                 carona,
                 pontos,
                 passageiros,
-                avaliacoes
+                avaliacoes,
+                minha_solicitacao: minhasSol[0] || null
             });
 
         } catch (error) {
