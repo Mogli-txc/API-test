@@ -201,15 +201,32 @@ class CaronaController {
             const [caronas] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
                         c.car_vagas_dispo, c.car_status,
-                        v.vei_marca_modelo AS veiculo,
-                        u.usu_nome         AS motorista,
-                        cur.cur_nome       AS curso_motorista
+                        v.vei_marca_modelo           AS veiculo,
+                        CAST(v.vei_tipo AS UNSIGNED) AS vei_tipo,
+                        v.vei_placa, v.vei_cor,
+                        u.usu_nome                   AS motorista,
+                        u.usu_foto                   AS motorista_foto,
+                        cur.cur_nome                 AS curso_motorista,
+                        origem.pon_nome              AS origem_nome,
+                        destino.pon_nome             AS destino_nome
                         ${selecaoCoordenadas}
                  FROM CARONAS c
                  INNER JOIN VEICULOS        v   ON c.vei_id     = v.vei_id
                  INNER JOIN USUARIOS        u   ON v.usu_id     = u.usu_id
                  LEFT  JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
                  LEFT  JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
+                 LEFT  JOIN PONTO_ENCONTROS origem ON origem.pon_id = (
+                     SELECT pe2.pon_id FROM PONTO_ENCONTROS pe2
+                     WHERE pe2.car_id = c.car_id AND pe2.pon_tipo = 0 AND pe2.pon_status = 1
+                     ORDER BY pe2.pon_ordem IS NULL, pe2.pon_ordem ASC, pe2.pon_id ASC
+                     LIMIT 1
+                 )
+                 LEFT  JOIN PONTO_ENCONTROS destino ON destino.pon_id = (
+                     SELECT pe3.pon_id FROM PONTO_ENCONTROS pe3
+                     WHERE pe3.car_id = c.car_id AND pe3.pon_tipo = 1 AND pe3.pon_status = 1
+                     ORDER BY pe3.pon_ordem IS NULL, pe3.pon_ordem ASC, pe3.pon_id ASC
+                     LIMIT 1
+                 )
                  ${joinEscola}
                  ${joinPontos}
                  WHERE c.car_status = 1
