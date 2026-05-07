@@ -172,5 +172,9 @@ router.delete('/:id', authMiddleware, UsuarioController.deletar);
  */
 router.get('/:id/penalidades', authMiddleware, UsuarioController.minhasPenalidades);
 
+router.get('/:id/reputacao', authMiddleware, UsuarioController.reputacao);
+
+router.get('/:id/exportar', authMiddleware, UsuarioController.exportarDados);
+
 module.exports = router;
 

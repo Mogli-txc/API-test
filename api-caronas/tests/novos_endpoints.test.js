@@ -9,8 +9,8 @@
  *   Grupo 3  — PUT /api/sugestoes/:sug_id/analisar (sug_status = 3)
  *   Grupo 4  — DELETE /api/pontos/:pon_id
  *   Grupo 5  — GET /api/admin/usuarios/:usu_id (detalhes)
- *   Grupo 6  — PUT /api/admin/usuarios/:usu_id/perfil (promoção)
- *   Grupo 7  — GET /api/admin/logs (?acao=, Dev only)
+ *   Grupo 6  — PUT /api/dev/usuarios/:usu_id/perfil (promoção)
+ *   Grupo 7  — GET /api/dev/logs (?acao=, Dev only)
  *   Grupo 8  — GET /api/admin/usuarios ?q= e cursor
  *   Grupo 9  — Admin CRUD Escolas e Cursos
  *   Grupo 10 — isParticipanteCarona: carona inexistente retorna 404
@@ -429,9 +429,9 @@ describe('Grupo 5 — GET /api/admin/usuarios/:usu_id', () => {
 });
 
 // ══════════════════════════════════════════════
-// GRUPO 6 — PUT /api/admin/usuarios/:usu_id/perfil
+// GRUPO 6 — PUT /api/dev/usuarios/:usu_id/perfil
 // ══════════════════════════════════════════════
-describe('Grupo 6 — PUT /api/admin/usuarios/:usu_id/perfil', () => {
+describe('Grupo 6 — PUT /api/dev/usuarios/:usu_id/perfil', () => {
     let adminToken;
     let usuarioAlvo;
 
@@ -442,7 +442,7 @@ describe('Grupo 6 — PUT /api/admin/usuarios/:usu_id/perfil', () => {
 
     it('6.1 — Dev promove usuário para per_tipo=1 (Admin) com escola → 200', async () => {
         const res = await request(app)
-            .put(`/api/admin/usuarios/${usuarioAlvo.usu_id}/perfil`)
+            .put(`/api/dev/usuarios/${usuarioAlvo.usu_id}/perfil`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ per_tipo: 1, per_escola_id: 1 });
         expect(res.status).toBe(200);
@@ -450,7 +450,7 @@ describe('Grupo 6 — PUT /api/admin/usuarios/:usu_id/perfil', () => {
 
     it('6.2 — Dev rebaixa de volta para per_tipo=0 → 200', async () => {
         const res = await request(app)
-            .put(`/api/admin/usuarios/${usuarioAlvo.usu_id}/perfil`)
+            .put(`/api/dev/usuarios/${usuarioAlvo.usu_id}/perfil`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ per_tipo: 0 });
         expect(res.status).toBe(200);
@@ -458,7 +458,7 @@ describe('Grupo 6 — PUT /api/admin/usuarios/:usu_id/perfil', () => {
 
     it('6.3 — per_tipo=1 sem per_escola_id deve retornar 400', async () => {
         const res = await request(app)
-            .put(`/api/admin/usuarios/${usuarioAlvo.usu_id}/perfil`)
+            .put(`/api/dev/usuarios/${usuarioAlvo.usu_id}/perfil`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ per_tipo: 1 });
         expect(res.status).toBe(400);
@@ -466,7 +466,7 @@ describe('Grupo 6 — PUT /api/admin/usuarios/:usu_id/perfil', () => {
 
     it('6.4 — per_tipo inválido deve retornar 400', async () => {
         const res = await request(app)
-            .put(`/api/admin/usuarios/${usuarioAlvo.usu_id}/perfil`)
+            .put(`/api/dev/usuarios/${usuarioAlvo.usu_id}/perfil`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ per_tipo: 9 });
         expect(res.status).toBe(400);
@@ -474,7 +474,7 @@ describe('Grupo 6 — PUT /api/admin/usuarios/:usu_id/perfil', () => {
 
     it('6.5 — Usuário comum deve retornar 403', async () => {
         const res = await request(app)
-            .put(`/api/admin/usuarios/${usuarioAlvo.usu_id}/perfil`)
+            .put(`/api/dev/usuarios/${usuarioAlvo.usu_id}/perfil`)
             .set('Authorization', `Bearer ${usuarioAlvo.token}`)
             .send({ per_tipo: 2 });
         expect(res.status).toBe(403);
@@ -482,23 +482,23 @@ describe('Grupo 6 — PUT /api/admin/usuarios/:usu_id/perfil', () => {
 
     it('6.6 — per_habilitado=0 desabilita a conta → 200', async () => {
         const res = await request(app)
-            .put(`/api/admin/usuarios/${usuarioAlvo.usu_id}/perfil`)
+            .put(`/api/dev/usuarios/${usuarioAlvo.usu_id}/perfil`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ per_habilitado: 0 });
         expect(res.status).toBe(200);
 
         // Restaura
         await request(app)
-            .put(`/api/admin/usuarios/${usuarioAlvo.usu_id}/perfil`)
+            .put(`/api/dev/usuarios/${usuarioAlvo.usu_id}/perfil`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ per_habilitado: 1 });
     });
 });
 
 // ══════════════════════════════════════════════
-// GRUPO 7 — GET /api/admin/logs
+// GRUPO 7 — GET /api/dev/logs
 // ══════════════════════════════════════════════
-describe('Grupo 7 — GET /api/admin/logs', () => {
+describe('Grupo 7 — GET /api/dev/logs', () => {
     let adminToken;
     let usuarioComum;
 
@@ -509,7 +509,7 @@ describe('Grupo 7 — GET /api/admin/logs', () => {
 
     it('7.1 — Dev pode ler o audit log → 200 com campo logs', async () => {
         const res = await request(app)
-            .get('/api/admin/logs')
+            .get('/api/dev/logs')
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('logs');
@@ -519,7 +519,7 @@ describe('Grupo 7 — GET /api/admin/logs', () => {
 
     it('7.2 — ?acao=LOGIN filtra corretamente → só registros LOGIN', async () => {
         const res = await request(app)
-            .get('/api/admin/logs?acao=LOGIN')
+            .get('/api/dev/logs?acao=LOGIN')
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(200);
         expect(res.body.logs.every(l => l.acao === 'LOGIN')).toBe(true);
@@ -527,7 +527,7 @@ describe('Grupo 7 — GET /api/admin/logs', () => {
 
     it('7.3 — ?tabela=USUARIOS filtra por tabela', async () => {
         const res = await request(app)
-            .get('/api/admin/logs?tabela=USUARIOS')
+            .get('/api/dev/logs?tabela=USUARIOS')
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(200);
         expect(res.body.logs.every(l => l.tabela === 'USUARIOS')).toBe(true);
@@ -535,19 +535,19 @@ describe('Grupo 7 — GET /api/admin/logs', () => {
 
     it('7.4 — Usuário comum deve retornar 403', async () => {
         const res = await request(app)
-            .get('/api/admin/logs')
+            .get('/api/dev/logs')
             .set('Authorization', `Bearer ${usuarioComum.token}`);
         expect(res.status).toBe(403);
     });
 
     it('7.5 — Sem token deve retornar 401', async () => {
-        const res = await request(app).get('/api/admin/logs');
+        const res = await request(app).get('/api/dev/logs');
         expect(res.status).toBe(401);
     });
 
     it('7.6 — ?limit=5 deve retornar no máximo 5 registros', async () => {
         const res = await request(app)
-            .get('/api/admin/logs?limit=5')
+            .get('/api/dev/logs?limit=5')
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(200);
         expect(res.body.logs.length).toBeLessThanOrEqual(5);
@@ -635,7 +635,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
     // ── Criar escola ────────────────────────────────
     it('9.1 — Dev cria nova escola → 201', async () => {
         const res = await request(app)
-            .post('/api/admin/escolas')
+            .post('/api/dev/escolas')
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ esc_nome: 'Escola Teste NVE', esc_endereco: 'Rua NVE, 100' });
         expect(res.status).toBe(201);
@@ -645,7 +645,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
 
     it('9.2 — Criar escola sem esc_nome deve retornar 400', async () => {
         const res = await request(app)
-            .post('/api/admin/escolas')
+            .post('/api/dev/escolas')
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ esc_endereco: 'Rua X' });
         expect(res.status).toBe(400);
@@ -653,7 +653,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
 
     it('9.3 — Usuário comum não pode criar escola → 403', async () => {
         const res = await request(app)
-            .post('/api/admin/escolas')
+            .post('/api/dev/escolas')
             .set('Authorization', `Bearer ${usuarioComum.token}`)
             .send({ esc_nome: 'Escola Hack', esc_endereco: 'Rua Hack' });
         expect(res.status).toBe(403);
@@ -663,7 +663,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
     it('9.4 — Dev atualiza escola criada → 200', async () => {
         if (!esc_id_criado) return;
         const res = await request(app)
-            .put(`/api/admin/escolas/${esc_id_criado}`)
+            .put(`/api/dev/escolas/${esc_id_criado}`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ esc_nome: 'Escola NVE Atualizada', esc_dominio: 'nve.edu.br' });
         expect(res.status).toBe(200);
@@ -671,7 +671,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
 
     it('9.5 — Atualizar escola inexistente deve retornar 404', async () => {
         const res = await request(app)
-            .put('/api/admin/escolas/999999')
+            .put('/api/dev/escolas/999999')
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ esc_nome: 'X' });
         expect(res.status).toBe(404);
@@ -681,7 +681,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
     it('9.6 — Dev cria curso na escola criada → 201', async () => {
         if (!esc_id_criado) return;
         const res = await request(app)
-            .post(`/api/admin/escolas/${esc_id_criado}/cursos`)
+            .post(`/api/dev/escolas/${esc_id_criado}/cursos`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ cur_nome: 'Curso NVE Teste', cur_semestre: 1 });
         expect(res.status).toBe(201);
@@ -691,7 +691,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
     it('9.7 — Criar curso sem cur_nome deve retornar 400', async () => {
         if (!esc_id_criado) return;
         const res = await request(app)
-            .post(`/api/admin/escolas/${esc_id_criado}/cursos`)
+            .post(`/api/dev/escolas/${esc_id_criado}/cursos`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ cur_semestre: 1 });
         expect(res.status).toBe(400);
@@ -701,7 +701,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
     it('9.8 — Dev atualiza curso criado → 200', async () => {
         if (!cur_id_criado) return;
         const res = await request(app)
-            .put(`/api/admin/cursos/${cur_id_criado}`)
+            .put(`/api/dev/cursos/${cur_id_criado}`)
             .set('Authorization', `Bearer ${adminToken}`)
             .send({ cur_nome: 'Curso NVE Atualizado', cur_semestre: 2 });
         expect(res.status).toBe(200);
@@ -711,7 +711,7 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
     it('9.9 — Dev remove curso sem matrículas → 204', async () => {
         if (!cur_id_criado) return;
         const res = await request(app)
-            .delete(`/api/admin/cursos/${cur_id_criado}`)
+            .delete(`/api/dev/cursos/${cur_id_criado}`)
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(204);
     });
@@ -720,14 +720,14 @@ describe('Grupo 9 — Admin CRUD Escolas e Cursos', () => {
     it('9.10 — Dev remove escola sem cursos → 204', async () => {
         if (!esc_id_criado) return;
         const res = await request(app)
-            .delete(`/api/admin/escolas/${esc_id_criado}`)
+            .delete(`/api/dev/escolas/${esc_id_criado}`)
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(204);
     });
 
     it('9.11 — Escola inexistente deve retornar 404', async () => {
         const res = await request(app)
-            .delete('/api/admin/escolas/999999')
+            .delete('/api/dev/escolas/999999')
             .set('Authorization', `Bearer ${adminToken}`);
         expect(res.status).toBe(404);
     });

@@ -1247,6 +1247,76 @@ class AdminController {
      *
      * Query params: ?esc_id=, ?page=, ?limit=
      */
+    async relatorioAtividade(req, res) {
+        try {
+            const dias = parseInt(req.query.dias) || 30;
+            if (isNaN(dias) || dias < 1 || dias > 365) {
+                return res.status(400).json({ error: "Parâmetro 'dias' inválido. Use entre 1 e 365." });
+            }
+
+            const inicio = new Date();
+            inicio.setDate(inicio.getDate() - dias);
+            const inicioStr = inicio.toISOString().slice(0, 10);
+
+            const esc_id = req.user.per_tipo === 1 ? req.user.per_escola_id : null;
+
+            // PASSO 1: Caronas no período filtradas por car_data (1=aberta,2=em espera,0=cancelada,3=finalizada)
+            const caronasWhere = esc_id
+                ? `INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                   INNER JOIN CURSOS_USUARIOS cu ON v.usu_id = cu.usu_id
+                   INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id
+                   WHERE cr.esc_id = ${db.escape(esc_id)} AND c.car_data >= ?`
+                : `WHERE c.car_data >= ?`;
+
+            const [[caronas]] = await db.query(
+                `SELECT COUNT(*) AS total,
+                        SUM(c.car_status = 3) AS finalizadas,
+                        SUM(c.car_status = 0) AS canceladas,
+                        SUM(c.car_status = 1) AS abertas
+                 FROM CARONAS c ${caronasWhere}`,
+                [inicioStr]
+            );
+
+            // PASSO 2: Usuários novos no período
+            const usuariosWhere = esc_id
+                ? `INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id
+                   INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
+                   INNER JOIN USUARIOS_REGISTROS ur ON u.usu_id = ur.usu_id
+                   WHERE c.esc_id = ${db.escape(esc_id)} AND u.usu_status = 1 AND ur.usu_criado_em >= ?`
+                : `INNER JOIN USUARIOS_REGISTROS ur ON u.usu_id = ur.usu_id
+                   WHERE u.usu_status = 1 AND ur.usu_criado_em >= ?`;
+
+            const [[usuarios]] = await db.query(
+                `SELECT COUNT(DISTINCT u.usu_id) AS novos FROM USUARIOS u ${usuariosWhere}`,
+                [inicioStr]
+            );
+
+            // PASSO 3: Avaliações no período
+            const avaliacoesWhere = esc_id
+                ? `INNER JOIN CURSOS_USUARIOS cu ON a.usu_id_avaliado = cu.usu_id
+                   INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
+                   WHERE c.esc_id = ${db.escape(esc_id)} AND a.ava_criado_em >= ?`
+                : `WHERE a.ava_criado_em >= ?`;
+
+            const [[avaliacoes]] = await db.query(
+                `SELECT COUNT(*) AS total, ROUND(AVG(ava_nota), 2) AS media
+                 FROM AVALIACOES a ${avaliacoesWhere}`,
+                [inicioStr]
+            );
+
+            return res.status(200).json({
+                caronas,
+                usuarios,
+                avaliacoes,
+                periodo: { dias, inicio: inicioStr }
+            });
+
+        } catch (error) {
+            console.error('[ERRO] relatorioAtividade:', error);
+            return res.status(500).json({ error: 'Erro ao gerar relatório de atividade.' });
+        }
+    }
+
     async listarCursos(req, res) {
         try {
             const { per_tipo, per_escola_id } = req.user;

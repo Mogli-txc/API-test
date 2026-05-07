@@ -90,7 +90,7 @@ cd api-caronas
 NODE_ENV=test npx jest --forceExit
 ```
 
-> **15 suites** (última atualização: 2026-05-02).
+> **18 suites, 494 testes** (última atualização: 2026-05-06).
 
 ---
 

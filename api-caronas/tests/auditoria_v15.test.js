@@ -34,7 +34,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-    if (db.end) await db.end();
+    // Pool é compartilhado entre suítes — encerramento gerenciado pelo Jest no exit
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -183,8 +183,13 @@ describe('T-V15-07 a T-V15-09 — Refresh token rotativo', () => {
         await request(app).post('/api/usuarios/cadastro').send({ usu_email: email, usu_senha: senha });
         await db.query(
             `UPDATE USUARIOS
-             SET usu_verificacao = 5, usu_verificacao_expira = DATE_ADD(NOW(), INTERVAL 5 DAY)
+             SET usu_status = 1, usu_verificacao = 5, usu_verificacao_expira = DATE_ADD(NOW(), INTERVAL 5 DAY)
              WHERE usu_email = ?`,
+            [email]
+        );
+        await db.query(
+            `UPDATE PERFIL SET per_habilitado = 1
+             WHERE usu_id = (SELECT usu_id FROM USUARIOS WHERE usu_email = ?)`,
             [email]
         );
     });
@@ -265,8 +270,13 @@ describe('T-V15-10 — Bloqueio de login por contrato expirado', () => {
         await request(app).post('/api/usuarios/cadastro').send({ usu_email: emailAluno, usu_senha: senhaAluno });
         await db.query(
             `UPDATE USUARIOS
-             SET usu_verificacao = 5, usu_verificacao_expira = DATE_ADD(NOW(), INTERVAL 5 DAY)
+             SET usu_status = 1, usu_verificacao = 5, usu_verificacao_expira = DATE_ADD(NOW(), INTERVAL 5 DAY)
              WHERE usu_email = ?`,
+            [emailAluno]
+        );
+        await db.query(
+            `UPDATE PERFIL SET per_habilitado = 1
+             WHERE usu_id = (SELECT usu_id FROM USUARIOS WHERE usu_email = ?)`,
             [emailAluno]
         );
     });

@@ -1103,6 +1103,88 @@ class UsuarioController {
      * Tabela: PENALIDADES
      * Parâmetro: id (via URL — deve ser o próprio usu_id ou Dev)
      */
+    reputacao = async (req, res) => {
+        try {
+            const { id } = req.params;
+            if (!id || isNaN(id)) {
+                return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+
+            const [[usuario]] = await db.query(
+                'SELECT usu_id, usu_nome FROM USUARIOS WHERE usu_id = ? AND usu_status = 1',
+                [id]
+            );
+            if (!usuario) return res.status(404).json({ error: "Usuário não encontrado." });
+
+            // PASSO 1: Média e total de avaliações recebidas
+            const [[avaliacao]] = await db.query(
+                `SELECT ROUND(AVG(ava_nota), 2) AS media, COUNT(*) AS total
+                 FROM AVALIACOES WHERE usu_id_avaliado = ?`,
+                [id]
+            );
+
+            // PASSO 2: Quantidade de caronas como motorista e como passageiro
+            const [[atividade]] = await db.query(
+                `SELECT
+                    (SELECT COUNT(*) FROM CARONAS c
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     WHERE v.usu_id = ? AND c.car_status != 'cancelada') AS caronas_motorista,
+                    (SELECT COUNT(*) FROM CARONA_PESSOAS cp
+                     WHERE cp.usu_id = ? AND cp.car_pes_status = 1) AS caronas_passageiro`,
+                [id, id]
+            );
+
+            return res.status(200).json({
+                usu_id:    usuario.usu_id,
+                usu_nome:  usuario.usu_nome,
+                avaliacoes: {
+                    media: avaliacao.media ?? 0,
+                    total: avaliacao.total ?? 0
+                },
+                atividade: {
+                    caronas_motorista:  atividade.caronas_motorista  ?? 0,
+                    caronas_passageiro: atividade.caronas_passageiro ?? 0
+                }
+            });
+
+        } catch (error) {
+            console.error('[ERRO] reputacao:', error);
+            return res.status(500).json({ error: 'Erro ao buscar reputação.' });
+        }
+    }
+
+    exportarDados = async (req, res) => {
+        try {
+            const { id } = req.params;
+            if (!id || isNaN(id)) {
+                return res.status(400).json({ error: "ID de usuário inválido." });
+            }
+
+            if (!await checkDevOrOwner(req.user.id, id)) {
+                return res.status(403).json({ error: "Sem permissão para exportar dados deste usuário." });
+            }
+
+            // PASSO 1: Dados do usuário sem a senha (LGPD Art. 18)
+            const [[usuario]] = await db.query(
+                `SELECT usu_id, usu_nome, usu_email, usu_telefone, usu_matricula,
+                        usu_endereco, usu_status, usu_verificacao
+                 FROM USUARIOS WHERE usu_id = ?`,
+                [id]
+            );
+            if (!usuario) return res.status(404).json({ error: "Usuário não encontrado." });
+
+            return res.status(200).json({
+                usuario,
+                base_legal: "LGPD Art. 18 - Direito à portabilidade dos dados",
+                gerado_em:  new Date().toISOString()
+            });
+
+        } catch (error) {
+            console.error('[ERRO] exportarDados:', error);
+            return res.status(500).json({ error: 'Erro ao exportar dados.' });
+        }
+    }
+
     minhasPenalidades = async (req, res) => {
         try {
             const { id } = req.params;

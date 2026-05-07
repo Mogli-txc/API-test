@@ -236,9 +236,9 @@ describe('Grupo 2 — Admin Stats', () => {
         expect(res.body).toHaveProperty('stats');
     });
 
-    it('2.4 — GET /api/admin/stats/sistema — dev recebe 200 com sistema', async () => {
+    it('2.4 — GET /api/dev/stats/sistema — dev recebe 200 com sistema', async () => {
         const res = await request(app)
-            .get('/api/admin/stats/sistema')
+            .get('/api/dev/stats/sistema')
             .set('Authorization', `Bearer ${adminToken}`);
 
         expect(res.status).toBe(200);
@@ -250,9 +250,9 @@ describe('Grupo 2 — Admin Stats', () => {
         expect(res.status).toBe(401);
     });
 
-    it('2.6 — GET /api/admin/stats/sistema — usuário sem role admin deve retornar 403', async () => {
+    it('2.6 — GET /api/dev/stats/sistema — usuário sem role admin deve retornar 403', async () => {
         const res = await request(app)
-            .get('/api/admin/stats/sistema')
+            .get('/api/dev/stats/sistema')
             .set('Authorization', `Bearer ${userToken}`);
 
         expect(res.status).toBe(403);

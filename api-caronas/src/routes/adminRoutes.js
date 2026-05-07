@@ -144,4 +144,6 @@ router.get('/escolas/:esc_id', ...adminGuard, AdminController.obterEscola);
  */
 router.get('/cursos', ...adminGuard, AdminController.listarCursos);
 
+router.get('/relatorios/atividade', ...adminGuard, AdminController.relatorioAtividade);
+
 module.exports = router;
