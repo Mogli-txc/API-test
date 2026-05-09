@@ -176,27 +176,27 @@ class CaronaController {
                 : '';
 
             // JOIN com PONTO_ENCONTROS apenas quando filtro de proximidade está ativo  [v10]
-            // LEFT JOIN para não excluir caronas cujo ponto ainda não foi geocodificado
-            // quando o filtro NÃO está ativo. Quando ativo, o bounding box no WHERE
-            // já garante que apenas caronas com coords válidas são retornadas.
+            // Filtra por ponto de DESTINO (pon_tipo=1): o usuário busca caronas que vão
+            // até o endereço pesquisado, não que partem dele.
             const joinPontos = proximidadeAtiva
                 ? `INNER JOIN PONTO_ENCONTROS pe ON pe.car_id = c.car_id
-                       AND pe.pon_tipo   = 0
+                       AND pe.pon_tipo   = 1
                        AND pe.pon_status = 1
                        AND pe.pon_lat IS NOT NULL`
                 : '';
 
             // Inclui pon_lat/pon_lon na projeção apenas quando filtro ativo (necessário para Haversine em JS)
             const selecaoCoordenadas = proximidadeAtiva
-                ? ', pe.pon_lat AS partida_lat, pe.pon_lon AS partida_lon'
+                ? ', pe.pon_lat AS destino_lat, pe.pon_lon AS destino_lon'
                 : '';
 
             const whereExtra = cursor !== null ? 'AND c.car_id < ?' : '';
 
-            // JOIN entre várias tabelas para trazer informações completas da carona
+            // JOIN entre várias tabelas para trazer informações completas da carona.
+            // req.user.id adicionado para excluir as próprias caronas do motorista autenticado.
             const params = cursor !== null
-                ? [...filtroParams, cursor, limit]
-                : [...filtroParams, limit, offset];
+                ? [...filtroParams, req.user.id, cursor, limit]
+                : [...filtroParams, req.user.id, limit, offset];
 
             const [caronas] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
@@ -232,6 +232,7 @@ class CaronaController {
                  WHERE c.car_status = 1
                    AND (c.car_data > CURDATE()
                         OR (c.car_data = CURDATE() AND c.car_hor_saida >= CURTIME()))
+                   AND v.usu_id != ?
                    ${filtroExtra}
                    ${whereExtra}
                  ORDER BY c.car_id DESC
@@ -246,9 +247,9 @@ class CaronaController {
             let caronasFiltradas = caronas;
             if (proximidadeAtiva) {
                 caronasFiltradas = caronas.filter(c => {
-                    const dist = calcularDistanciaKm(latUsuario, lonUsuario, c.partida_lat, c.partida_lon);
+                    const dist = calcularDistanciaKm(latUsuario, lonUsuario, c.destino_lat, c.destino_lon);
                     return dist <= raioKm;
-                }).map(({ partida_lat, partida_lon, ...rest }) => rest); // remove coords internas da resposta
+                }).map(({ destino_lat, destino_lon, ...rest }) => rest); // remove coords internas da resposta
             }
             // ────────────────────────────────────────────────────────────────────────────
 
@@ -264,6 +265,7 @@ class CaronaController {
             const [[{ totalGeral }]] = await db.query(
                 `SELECT COUNT(*) AS totalGeral
                  FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  LEFT  JOIN CURSOS_USUARIOS cu  ON c.cur_usu_id = cu.cur_usu_id
                  LEFT  JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
                  ${joinEscola}
@@ -271,8 +273,9 @@ class CaronaController {
                  WHERE c.car_status = 1
                    AND (c.car_data > CURDATE()
                         OR (c.car_data = CURDATE() AND c.car_hor_saida >= CURTIME()))
+                   AND v.usu_id != ?
                    ${filtroExtra}`,
-                filtroParams
+                [...filtroParams, req.user.id]
             );
 
             return res.status(200).json({
@@ -432,6 +435,23 @@ class CaronaController {
             if (vagasNum > capacidade) {
                 return res.status(400).json({
                     error: `Vagas disponíveis não podem exceder a capacidade do veículo (${capacidade} vagas).`
+                });
+            }
+
+            // Bloqueia criar nova carona se o motorista já tem uma ativa (Aberta=1 ou Em espera=2)
+            const [ativas] = await db.query(
+                `SELECT c.car_id
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 WHERE v.usu_id = ? AND c.car_status IN (1, 2)
+                 ORDER BY c.car_id DESC
+                 LIMIT 1`,
+                [usu_id]
+            );
+            if (ativas.length > 0) {
+                return res.status(409).json({
+                    error: "Você já possui uma carona ativa. Finalize ou cancele antes de oferecer outra.",
+                    car_id: ativas[0].car_id
                 });
             }
 
@@ -629,9 +649,15 @@ class CaronaController {
             const offset = (page - 1) * limit;
 
             // Filtro opcional por status (0=Cancelada, 1=Aberta, 2=Em espera, 3=Finalizada)
+            // Filtro alternativo `ativas=true` agrupa Aberta + Em espera numa única query.
             let filtroStatus = '';
             const params = [usu_id];
-            if (req.query.status !== undefined) {
+            const ativasParam = String(req.query.ativas ?? '').toLowerCase();
+            const querAtivas = ativasParam === 'true' || ativasParam === '1';
+
+            if (querAtivas) {
+                filtroStatus = ' AND c.car_status IN (1, 2)';
+            } else if (req.query.status !== undefined) {
                 const statusFiltro = parseInt(req.query.status);
                 if (isNaN(statusFiltro) || ![0, 1, 2, 3].includes(statusFiltro)) {
                     return res.status(400).json({ error: "status inválido. Use 0, 1, 2 ou 3." });
@@ -696,7 +722,12 @@ class CaronaController {
 
             let filtroStatus = '';
             const params = [usu_id, usu_id];
-            if (req.query.status !== undefined) {
+            const ativasParam = String(req.query.ativas ?? '').toLowerCase();
+            const querAtivas = ativasParam === 'true' || ativasParam === '1';
+
+            if (querAtivas) {
+                filtroStatus = ' AND c.car_status IN (1, 2)';
+            } else if (req.query.status !== undefined) {
                 const statusFiltro = parseInt(req.query.status);
                 if (isNaN(statusFiltro) || ![0, 1, 2, 3].includes(statusFiltro)) {
                     return res.status(400).json({ error: "status inválido. Use 0, 1, 2 ou 3." });

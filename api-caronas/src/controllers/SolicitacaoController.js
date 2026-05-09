@@ -169,22 +169,47 @@ class SolicitacaoController {
                     });
                 }
 
-                // Verifica duplicidade dentro da transação — evita INSERT duplo concorrente
-                const [jaExiste] = await conn.query(
-                    `SELECT sol_id FROM SOLICITACOES_CARONA
-                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status IN (1, 2)`,
+                // A unique key UQ_Solicitacao em (car_id, usu_id_passageiro) bloqueia
+                // INSERT mesmo quando há registro com status terminal (0 ou 3). Por isso
+                // checamos a linha existente e tratamos cada estado:
+                //   1/2 (ativos)   -> 409: já existe solicitação em andamento
+                //   3 (recusada)   -> 409: motorista já decidiu, não permite re-solicitar
+                //   0 (cancelada)  -> reativa via UPDATE
+                //   sem registro   -> INSERT
+                const [existente] = await conn.query(
+                    `SELECT sol_id, sol_status FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ?`,
                     [car_id, usu_id]
                 );
-                if (jaExiste.length > 0) {
-                    await conn.rollback();
-                    return res.status(409).json({ error: "Você já tem uma solicitação ativa para esta carona." });
-                }
 
-                [resultado] = await conn.query(
-                    `INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli)
-                     VALUES (?, ?, 1, ?)`,
-                    [usu_id, car_id, sol_vaga_soli]
-                );
+                if (existente.length > 0) {
+                    const statusAtual = existente[0].sol_status;
+
+                    if (statusAtual === 1 || statusAtual === 2) {
+                        await conn.rollback();
+                        return res.status(409).json({ error: "Você já tem uma solicitação ativa para esta carona." });
+                    }
+
+                    if (statusAtual === 3) {
+                        await conn.rollback();
+                        return res.status(409).json({ error: "Sua solicitação foi recusada pelo motorista para esta carona." });
+                    }
+
+                    // statusAtual === 0 (Cancelada): reativa o registro existente
+                    await conn.query(
+                        `UPDATE SOLICITACOES_CARONA
+                         SET sol_status = 1, sol_vaga_soli = ?
+                         WHERE sol_id = ?`,
+                        [sol_vaga_soli, existente[0].sol_id]
+                    );
+                    resultado = { insertId: existente[0].sol_id };
+                } else {
+                    [resultado] = await conn.query(
+                        `INSERT INTO SOLICITACOES_CARONA (usu_id_passageiro, car_id, sol_status, sol_vaga_soli)
+                         VALUES (?, ?, 1, ?)`,
+                        [usu_id, car_id, sol_vaga_soli]
+                    );
+                }
 
                 await conn.commit();
             } catch (err) {

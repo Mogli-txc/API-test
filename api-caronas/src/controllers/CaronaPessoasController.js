@@ -163,9 +163,10 @@ class CaronaPessoasController {
             }
 
             // PASSO 3: Verifica se o usuário autenticado é motorista ou passageiro desta carona
+            // Motorista obtido via VEICULOS (null-safe para cur_usu_id=NULL — v13).
             const [motorista] = await db.query(
-                `SELECT cu.usu_id FROM CARONAS c
-                 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
+                `SELECT v.usu_id FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -174,9 +175,16 @@ class CaronaPessoasController {
             }
             const ehMotorista = motorista[0].usu_id === req.user.id;
             if (!ehMotorista) {
+                // Passageiro ativo pode estar em CARONA_PESSOAS (adicionado direto)
+                // OU em SOLICITACOES_CARONA com sol_status=2 (aceito via solicitação).
                 const [ehPassageiro] = await db.query(
-                    'SELECT car_pes_id FROM CARONA_PESSOAS WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1',
-                    [car_id, req.user.id]
+                    `SELECT 1 FROM CARONA_PESSOAS
+                     WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                     UNION
+                     SELECT 1 FROM SOLICITACOES_CARONA
+                     WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2
+                     LIMIT 1`,
+                    [car_id, req.user.id, car_id, req.user.id]
                 );
                 if (ehPassageiro.length === 0) {
                     return res.status(403).json({ error: "Sem permissão para visualizar passageiros desta carona." });
