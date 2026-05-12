@@ -27,7 +27,8 @@ const { notificar, TIPOS } = require('../utils/notificar');
 const { getMotoristaId }   = require('../utils/authHelper'); // [v17 — CODE-B03]
 
 // Haversine para filtro de proximidade — sem custo de API, executado em memória  [v10]
-const { calcularDistanciaKm } = require('../services/geocodingService');
+// geocodificarEndereco usado pelo /oferecer atômico [v17 — ENR-05]
+const { calcularDistanciaKm, geocodificarEndereco } = require('../services/geocodingService');
 
 // Regex para validar formato HH:MM ou HH:MM:SS
 const HORA_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
@@ -312,14 +313,39 @@ class CaronaController {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
+            // LEFT JOIN com PONTO_ENCONTROS para retornar origem (pon_tipo=0) e destino (pon_tipo=1)
+            // como objetos enriquecidos no mesmo round-trip. Subselects garantem que apenas o
+            // primeiro ponto ativo de cada tipo seja escolhido (ordenado por pon_ordem, pon_id).
             const [rows] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
                         c.car_vagas_dispo, c.car_status, c.vei_id, c.cur_usu_id,
-                        v.vei_marca_modelo, v.vei_placa, v.vei_tipo, v.vei_vagas,
-                        u.usu_nome AS motorista, v.usu_id AS motorista_id
+                        v.vei_marca_modelo, v.vei_placa, v.vei_tipo, v.vei_vagas, v.vei_cor,
+                        u.usu_nome AS motorista, v.usu_id AS motorista_id,
+                        origem.pon_id       AS origem_pon_id,
+                        origem.pon_nome     AS origem_nome,
+                        origem.pon_endereco AS origem_endereco,
+                        origem.pon_lat      AS origem_lat,
+                        origem.pon_lon      AS origem_lon,
+                        destino.pon_id       AS destino_pon_id,
+                        destino.pon_nome     AS destino_nome,
+                        destino.pon_endereco AS destino_endereco,
+                        destino.pon_lat      AS destino_lat,
+                        destino.pon_lon      AS destino_lon
                  FROM CARONAS c
                  INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
+                 LEFT  JOIN PONTO_ENCONTROS origem ON origem.pon_id = (
+                     SELECT pe2.pon_id FROM PONTO_ENCONTROS pe2
+                     WHERE pe2.car_id = c.car_id AND pe2.pon_tipo = 0 AND pe2.pon_status = 1
+                     ORDER BY pe2.pon_ordem IS NULL, pe2.pon_ordem ASC, pe2.pon_id ASC
+                     LIMIT 1
+                 )
+                 LEFT  JOIN PONTO_ENCONTROS destino ON destino.pon_id = (
+                     SELECT pe3.pon_id FROM PONTO_ENCONTROS pe3
+                     WHERE pe3.car_id = c.car_id AND pe3.pon_tipo = 1 AND pe3.pon_status = 1
+                     ORDER BY pe3.pon_ordem IS NULL, pe3.pon_ordem ASC, pe3.pon_id ASC
+                     LIMIT 1
+                 )
                  WHERE c.car_id = ?`,
                 [car_id]
             );
@@ -328,9 +354,27 @@ class CaronaController {
                 return res.status(404).json({ error: "Carona não encontrada." });
             }
 
+            const r = rows[0];
+            const origem = r.origem_pon_id !== null
+                ? { pon_id: r.origem_pon_id, pon_nome: r.origem_nome, pon_endereco: r.origem_endereco, pon_lat: r.origem_lat, pon_lon: r.origem_lon }
+                : null;
+            const destino = r.destino_pon_id !== null
+                ? { pon_id: r.destino_pon_id, pon_nome: r.destino_nome, pon_endereco: r.destino_endereco, pon_lat: r.destino_lat, pon_lon: r.destino_lon }
+                : null;
+
+            const carona = {
+                car_id: r.car_id, car_desc: r.car_desc, car_data: r.car_data,
+                car_hor_saida: r.car_hor_saida, car_vagas_dispo: r.car_vagas_dispo,
+                car_status: r.car_status, vei_id: r.vei_id, cur_usu_id: r.cur_usu_id,
+                vei_marca_modelo: r.vei_marca_modelo, vei_placa: r.vei_placa,
+                vei_tipo: r.vei_tipo, vei_vagas: r.vei_vagas, vei_cor: r.vei_cor,
+                motorista: r.motorista, motorista_id: r.motorista_id,
+                origem, destino,
+            };
+
             return res.status(200).json({
                 message: "Detalhes da carona recuperados",
-                carona:  rows[0]
+                carona,
             });
 
         } catch (error) {
@@ -341,15 +385,23 @@ class CaronaController {
 
     /**
      * MÉTODO: criar
-     * Insere uma nova carona no banco com status Aberta (car_status = 1).
+     * Insere uma nova carona com status Aberta (car_status = 1) JUNTO com os
+     * pontos de partida e destino, dentro de uma transação atômica [v17 — ENR-05].
      *
-     * Tabela: CARONAS (INSERT)
-     * Campos obrigatórios no body: cur_usu_id, vei_id, car_desc, car_data,
-     *   car_hor_saida, car_vagas_dispo
+     * Tabelas: CARONAS (INSERT) + PONTO_ENCONTROS (2 INSERTs)
+     * Campos obrigatórios no body:
+     *   vei_id, car_data, car_hor_saida, car_vagas_dispo,
+     *   origem  = { pon_nome, pon_endereco, pon_endereco_geom? },
+     *   destino = { pon_nome, pon_endereco, pon_endereco_geom? }
+     * Campos opcionais: cur_usu_id, car_desc
+     *
+     * Invariante: se qualquer um dos pontos falhar (validação ou inserção),
+     * a carona NÃO é criada. Impossível ter carona sem origem+destino.
      */
     async criar(req, res) {
+        let conn;
         try {
-            const { cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo } = req.body;
+            const { cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, origem, destino } = req.body;
 
             // cur_usu_id é opcional — NULL para cadastros temporários sem curso vinculado [v13]
             if (!vei_id || !car_data || !car_hor_saida || !car_vagas_dispo) {
@@ -357,6 +409,23 @@ class CaronaController {
                     error: "Campos obrigatórios: vei_id, car_data, car_hor_saida, car_vagas_dispo."
                 });
             }
+
+            // Valida origem/destino — agora obrigatórios [v17 — ENR-05]
+            const validarPonto = (ponto, rotulo) => {
+                if (!ponto || typeof ponto !== 'object') {
+                    return `Campo "${rotulo}" é obrigatório (objeto com pon_nome e pon_endereco).`;
+                }
+                const nome = String(ponto.pon_nome ?? '').trim();
+                const endereco = String(ponto.pon_endereco ?? '').trim();
+                if (!nome) return `"${rotulo}.pon_nome" é obrigatório.`;
+                if (nome.length > 25) return `"${rotulo}.pon_nome" não pode exceder 25 caracteres.`;
+                if (!endereco) return `"${rotulo}.pon_endereco" é obrigatório.`;
+                return null;
+            };
+            const erroOrigem = validarPonto(origem, 'origem');
+            if (erroOrigem) return res.status(400).json({ error: erroOrigem });
+            const erroDestino = validarPonto(destino, 'destino');
+            if (erroDestino) return res.status(400).json({ error: erroDestino });
 
             // Sanitiza car_desc quando fornecido (campo opcional)
             let car_desc_limpa = null;
@@ -470,28 +539,93 @@ class CaronaController {
                 curUsuIdFinal = cur_usu_id;
             }
 
-            // Insere a carona com status 1 (Aberta)
-            const [resultado] = await db.query(
+            // Pré-processa cada ponto: parseia pon_endereco_geom se vier, senão
+            // geocodifica via Nominatim (best-effort). Coordenadas null não bloqueiam.
+            const prepararPonto = async (ponto) => {
+                const nome     = stripHtml(String(ponto.pon_nome).trim());
+                const endereco = stripHtml(String(ponto.pon_endereco).trim());
+                let lat = null;
+                let lon = null;
+                let geom = null;
+
+                if (ponto.pon_endereco_geom) {
+                    const raw = String(ponto.pon_endereco_geom).trim();
+                    if (/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(raw)) {
+                        const [latStr, lonStr] = raw.split(',');
+                        lat = parseFloat(latStr);
+                        lon = parseFloat(lonStr);
+                        geom = raw;
+                    }
+                    // Formatos diferentes (GeoJSON) podem ser adicionados aqui no futuro
+                }
+
+                if (lat === null) {
+                    const coords = await geocodificarEndereco(endereco);
+                    if (coords) {
+                        lat = coords.lat;
+                        lon = coords.lon;
+                        geom = `${lat},${lon}`;
+                    }
+                }
+
+                return { nome, endereco, lat, lon, geom };
+            };
+
+            const origemPreparada  = await prepararPonto(origem);
+            const destinoPreparado = await prepararPonto(destino);
+
+            // Transação atômica: CARONA + 2 PONTO_ENCONTROS [v17 — ENR-05]
+            conn = await db.getConnection();
+            await conn.beginTransaction();
+
+            const [caronaRes] = await conn.query(
                 `INSERT INTO CARONAS
                     (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status)
                  VALUES (?, ?, ?, ?, ?, ?, 1)`,
                 [vei_id, curUsuIdFinal, car_desc_limpa, car_data, car_hor_saida, vagasNum]
             );
+            const novoCarId = caronaRes.insertId;
 
-            await registrarAudit({ tabela: 'CARONAS', registroId: resultado.insertId, acao: 'CARONA_CRIAR', usuId: usu_id, ip: req.ip });
+            const inserirPonto = async (p, tipo) => {
+                const [r] = await conn.query(
+                    `INSERT INTO PONTO_ENCONTROS
+                        (car_id, pon_endereco, pon_endereco_geom, pon_lat, pon_lon, pon_tipo, pon_nome, pon_ordem, pon_status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 1)`,
+                    [novoCarId, p.endereco, p.geom, p.lat, p.lon, tipo, p.nome]
+                );
+                return r.insertId;
+            };
+
+            const origemId  = await inserirPonto(origemPreparada,  0);
+            const destinoId = await inserirPonto(destinoPreparado, 1);
+
+            await conn.commit();
+
+            await registrarAudit({ tabela: 'CARONAS', registroId: novoCarId, acao: 'CARONA_CRIAR', usuId: usu_id, ip: req.ip });
 
             return res.status(201).json({
                 message: "Carona criada com sucesso!",
                 carona: {
-                    car_id: resultado.insertId,
+                    car_id: novoCarId,
                     cur_usu_id: curUsuIdFinal, vei_id, car_desc: car_desc_limpa, car_data,
-                    car_hor_saida, car_vagas_dispo, car_status: 1
+                    car_hor_saida, car_vagas_dispo, car_status: 1,
+                    origem: {
+                        pon_id: origemId, pon_nome: origemPreparada.nome, pon_endereco: origemPreparada.endereco,
+                        pon_lat: origemPreparada.lat, pon_lon: origemPreparada.lon,
+                    },
+                    destino: {
+                        pon_id: destinoId, pon_nome: destinoPreparado.nome, pon_endereco: destinoPreparado.endereco,
+                        pon_lat: destinoPreparado.lat, pon_lon: destinoPreparado.lon,
+                    },
                 }
             });
 
         } catch (error) {
+            if (conn) await conn.rollback();
             console.error("[ERRO] criar:", error);
             return res.status(500).json({ error: "Erro ao criar carona." });
+        } finally {
+            if (conn) conn.release();
         }
     }
 

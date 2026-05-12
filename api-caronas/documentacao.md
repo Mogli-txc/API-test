@@ -24,7 +24,12 @@ info:
     - Nível 5 → envia comprovante → nível 1
     - Nível 5 → cadastra veículo → nível 6
     - Nível 6 → envia comprovante → nível 2
-    - Nível 1 → envia CNH (com veículo ativo) → nível 2
+    - Nível 1 → cadastra veículo → nível 2 [v17 — CODE-A04]
+
+    > A partir de v17, **CNH deixou de ser pré-requisito** para promoção ao nível 2.
+    > Basta matrícula verificada (nível 1) + veículo cadastrado. A CNH continua
+    > sendo aceita via `POST /api/documentos/cnh` mas não bloqueia a publicação
+    > de caronas.
 
     **Penalidades (tabela `PENALIDADES`):**
     | `pen_tipo` | Efeito | Duração |
@@ -228,7 +233,11 @@ components:
     # ─── Carona ─────────────────────────────────────────────────────────────────
     CaronaCriarRequest:
       type: object
-      required: [vei_id, car_data, car_hor_saida, car_vagas_dispo]
+      required: [vei_id, car_data, car_hor_saida, car_vagas_dispo, origem, destino]
+      description: |
+        [v17 — ENR-05] `origem` e `destino` passaram a ser **obrigatórios**.
+        A criação é atômica: se qualquer ponto falhar na validação ou inserção,
+        a carona não é criada (rollback). Impossível criar carona sem ambos os pontos.
       properties:
         cur_usu_id:
           type: integer
@@ -257,6 +266,42 @@ components:
           type: integer
           minimum: 1
           example: 3
+        origem:
+          type: object
+          description: "Ponto de partida (pon_tipo=0). Obrigatório [v17 — ENR-05]."
+          required: [pon_nome, pon_endereco]
+          properties:
+            pon_nome:
+              type: string
+              maxLength: 25
+              example: "Portão FFLCH"
+            pon_endereco:
+              type: string
+              example: "Av. Prof. Luciano Gualberto, São Paulo"
+            pon_endereco_geom:
+              type: string
+              nullable: true
+              description: |
+                Coordenadas no formato "lat,lon". **Opcional** — quando ausente,
+                o backend geocodifica `pon_endereco` via Nominatim automaticamente
+                (best-effort: se falhar, ponto é salvo sem lat/lon).
+              example: "-23.5614,-46.7215"
+        destino:
+          type: object
+          description: "Ponto de destino (pon_tipo=1). Obrigatório [v17 — ENR-05]."
+          required: [pon_nome, pon_endereco]
+          properties:
+            pon_nome:
+              type: string
+              maxLength: 25
+              example: "Praça da Sé"
+            pon_endereco:
+              type: string
+              example: "Praça da Sé, Centro, São Paulo"
+            pon_endereco_geom:
+              type: string
+              nullable: true
+              example: "-23.5505,-46.6333"
 
     Carona:
       type: object
@@ -1391,7 +1436,14 @@ paths:
               $ref: '#/components/schemas/VeiculoCadastroRequest'
       responses:
         '201':
-          description: Veículo cadastrado
+          description: |
+            Veículo cadastrado. A resposta inclui `usu_verificacao` e
+            `usu_verificacao_expira` atualizados — o cliente pode usar esses
+            campos para sincronizar o AuthContext sem refetch de `/perfil`.
+
+            **Promoções automáticas [v17 — CODE-A04]:**
+            - Nível 5 → 6 (temporário com veículo, 5 dias)
+            - Nível 1 → 2 (matrícula + veículo, prazo semestral renovado)
           content:
             application/json:
               schema:
@@ -1401,6 +1453,16 @@ paths:
                     type: string
                   veiculo:
                     $ref: '#/components/schemas/Veiculo'
+                  usu_verificacao:
+                    type: integer
+                    nullable: true
+                    description: "Nível atualizado após eventual promoção. Pode coincidir com o nível anterior se nenhuma promoção foi aplicável."
+                    example: 2
+                  usu_verificacao_expira:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: "Expiração do nível atual. Renovada (180 dias) quando o usuário foi promovido de 1 para 2."
         '400':
           description: Dados inválidos (placa mal formatada, vagas fora do limite por tipo)
         '401':
@@ -1696,7 +1758,13 @@ paths:
   /api/caronas/oferecer:
     post:
       tags: [Caronas]
-      summary: Oferecer uma carona
+      summary: Oferecer uma carona (com origem e destino atômicos) [v17 — ENR-05]
+      description: |
+        Cria a carona e os pontos de partida + destino em uma transação atômica.
+        Se qualquer ponto falhar na validação ou inserção, a carona NÃO é criada.
+
+        Substitui o fluxo antigo de POST /api/caronas/oferecer + POST /api/pontos
+        em duas chamadas separadas (que podia deixar caronas "órfãs" sem pontos).
       security:
         - bearerAuth: []
       requestBody:
@@ -1707,7 +1775,7 @@ paths:
               $ref: '#/components/schemas/CaronaCriarRequest'
       responses:
         '201':
-          description: Carona criada
+          description: Carona criada com origem e destino. A resposta inclui os pontos com `pon_id` para uso futuro.
           content:
             application/json:
               schema:
@@ -1716,16 +1784,55 @@ paths:
                   message:
                     type: string
                   carona:
-                    $ref: '#/components/schemas/Carona'
+                    type: object
+                    properties:
+                      car_id:          { type: integer }
+                      cur_usu_id:      { type: integer, nullable: true }
+                      vei_id:          { type: integer }
+                      car_desc:        { type: string, nullable: true }
+                      car_data:        { type: string, format: date }
+                      car_hor_saida:   { type: string }
+                      car_vagas_dispo: { type: integer }
+                      car_status:      { type: integer, example: 1 }
+                      origem:
+                        type: object
+                        properties:
+                          pon_id:       { type: integer }
+                          pon_nome:     { type: string }
+                          pon_endereco: { type: string }
+                          pon_lat:      { type: number, nullable: true }
+                          pon_lon:      { type: number, nullable: true }
+                      destino:
+                        type: object
+                        properties:
+                          pon_id:       { type: integer }
+                          pon_nome:     { type: string }
+                          pon_endereco: { type: string }
+                          pon_lat:      { type: number, nullable: true }
+                          pon_lon:      { type: number, nullable: true }
         '400':
-          description: Dados inválidos
+          description: |
+            Dados inválidos. Causas comuns:
+            - `origem` ou `destino` ausentes
+            - `pon_nome` vazio ou com mais de 25 caracteres
+            - `pon_endereco` vazio
+            - `vei_id`, `car_data`, `car_hor_saida` ou `car_vagas_dispo` ausentes
+            - Data/hora no passado
         '401':
           description: Não autenticado
 
   /api/caronas/{car_id}:
     get:
       tags: [Caronas]
-      summary: Obter carona por ID
+      summary: Obter carona por ID (com pontos enriquecidos) [v17 — ENR-04]
+      description: |
+        Retorna a carona junto com os pontos de partida (`origem`) e destino (`destino`)
+        no mesmo round-trip. Cada ponto vem como objeto com `pon_id`, `pon_nome`,
+        `pon_endereco`, `pon_lat`, `pon_lon` — ou `null` quando a carona não tem ponto
+        daquele tipo cadastrado.
+
+        Use este endpoint para carregar a "carona ativa" do motorista ou passageiro
+        sem precisar do `/resumo` (que é mais pesado e traz passageiros + avaliações).
       security:
         - bearerAuth: []
       parameters:
@@ -1737,11 +1844,52 @@ paths:
           example: 1
       responses:
         '200':
-          description: Dados da carona
+          description: Dados da carona com origem e destino enriquecidos
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Carona'
+                type: object
+                properties:
+                  message:
+                    type: string
+                  carona:
+                    type: object
+                    properties:
+                      car_id:           { type: integer }
+                      car_desc:         { type: string, nullable: true }
+                      car_data:         { type: string, format: date }
+                      car_hor_saida:    { type: string }
+                      car_vagas_dispo:  { type: integer }
+                      car_status:       { type: integer }
+                      vei_id:           { type: integer }
+                      cur_usu_id:       { type: integer, nullable: true }
+                      vei_marca_modelo: { type: string, nullable: true }
+                      vei_placa:        { type: string, nullable: true }
+                      vei_tipo:         { type: integer, enum: [0, 1] }
+                      vei_vagas:        { type: integer }
+                      vei_cor:          { type: string, nullable: true }
+                      motorista:        { type: string }
+                      motorista_id:     { type: integer }
+                      origem:
+                        nullable: true
+                        type: object
+                        description: "Ponto de partida (pon_tipo=0). NULL se a carona não tem origem cadastrada."
+                        properties:
+                          pon_id:       { type: integer }
+                          pon_nome:     { type: string }
+                          pon_endereco: { type: string }
+                          pon_lat:      { type: number, format: float, nullable: true }
+                          pon_lon:      { type: number, format: float, nullable: true }
+                      destino:
+                        nullable: true
+                        type: object
+                        description: "Ponto de destino (pon_tipo=1). NULL se a carona não tem destino cadastrado."
+                        properties:
+                          pon_id:       { type: integer }
+                          pon_nome:     { type: string }
+                          pon_endereco: { type: string }
+                          pon_lat:      { type: number, format: float, nullable: true }
+                          pon_lon:      { type: number, format: float, nullable: true }
         '404':
           description: Carona não encontrada
 

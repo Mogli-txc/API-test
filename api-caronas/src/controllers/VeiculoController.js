@@ -88,41 +88,34 @@ class VeiculoController {
                 [usu_id, placa_limpa, marca_limpa, tipoNum, cor_limpa, vagasNum]
             );
 
-            // PASSO 6: Promove nível de verificação do usuário  [v16 — CODE-A03]
+            // PASSO 6: Promove nível de verificação do usuário  [v17 — CODE-A04]
             //   Nível 5 → 6: temporário sem veículo passa a ter veículo (5 dias)
-            //   Nível 1 + CNH aprovada → 2: matrícula verificada + CNH + novo veículo = completo
-            const [cnhAprovada] = await db.query(
-                `SELECT doc_id FROM DOCUMENTOS_VERIFICACAO
-                 WHERE usu_id = ? AND doc_tipo = 1 AND doc_status = 0
-                 LIMIT 1`,
-                [usu_id]
+            //   Nível 1 → 2: matrícula verificada + veículo = pode oferecer caronas
+            //     (renova prazo semestral; CNH deixou de ser pré-requisito para nível 2)
+            const novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+            await db.query(
+                `UPDATE USUARIOS
+                 SET usu_verificacao = CASE
+                     WHEN usu_verificacao = 5 THEN 6
+                     WHEN usu_verificacao = 1 THEN 2
+                     ELSE usu_verificacao
+                 END,
+                 usu_verificacao_expira = CASE
+                     WHEN usu_verificacao = 1 THEN ?
+                     ELSE usu_verificacao_expira
+                 END
+                 WHERE usu_id = ?`,
+                [novaExpira, usu_id]
             );
 
-            if (cnhAprovada.length > 0) {
-                // CNH já aprovada e agora tem veículo: promove 1→2 renovando prazo semestral
-                const novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
-                await db.query(
-                    `UPDATE USUARIOS
-                     SET usu_verificacao = CASE
-                         WHEN usu_verificacao = 5 THEN 6
-                         WHEN usu_verificacao = 1 THEN 2
-                         ELSE usu_verificacao
-                     END,
-                     usu_verificacao_expira = CASE
-                         WHEN usu_verificacao = 1 THEN ?
-                         ELSE usu_verificacao_expira
-                     END
-                     WHERE usu_id = ?`,
-                    [novaExpira, usu_id]
-                );
-            } else {
-                // Sem CNH aprovada: apenas sobe 5→6 (temporário com veículo)
-                await db.query(
-                    `UPDATE USUARIOS SET usu_verificacao = 6
-                     WHERE usu_id = ? AND usu_verificacao = 5`,
-                    [usu_id]
-                );
-            }
+            // Lê o nível atualizado para devolver ao cliente — evita um refetch
+            // explícito de /perfil só pra sincronizar o AuthContext.
+            const [usuarioAtualizado] = await db.query(
+                `SELECT usu_verificacao, usu_verificacao_expira
+                 FROM USUARIOS WHERE usu_id = ?`,
+                [usu_id]
+            );
+            const verificacaoFinal = usuarioAtualizado[0] ?? {};
 
             await registrarAudit({
                 tabela: 'VEICULOS', registroId: resultado.insertId,
@@ -137,7 +130,9 @@ class VeiculoController {
                     vei_id: resultado.insertId,
                     usu_id, vei_placa: placa_limpa, vei_marca_modelo: marca_limpa,
                     vei_tipo: tipoNum, vei_cor: cor_limpa, vei_vagas: vagasNum, vei_status: 1
-                }
+                },
+                usu_verificacao: verificacaoFinal.usu_verificacao ?? null,
+                usu_verificacao_expira: verificacaoFinal.usu_verificacao_expira ?? null,
             });
 
         } catch (error) {
