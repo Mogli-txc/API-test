@@ -33,4 +33,22 @@ function parseCursorPagination(req, defaultLimit = 20, maxLimit = 100) {
     return { limit, cursor, page, offset };
 }
 
-module.exports = { parsePagination, parseCursorPagination };
+/**
+ * Retorna a próxima fronteira semestral: 1º de agosto ou 1º de fevereiro.
+ *
+ * Semestres brasileiros:
+ *   1º semestre (fev–jul) → próxima fronteira: 1º de agosto do mesmo ano
+ *   2º semestre (ago–jan) → próxima fronteira: 1º de fevereiro do ano seguinte
+ *
+ * @param {Date} [agora=new Date()]
+ * @returns {Date}
+ */
+function proximaFronteiraSemestral(agora = new Date()) {
+    const mes = agora.getMonth(); // 0=jan … 11=dez
+    const ano = agora.getFullYear();
+    return mes <= 6
+        ? new Date(ano, 7, 1)      // 1º de agosto do mesmo ano
+        : new Date(ano + 1, 1, 1); // 1º de fevereiro do ano seguinte
+}
+
+module.exports = { parsePagination, parseCursorPagination, proximaFronteiraSemestral };

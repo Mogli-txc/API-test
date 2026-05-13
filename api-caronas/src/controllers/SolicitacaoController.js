@@ -69,7 +69,7 @@ class SolicitacaoController {
 
             // usu_verificacao_expira é o campo unificado de expiração para todos os níveis:
             //   nível 5/6 → preenchido com NOW() + 5 dias na verificação do email
-            //   nível 1/2 → preenchido com NOW() + 6 meses na verificação semestral
+            //   nível 1/2 → preenchido com a próxima fronteira semestral (1º fev ou 1º ago)
             if (!expira || new Date(expira) < new Date()) {
                 const mensagem = (verificacao === 5 || verificacao === 6)
                     ? "Período de acesso temporário encerrado. Complete seu cadastro para continuar pedindo caronas."

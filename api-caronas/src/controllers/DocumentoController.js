@@ -7,9 +7,9 @@
  * O controller lê req.ocrResultado e decide se promove ou rejeita o usuário.
  *
  * Fluxo de promoção (quando OCR aprovado):
- *   5  (temp sem veículo) → envia comprovante → 1  (matrícula verificada, +6 meses)
- *   6  (temp com veículo) → envia comprovante → 2  (matrícula + veículo, +6 meses)
- *   1  (verificado)       → envia CNH + tem veículo ativo → 2  (+6 meses renovados)
+ *   5  (temp sem veículo) → envia comprovante → 1  (matrícula verificada, expira na próxima fronteira semestral)
+ *   6  (temp com veículo) → envia comprovante → 2  (matrícula + veículo, expira na próxima fronteira semestral)
+ *   1  (verificado)       → envia CNH + tem veículo ativo → 2  (expira na próxima fronteira semestral)
  *
  * Tabela: DOCUMENTOS_VERIFICACAO
  *   doc_id, usu_id, doc_tipo (0=comprovante, 1=cnh),
@@ -19,8 +19,7 @@
 const db  = require('../config/database');
 const fsp = require('fs').promises;
 const { registrarAudit } = require('../utils/auditLog');
-
-const SEIS_MESES_MS = 180 * 24 * 60 * 60 * 1000;
+const { proximaFronteiraSemestral } = require('../utils/queryHelpers');
 
 class DocumentoController {
 
@@ -30,8 +29,8 @@ class DocumentoController {
      * promove o nível de verificação do usuário.
      *
      * Promoção automática (OCR aprovado):
-     *   usu_verificacao = 5 → 1  (matrícula verificada, sem veículo, +6 meses)
-     *   usu_verificacao = 6 → 2  (matrícula + veículo verificados, +6 meses)
+     *   usu_verificacao = 5 → 1  (matrícula verificada, sem veículo, expira na próxima fronteira semestral)
+     *   usu_verificacao = 6 → 2  (matrícula + veículo verificados, expira na próxima fronteira semestral)
      *
      * Rejeição (OCR reprovado):
      *   Documento salvo com doc_status=2 para auditoria. Usuário não é promovido.
@@ -161,7 +160,7 @@ class DocumentoController {
                     [usu_id, melhorCurso.cur_id]
                 );
                 if (jaMatriculado.length === 0) {
-                    const dataFinal = new Date(Date.now() + SEIS_MESES_MS).toISOString().slice(0, 10);
+                    const dataFinal = proximaFronteiraSemestral().toISOString().slice(0, 10);
                     const [ins] = await db.query(
                         'INSERT INTO CURSOS_USUARIOS (usu_id, cur_id, cur_usu_dataFinal) VALUES (?, ?, ?)',
                         [usu_id, melhorCurso.cur_id, dataFinal]
@@ -186,7 +185,7 @@ class DocumentoController {
                 }
             }
             const novoNivel  = verificacao === 6 ? 2 : 1;
-            const novaExpira = new Date(Date.now() + SEIS_MESES_MS);
+            const novaExpira = proximaFronteiraSemestral();
 
             // PASSO 8: Salva documento + atualiza usuário em transação atômica
             // Opção A: histórico em DOCUMENTOS_VERIFICACAO (doc_matricula, doc_curso, doc_periodo)
@@ -258,7 +257,7 @@ class DocumentoController {
      * ativo, promove de nível 1 para 2.
      *
      * Promoção automática (OCR aprovado):
-     *   usu_verificacao = 1 + veículo ativo → 2  (+6 meses renovados)
+     *   usu_verificacao = 1 + veículo ativo → 2  (expira na próxima fronteira semestral)
      *   usu_verificacao = 1 sem veículo     → mantém 1 (CNH salva para quando cadastrar veículo)
      *
      * Rejeição (OCR reprovado):
@@ -351,7 +350,7 @@ class DocumentoController {
                 );
 
                 if (temVeiculo) {
-                    novaExpira = new Date(Date.now() + SEIS_MESES_MS); // +6 meses
+                    novaExpira = proximaFronteiraSemestral();
                     await conn.query(
                         `UPDATE USUARIOS SET usu_verificacao = 2, usu_verificacao_expira = ?
                          WHERE usu_id = ?`,

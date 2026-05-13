@@ -35,7 +35,7 @@ const { stripHtml }                      = require('../utils/sanitize');
 const { registrarAudit }                 = require('../utils/auditLog');
 const { DURACAO_SQL }                    = require('../utils/penaltyHelper');
 const { notificar, TIPOS }               = require('../utils/notificar');
-const { parsePagination, parseCursorPagination } = require('../utils/queryHelpers');
+const { parsePagination, parseCursorPagination, proximaFronteiraSemestral } = require('../utils/queryHelpers');
 
 // Mensagem padrão para Admin sem escola — evita string duplicada em 4 métodos
 const ERRO_ADMIN_SEM_ESCOLA = {
@@ -904,16 +904,15 @@ class AdminController {
 
             // PASSO 5: Penalidade tipo 4 → restaura acesso ao nível correto e renova prazo.
             // Verifica se o usuário possui veículos ativos para determinar o nível (1 ou 2).
-            // usu_verificacao_expira é renovado por 6 meses — sem isso o usuário voltaria ativo
-            // mas seria barrado imediatamente em qualquer endpoint que valida o prazo de verificação.
+            // usu_verificacao_expira é alinhado à próxima fronteira semestral (fev/ago) — sem isso
+            // o usuário voltaria ativo mas seria barrado em qualquer endpoint que valida o prazo.
             if (pen.pen_tipo === 4) {
-                const SEIS_MESES_MS = 180 * 24 * 60 * 60 * 1000;
                 const [[{ veiculosAtivos }]] = await db.query(
                     'SELECT COUNT(*) AS veiculosAtivos FROM VEICULOS WHERE usu_id = ? AND vei_status = 1',
                     [pen.usu_id]
                 );
                 const nivelRestaurado = veiculosAtivos > 0 ? 2 : 1;
-                const novaExpira = new Date(Date.now() + SEIS_MESES_MS);
+                const novaExpira = proximaFronteiraSemestral();
                 await db.query(
                     `UPDATE USUARIOS
                      SET usu_verificacao = ?, usu_verificacao_expira = ?

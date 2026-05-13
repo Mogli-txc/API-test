@@ -1221,8 +1221,8 @@ paths:
         > portais SIGAA e outros sistemas governamentais brasileiros.
 
         **Promoção automática (OCR aprovado + curso validado):**
-        - Nível 5 → **1** (matrícula verificada, +6 meses)
-        - Nível 6 → **2** (matrícula + veículo, +6 meses)
+        - Nível 5 → **1** (matrícula verificada, expira no próximo 1º fev ou 1º ago)
+        - Nível 6 → **2** (matrícula + veículo, expira no próximo 1º fev ou 1º ago)
 
         **Falha:** documento salvo com `doc_status=2` para auditoria — retorna 422.
 
@@ -1335,7 +1335,7 @@ paths:
            com confiança mínima de 75%.
 
         **Promoção automática (OCR aprovado):**
-        - Com veículo ativo (`vei_status = 1`) → **nível 2** (+6 meses)
+        - Com veículo ativo (`vei_status = 1`) → **nível 2** (expira no próximo 1º fev ou 1º ago)
         - Sem veículo → mantém nível 1 (CNH armazenada; promoção ocorre ao cadastrar veículo)
 
         **OCR reprovado:** documento salvo com `doc_status=2` para auditoria — retorna 422.
@@ -1443,7 +1443,7 @@ paths:
 
             **Promoções automáticas [v17 — CODE-A04]:**
             - Nível 5 → 6 (temporário com veículo, 5 dias)
-            - Nível 1 → 2 (matrícula + veículo, prazo semestral renovado)
+            - Nível 1 → 2 (matrícula + veículo, expira no próximo 1º fev ou 1º ago)
           content:
             application/json:
               schema:
@@ -1462,7 +1462,7 @@ paths:
                     type: string
                     format: date-time
                     nullable: true
-                    description: "Expiração do nível atual. Renovada (180 dias) quando o usuário foi promovido de 1 para 2."
+                    description: "Expiração do nível atual. Alinhada ao próximo 1º de fevereiro ou 1º de agosto quando o usuário foi promovido de 1 para 2."
         '400':
           description: Dados inválidos (placa mal formatada, vagas fora do limite por tipo)
         '401':
@@ -3564,8 +3564,8 @@ paths:
         Desativa a penalidade (`pen_ativo = 0`).
         Se `pen_tipo = 4`, consulta os veículos ativos do usuário e restaura
         `usu_verificacao` para o nível correto: `2` (com veículo ativo) ou `1` (sem veículo).
-        Renova também `usu_verificacao_expira` por +6 meses para que o usuário possa
-        utilizar a plataforma imediatamente após a remoção da suspensão.
+        Renova também `usu_verificacao_expira` alinhando ao próximo 1º fev ou 1º ago para
+        que o usuário possa utilizar a plataforma imediatamente após a remoção da suspensão.
         Admin só pode remover penalidades de usuários da sua escola.
       security:
         - bearerAuth: []

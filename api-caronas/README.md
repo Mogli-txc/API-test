@@ -479,6 +479,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v15    | `CHECK` constraints; `utf8mb4` explícito; `PERFIL` com `usu_id` como PK; separação Admin/Dev    |
 | v16    | Race condition em overbooking (`FOR UPDATE`); promoção 1→2 com CNH; `TOKEN_EXPIRED`/`TOKEN_INVALID`; guard de env vars |
 | v17    | `buscar()` e `listarCaronasComoPassageiro()` corrigidos para `cur_usu_id=NULL`; `COUNT(*)→SUM(sol_vaga_soli)`; `?status=` em listagem de usuários; helper `queryHelpers.js` |
+| v18    | Expiração semestral alinhada a fronteiras fixas (1º fev / 1º ago) via `proximaFronteiraSemestral()`; substitui `+180 dias` em `DocumentoController`, `VeiculoController` e `AdminController` |
 
 ---
 
@@ -497,8 +498,8 @@ Verificação de e-mail (OTP de 6 dígitos, válido 10 min, máx. 3 tentativas)
   │  usu_verificacao = 6 (acesso temporário por 5 dias, com veículo)
   ▼
 Envio de comprovante de matrícula (PDF → OCR automático)
-  │  5 → 1  (matrícula verificada, sem veículo, prazo semestral)
-  │  6 → 2  (matrícula + veículo verificados, prazo semestral)
+  │  5 → 1  (matrícula verificada, sem veículo, expira no próximo 1º fev ou 1º ago)
+  │  6 → 2  (matrícula + veículo verificados, expira no próximo 1º fev ou 1º ago)
   ▼
 Envio de CNH (PDF → OCR automático) + veículo ativo
   │  1 → 2  (habilitado para oferecer caronas)
@@ -506,7 +507,7 @@ Envio de CNH (PDF → OCR automático) + veículo ativo
 usu_verificacao = 2 — acesso completo (solicitar e oferecer caronas)
 ```
 
-> O prazo semestral (`usu_verificacao_expira`) expira automaticamente. O usuário precisa reenviar o comprovante de matrícula a cada semestre para manter o acesso ativo.
+> A expiração (`usu_verificacao_expira`) é alinhada à próxima fronteira semestral — sempre **1º de fevereiro** ou **1º de agosto**, independentemente do dia de envio. O usuário precisa reenviar o comprovante a cada semestre para manter o acesso ativo.
 
 ### Ciclo de vida de uma carona
 
@@ -589,8 +590,8 @@ O raio máximo permitido é **25 km** em `buscar()`. Em `listarTodas()`, o clien
 | 0     | Aguardando OTP                     | ✗              | ✗             |
 | 5     | Acesso temporário (sem veículo)    | ✓ (5 dias)     | ✗             |
 | 6     | Acesso temporário (com veículo)    | ✓ (5 dias)     | ✓ (5 dias)    |
-| 1     | Matrícula verificada               | ✓ (semestral)  | ✗             |
-| 2     | Matrícula + veículo verificados    | ✓ (semestral)  | ✓ (semestral) |
+| 1     | Matrícula verificada               | ✓ (até 1º fev/ago) | ✗                  |
+| 2     | Matrícula + veículo verificados    | ✓ (até 1º fev/ago) | ✓ (até 1º fev/ago) |
 | 9     | Suspenso (penalidade tipo 4)       | ✗              | ✗             |
 
 **`car_status`**

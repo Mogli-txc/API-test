@@ -22,6 +22,7 @@ const LIMITE_MAX_PAGINACAO = 100;
 const { checkDevOrOwner } = require('../utils/authHelper');
 const { stripHtml }       = require('../utils/sanitize');
 const { registrarAudit }  = require('../utils/auditLog');
+const { proximaFronteiraSemestral } = require('../utils/queryHelpers');
 
 class VeiculoController {
 
@@ -92,7 +93,7 @@ class VeiculoController {
             //   Nível 5 → 6: temporário sem veículo passa a ter veículo (5 dias)
             //   Nível 1 → 2: matrícula verificada + veículo = pode oferecer caronas
             //     (renova prazo semestral; CNH deixou de ser pré-requisito para nível 2)
-            const novaExpira = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+            const novaExpira = proximaFronteiraSemestral();
             await db.query(
                 `UPDATE USUARIOS
                  SET usu_verificacao = CASE
