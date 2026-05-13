@@ -1432,6 +1432,281 @@ class CaronaController {
         }
     }
 
+    /**
+     * MÉTODO: timeline
+     * Histórico cronológico de eventos de uma carona em ordem de ocorrência.
+     * Eventos cobertos: criação, solicitações, respostas (aceite/recusa), finalização, avaliações.
+     *
+     * PASSO 1: Valida participação (apenas motorista e passageiros confirmados).
+     * PASSO 2: Coleta eventos das tabelas relevantes.
+     * PASSO 3: Mescla e ordena por timestamp.
+     *
+     * GET /api/caronas/:car_id/timeline
+     */
+    async timeline(req, res) {
+        try {
+            const { car_id } = req.params;
+            if (!car_id || isNaN(car_id)) {
+                return res.status(400).json({ error: "ID de carona inválido." });
+            }
+
+            // PASSO 1: Verifica participação
+            const { isParticipanteCarona } = require('../utils/authHelper');
+            const participacao = await isParticipanteCarona(car_id, req.user.id);
+            if (participacao === null) return res.status(404).json({ error: "Carona não encontrada." });
+            if (!participacao)         return res.status(403).json({ error: "Apenas participantes podem ver a timeline." });
+
+            // PASSO 2: Busca dados em paralelo
+            const [
+                [caronaRows],
+                [solicitacoes],
+                [avaliacoes]
+            ] = await Promise.all([
+                db.query(
+                    `SELECT c.car_data, c.car_hor_saida, c.car_status, u.usu_nome AS motorista
+                     FROM CARONAS c
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
+                     WHERE c.car_id = ?`,
+                    [car_id]
+                ),
+                db.query(
+                    `SELECT sc.sol_status, sc.sol_criado_em, sc.sol_atualizado_em,
+                            sc.sol_vaga_soli, u.usu_nome
+                     FROM SOLICITACOES_CARONA sc
+                     INNER JOIN USUARIOS u ON sc.usu_id_passageiro = u.usu_id
+                     WHERE sc.car_id = ?
+                     ORDER BY sc.sol_criado_em ASC`,
+                    [car_id]
+                ),
+                db.query(
+                    `SELECT a.ava_nota, a.ava_criado_em, u.usu_nome AS avaliador
+                     FROM AVALIACOES a
+                     INNER JOIN USUARIOS u ON a.usu_id_avaliador = u.usu_id
+                     WHERE a.car_id = ?
+                     ORDER BY a.ava_criado_em ASC`,
+                    [car_id]
+                )
+            ]);
+
+            const carona = caronaRows[0];
+
+            // PASSO 3: Monta lista de eventos
+            const eventos = [];
+
+            // Evento: criação (usa car_data + car_hor_saida como referência)
+            eventos.push({
+                tipo:    'CRIACAO',
+                em:      `${String(carona.car_data).slice(0, 10)}T${carona.car_hor_saida}`,
+                detalhe: `Carona criada pelo motorista ${carona.motorista}`
+            });
+
+            // Eventos: solicitações e respostas
+            for (const s of solicitacoes) {
+                eventos.push({ tipo: 'SOLICITACAO', em: s.sol_criado_em, usu_nome: s.usu_nome, vagas: s.sol_vaga_soli });
+                if (s.sol_status === 2 && s.sol_atualizado_em) {
+                    eventos.push({ tipo: 'ACEITE',   em: s.sol_atualizado_em, usu_nome: s.usu_nome });
+                } else if (s.sol_status === 3 && s.sol_atualizado_em) {
+                    eventos.push({ tipo: 'RECUSA',   em: s.sol_atualizado_em, usu_nome: s.usu_nome });
+                } else if (s.sol_status === 0 && s.sol_atualizado_em) {
+                    eventos.push({ tipo: 'CANCELAMENTO', em: s.sol_atualizado_em, usu_nome: s.usu_nome });
+                }
+            }
+
+            // Evento: finalização
+            if (carona.car_status === 3) {
+                eventos.push({ tipo: 'FINALIZACAO', em: null, detalhe: 'Carona finalizada' });
+            } else if (carona.car_status === 0) {
+                eventos.push({ tipo: 'CANCELAMENTO_CARONA', em: null, detalhe: 'Carona cancelada' });
+            }
+
+            // Eventos: avaliações
+            for (const a of avaliacoes) {
+                eventos.push({ tipo: 'AVALIACAO', em: a.ava_criado_em, avaliador: a.avaliador, ava_nota: a.ava_nota });
+            }
+
+            // Ordena por timestamp (nulls no final)
+            eventos.sort((a, b) => {
+                if (!a.em) return 1;
+                if (!b.em) return -1;
+                return new Date(a.em) - new Date(b.em);
+            });
+
+            return res.status(200).json({
+                message: `Timeline da carona ${car_id}.`,
+                car_id:  parseInt(car_id),
+                total:   eventos.length,
+                eventos
+            });
+
+        } catch (error) {
+            console.error("[ERRO] timeline:", error);
+            return res.status(500).json({ error: "Erro ao buscar timeline da carona." });
+        }
+    }
+
+    /**
+     * MÉTODO: buscarProximas
+     * Busca caronas abertas por proximidade geográfica do ponto de partida.
+     *
+     * PASSO 1: Valida lat, lon e raio_km (máx. 25 km).
+     * PASSO 2: Bounding box SQL para pré-filtro rápido via índice.
+     * PASSO 3: Refinamento Haversine em JS para descartar cantos do quadrado.
+     *
+     * GET /api/caronas/buscar/proximas?lat=-23.55&lon=-46.63&raio_km=5
+     */
+    async buscarProximas(req, res) {
+        try {
+            const lat    = parseFloat(req.query.lat);
+            const lon    = parseFloat(req.query.lon);
+            const raioKm = parseFloat(req.query.raio_km) || 5;
+
+            if (isNaN(lat) || isNaN(lon)) {
+                return res.status(400).json({ error: "Parâmetros obrigatórios: lat e lon (numéricos)." });
+            }
+            if (raioKm <= 0 || raioKm > RAIO_MAX_KM) {
+                return res.status(400).json({ error: `raio_km deve ser entre 0 e ${RAIO_MAX_KM} km.` });
+            }
+
+            const page   = Math.max(1, parseInt(req.query.page) || 1);
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 2: Bounding box (1° lat ≈ 111 km)
+            const deltaLat = raioKm / 111;
+            const deltaLon = raioKm / (111 * Math.cos((lat * Math.PI) / 180));
+            const latMin = lat - deltaLat, latMax = lat + deltaLat;
+            const lonMin = lon - deltaLon, lonMax = lon + deltaLon;
+
+            const [candidatos] = await db.query(
+                `SELECT DISTINCT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
+                        c.car_vagas_dispo, c.car_status,
+                        u.usu_nome AS motorista,
+                        v.vei_marca_modelo, v.vei_tipo,
+                        p.pon_nome AS origem_nome, p.pon_lat, p.pon_lon
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS v       ON c.vei_id  = v.vei_id
+                 INNER JOIN USUARIOS u       ON v.usu_id  = u.usu_id
+                 INNER JOIN PONTO_ENCONTROS p ON p.car_id  = c.car_id AND p.pon_tipo = 0 AND p.pon_status = 1
+                 WHERE c.car_status = 1
+                   AND p.pon_lat BETWEEN ? AND ?
+                   AND p.pon_lon BETWEEN ? AND ?
+                 ORDER BY c.car_data ASC, c.car_hor_saida ASC
+                 LIMIT ? OFFSET ?`,
+                [latMin, latMax, lonMin, lonMax, limit + 20, offset]
+            );
+
+            // PASSO 3: Refinamento Haversine
+            const dentro = candidatos.filter(c =>
+                calcularDistanciaKm(lat, lon, c.pon_lat, c.pon_lon) <= raioKm
+            ).slice(0, limit);
+
+            return res.status(200).json({
+                message:    `Caronas próximas num raio de ${raioKm} km.`,
+                raio_km:    raioKm,
+                total:      dentro.length,
+                page,
+                limit,
+                caronas:    dentro
+            });
+
+        } catch (error) {
+            console.error("[ERRO] buscarProximas:", error);
+            return res.status(500).json({ error: "Erro ao buscar caronas próximas." });
+        }
+    }
+
+    /**
+     * MÉTODO: adicionarCheckpoint
+     * Motorista registra sua localização atual durante a carona.
+     *
+     * PASSO 1: Valida que o usuário é o motorista da carona.
+     * PASSO 2: Valida lat/lng.
+     * PASSO 3: Insere em CARONAS_CHECKPOINTS.
+     *
+     * POST /api/caronas/:car_id/checkpoints
+     * Body: { lat, lng }
+     */
+    async adicionarCheckpoint(req, res) {
+        try {
+            const { car_id } = req.params;
+            const { lat, lng } = req.body;
+
+            if (!car_id || isNaN(car_id)) return res.status(400).json({ error: "ID de carona inválido." });
+
+            const latNum = parseFloat(lat);
+            const lngNum = parseFloat(lng);
+            if (isNaN(latNum) || isNaN(lngNum)) {
+                return res.status(400).json({ error: "Campos obrigatórios: lat e lng (numéricos)." });
+            }
+
+            // PASSO 1: Apenas o motorista pode registrar checkpoints
+            const { getMotoristaId } = require('../utils/authHelper');
+            const motoristaId = await getMotoristaId(car_id);
+            if (motoristaId === null) return res.status(404).json({ error: "Carona não encontrada." });
+            if (motoristaId !== req.user.id) return res.status(403).json({ error: "Apenas o motorista pode registrar checkpoints." });
+
+            // PASSO 2: Carona deve estar ativa (1=Aberta, 2=Em espera)
+            const [[carona]] = await db.query('SELECT car_status FROM CARONAS WHERE car_id = ?', [car_id]);
+            if (![1, 2].includes(carona.car_status)) {
+                return res.status(409).json({ error: "Checkpoints só podem ser registrados em caronas ativas." });
+            }
+
+            // PASSO 3: Insere o checkpoint
+            const [resultado] = await db.query(
+                'INSERT INTO CARONAS_CHECKPOINTS (car_id, lat, lng, criado_em) VALUES (?, ?, ?, NOW())',
+                [car_id, latNum, lngNum]
+            );
+
+            return res.status(201).json({
+                message:    "Checkpoint registrado.",
+                checkpoint: { chk_id: resultado.insertId, car_id: parseInt(car_id), lat: latNum, lng: lngNum }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] adicionarCheckpoint:", error);
+            return res.status(500).json({ error: "Erro ao registrar checkpoint." });
+        }
+    }
+
+    /**
+     * MÉTODO: obterCheckpoints
+     * Retorna o último checkpoint da carona — posição atual do motorista.
+     * Passageiros confirmados podem consultar.
+     *
+     * GET /api/caronas/:car_id/checkpoints
+     */
+    async obterCheckpoints(req, res) {
+        try {
+            const { car_id } = req.params;
+            if (!car_id || isNaN(car_id)) return res.status(400).json({ error: "ID de carona inválido." });
+
+            // Valida participação
+            const { isParticipanteCarona } = require('../utils/authHelper');
+            const participacao = await isParticipanteCarona(car_id, req.user.id);
+            if (participacao === null) return res.status(404).json({ error: "Carona não encontrada." });
+            if (!participacao)         return res.status(403).json({ error: "Apenas participantes podem ver os checkpoints." });
+
+            const [[ultimo]] = await db.query(
+                `SELECT chk_id, lat, lng, criado_em
+                 FROM CARONAS_CHECKPOINTS
+                 WHERE car_id = ?
+                 ORDER BY chk_id DESC LIMIT 1`,
+                [car_id]
+            );
+
+            return res.status(200).json({
+                car_id:            parseInt(car_id),
+                ultimo_checkpoint: ultimo || null
+            });
+
+        } catch (error) {
+            console.error("[ERRO] obterCheckpoints:", error);
+            return res.status(500).json({ error: "Erro ao obter checkpoints." });
+        }
+    }
+
 }
+
 
 module.exports = new CaronaController();

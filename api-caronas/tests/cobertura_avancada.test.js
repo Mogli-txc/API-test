@@ -113,7 +113,16 @@ async function criarCarona(motorista, vagas = 2, descricao = 'Carona de teste') 
     const carRes = await request(app)
         .post('/api/caronas/oferecer')
         .set('Authorization', `Bearer ${motorista.token}`)
-        .send({ cur_usu_id, vei_id, car_desc: descricao, car_data: '2027-09-01 08:00:00', car_hor_saida: '08:00:00', car_vagas_dispo: vagas });
+        .send({
+            cur_usu_id,
+            vei_id,
+            car_desc: descricao,
+            car_data: '2027-09-01 08:00:00',
+            car_hor_saida: '08:00:00',
+            car_vagas_dispo: vagas,
+            origem: { pon_nome: 'Origem Cobertura', pon_endereco: 'Rua A, 100, São Paulo' },
+            destino: { pon_nome: 'Destino Cobertura', pon_endereco: 'Rua B, 200, São Paulo' }
+        });
 
     return carRes.body.carona.car_id;
 }

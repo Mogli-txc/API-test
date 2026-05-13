@@ -420,6 +420,85 @@ class VeiculoController {
             return res.status(500).json({ error: "Erro ao listar veículos." });
         }
     }
+
+    /**
+     * MÉTODO: listarCaronasPorVeiculo
+     * Lista o histórico de caronas de um veículo específico.
+     * Acessível pelo dono do veículo ou por Admin/Dev.
+     *
+     * PASSO 1: Verifica que o veículo pertence ao usuário ou que é Admin/Dev.
+     * PASSO 2: Busca caronas com filtro opcional por status.
+     *
+     * GET /api/veiculos/:vei_id/caronas
+     * Query: ?status=, ?page=, ?limit=
+     */
+    async listarCaronasPorVeiculo(req, res) {
+        try {
+            const { vei_id } = req.params;
+
+            if (!vei_id || isNaN(vei_id)) return res.status(400).json({ error: "ID de veículo inválido." });
+
+            // PASSO 1: Valida acesso — dono do veículo ou Admin/Dev
+            const [veiculo] = await db.query(
+                'SELECT usu_id FROM VEICULOS WHERE vei_id = ?',
+                [vei_id]
+            );
+            if (veiculo.length === 0) return res.status(404).json({ error: "Veículo não encontrado." });
+
+            const { checkAdminOrOwner } = require('../utils/authHelper');
+            const perTipo = req.user.per_tipo ?? null;
+            if (!await checkAdminOrOwner(req.user.id, veiculo[0].usu_id, perTipo)) {
+                return res.status(403).json({ error: "Sem permissão para ver as caronas deste veículo." });
+            }
+
+            // PASSO 2: Filtros e paginação
+            const filtros  = ['c.vei_id = ?'];
+            const params   = [vei_id];
+
+            if (req.query.status !== undefined) {
+                const st = parseInt(req.query.status);
+                if (isNaN(st) || ![0, 1, 2, 3].includes(st)) {
+                    return res.status(400).json({ error: "status deve ser 0, 1, 2 ou 3." });
+                }
+                filtros.push('c.car_status = ?');
+                params.push(st);
+            }
+
+            const page   = Math.max(1, parseInt(req.query.page) || 1);
+            const limit  = Math.min(LIMITE_MAX_PAGINACAO, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+            const where  = filtros.join(' AND ');
+
+            const [caronas] = await db.query(
+                `SELECT c.car_id, c.car_data, c.car_hor_saida, c.car_vagas_dispo,
+                        c.car_status, c.car_desc
+                 FROM CARONAS c
+                 WHERE ${where}
+                 ORDER BY c.car_data DESC, c.car_hor_saida DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral FROM CARONAS c WHERE ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message:    `Caronas do veículo ${vei_id}.`,
+                vei_id:     parseInt(vei_id),
+                totalGeral,
+                total:      caronas.length,
+                page,
+                limit,
+                caronas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarCaronasPorVeiculo:", error);
+            return res.status(500).json({ error: "Erro ao listar caronas do veículo." });
+        }
+    }
 }
 
 module.exports = new VeiculoController();

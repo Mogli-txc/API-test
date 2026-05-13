@@ -1385,6 +1385,247 @@ class AdminController {
             return res.status(500).json({ error: "Erro ao listar cursos." });
         }
     }
+
+    /**
+     * MÉTODO: relatorioCaronas
+     * Relatório de caronas por período com breakdown por status, vagas e motoristas ativos.
+     * Suporta exportação CSV via ?formato=csv.
+     *
+     * PASSO 0: Valida escopo (Admin exige esc_id).
+     * PASSO 1: Aplica filtro de período e escola.
+     * PASSO 2: Agrega totais por status + vagas + ranking de motoristas.
+     *
+     * GET /api/admin/relatorios/caronas?inicio=YYYY-MM-DD&fim=YYYY-MM-DD&esc_id=
+     */
+    async relatorioCaronas(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+            const esc_id = per_tipo === 1 ? per_escola_id : (req.query.esc_id ? parseInt(req.query.esc_id) : null);
+
+            if (per_tipo === 1 && !esc_id) return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
+
+            const hoje   = new Date().toISOString().slice(0, 10);
+            const inicio = req.query.inicio || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const fim    = req.query.fim    || hoje;
+            const formato = (req.query.formato || '').toLowerCase();
+
+            // PASSO 1: Monta condições SQL
+            const escolaJoin   = esc_id ? 'INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id' : '';
+            const escolaWhere  = esc_id ? ' AND cr.esc_id = ?' : '';
+            const baseParams   = esc_id ? [inicio, fim, esc_id] : [inicio, fim];
+
+            // PASSO 2: Totais por status + vagas
+            const [totais] = await db.query(
+                `SELECT
+                    COUNT(*) AS total_caronas,
+                    SUM(CASE WHEN c.car_status = 1 THEN 1 ELSE 0 END) AS abertas,
+                    SUM(CASE WHEN c.car_status = 2 THEN 1 ELSE 0 END) AS em_espera,
+                    SUM(CASE WHEN c.car_status = 3 THEN 1 ELSE 0 END) AS finalizadas,
+                    SUM(CASE WHEN c.car_status = 0 THEN 1 ELSE 0 END) AS canceladas,
+                    SUM(c.car_vagas_dispo) AS vagas_disponiveis_total,
+                    COALESCE((SELECT SUM(sc.sol_vaga_soli)
+                              FROM SOLICITACOES_CARONA sc
+                              WHERE sc.car_id = c.car_id AND sc.sol_status = 2), 0) AS vagas_ocupadas_total
+                 FROM CARONAS c ${escolaJoin}
+                 WHERE c.car_data BETWEEN ? AND ?${escolaWhere}`,
+                baseParams
+            );
+
+            // Top 5 motoristas
+            const [motoristas] = await db.query(
+                `SELECT u.usu_nome AS motorista, COUNT(c.car_id) AS caronas_oferecidas
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
+                 ${esc_id ? 'INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id' : ''}
+                 WHERE c.car_data BETWEEN ? AND ?${escolaWhere}
+                 GROUP BY u.usu_id, u.usu_nome
+                 ORDER BY caronas_oferecidas DESC
+                 LIMIT 5`,
+                baseParams
+            );
+
+            const relatorio = {
+                periodo:    { inicio, fim },
+                esc_id:     esc_id || null,
+                ...totais[0],
+                top_motoristas: motoristas
+            };
+
+            // Exportação CSV
+            if (formato === 'csv') {
+                const linhas = [
+                    'periodo_inicio,periodo_fim,total,abertas,em_espera,finalizadas,canceladas',
+                    `${inicio},${fim},${relatorio.total_caronas},${relatorio.abertas},${relatorio.em_espera},${relatorio.finalizadas},${relatorio.canceladas}`
+                ];
+                res.setHeader('Content-Type', 'text/csv');
+                res.setHeader('Content-Disposition', `attachment; filename="caronas_${inicio}_${fim}.csv"`);
+                return res.send(linhas.join('\n'));
+            }
+
+            return res.status(200).json({ message: "Relatório de caronas.", relatorio });
+
+        } catch (error) {
+            console.error("[ERRO] relatorioCaronas:", error);
+            return res.status(500).json({ error: "Erro ao gerar relatório de caronas." });
+        }
+    }
+
+    /**
+     * MÉTODO: statsSugestoesDetalhado
+     * Estatísticas de sugestões/denúncias por tipo, status e período.
+     * Mais detalhado que statsSugestoes (que é um resumo rápido).
+     *
+     * GET /api/admin/sugestoes/stats?dias=30
+     */
+    async statsSugestoesDetalhado(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+            if (per_tipo === 1 && !per_escola_id) return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
+
+            const dias   = Math.max(1, parseInt(req.query.dias) || 30);
+            const inicio = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+            const escolaJoin  = per_tipo === 1 ? 'INNER JOIN USUARIOS u ON s.usu_id = u.usu_id INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id INNER JOIN CURSOS c ON cu.cur_id = c.cur_id' : '';
+            const escolaWhere = per_tipo === 1 ? ` AND c.esc_id = ${per_escola_id}` : '';
+
+            const [rows] = await db.query(
+                `SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN sug_tipo = 1 THEN 1 ELSE 0 END) AS sugestoes,
+                    SUM(CASE WHEN sug_tipo = 0 THEN 1 ELSE 0 END) AS denuncias,
+                    SUM(CASE WHEN sug_status = 1 THEN 1 ELSE 0 END) AS abertas,
+                    SUM(CASE WHEN sug_status = 3 THEN 1 ELSE 0 END) AS em_analise,
+                    SUM(CASE WHEN sug_status = 2 THEN 1 ELSE 0 END) AS arquivadas,
+                    SUM(CASE WHEN sug_status = 0 THEN 1 ELSE 0 END) AS fechadas
+                 FROM SUGESTAO_DENUNCIA s ${escolaJoin}
+                 WHERE s.sug_deletado_em IS NULL AND s.sug_data >= ?${escolaWhere}`,
+                [inicio]
+            );
+
+            return res.status(200).json({
+                message:  `Estatísticas de sugestões/denúncias — últimos ${dias} dias.`,
+                periodo:  { dias, desde: inicio },
+                esc_id:   per_tipo === 1 ? per_escola_id : null,
+                por_tipo:   { sugestoes: rows[0].sugestoes, denuncias: rows[0].denuncias },
+                por_status: { abertas: rows[0].abertas, em_analise: rows[0].em_analise, arquivadas: rows[0].arquivadas, fechadas: rows[0].fechadas },
+                total:    rows[0].total
+            });
+
+        } catch (error) {
+            console.error("[ERRO] statsSugestoesDetalhado:", error);
+            return res.status(500).json({ error: "Erro ao buscar estatísticas de sugestões." });
+        }
+    }
+
+    /**
+     * MÉTODO: obterDocumento
+     * Retorna detalhes completos de um documento de verificação específico.
+     * Admin: apenas documentos de usuários da escola. Dev: qualquer.
+     *
+     * GET /api/admin/documentos/:doc_id
+     */
+    async obterDocumento(req, res) {
+        try {
+            const { doc_id } = req.params;
+            const { per_tipo, per_escola_id } = req.user;
+            if (!doc_id || isNaN(doc_id)) return res.status(400).json({ error: "ID de documento inválido." });
+
+            const escolaJoin  = per_tipo === 1 ? 'INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id INNER JOIN CURSOS c ON cu.cur_id = c.cur_id' : '';
+            const escolaWhere = per_tipo === 1 ? ` AND c.esc_id = ${per_escola_id}` : '';
+
+            const [rows] = await db.query(
+                `SELECT d.doc_id, d.usu_id, u.usu_nome, u.usu_email,
+                        d.doc_tipo, d.doc_arquivo, d.doc_ocr_confianca,
+                        d.doc_status, d.doc_enviado_em,
+                        d.doc_matricula, d.doc_curso, d.doc_periodo
+                 FROM DOCUMENTOS_VERIFICACAO d
+                 INNER JOIN USUARIOS u ON d.usu_id = u.usu_id
+                 ${escolaJoin}
+                 WHERE d.doc_id = ?${escolaWhere}`,
+                [doc_id]
+            );
+
+            if (rows.length === 0) return res.status(404).json({ error: "Documento não encontrado." });
+
+            return res.status(200).json({ message: "Documento recuperado.", documento: rows[0] });
+
+        } catch (error) {
+            console.error("[ERRO] obterDocumento:", error);
+            return res.status(500).json({ error: "Erro ao buscar documento." });
+        }
+    }
+
+    /**
+     * MÉTODO: atualizarStatusDocumento
+     * Admin/Dev aprova ou rejeita manualmente um documento de verificação.
+     * Ao aprovar comprovante → promove usu_verificacao conforme o nível atual.
+     * Ao rejeitar → mantém o nível atual sem alteração.
+     *
+     * PASSO 1: Valida status e escopo.
+     * PASSO 2: Atualiza doc_status.
+     * PASSO 3: Se aprovação de comprovante, promove o usuário.
+     *
+     * PATCH /api/admin/documentos/:doc_id/status
+     * Body: { status: "aprovado"|"rejeitado", observacao? }
+     */
+    async atualizarStatusDocumento(req, res) {
+        try {
+            const { doc_id } = req.params;
+            const { status, observacao } = req.body;
+            const { per_tipo, per_escola_id } = req.user;
+
+            if (!doc_id || isNaN(doc_id)) return res.status(400).json({ error: "ID de documento inválido." });
+            if (!['aprovado', 'rejeitado'].includes(status)) {
+                return res.status(400).json({ error: "status deve ser 'aprovado' ou 'rejeitado'." });
+            }
+
+            // PASSO 1: Busca o documento e valida escopo de Admin
+            const escolaJoin  = per_tipo === 1 ? 'INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id INNER JOIN CURSOS c ON cu.cur_id = c.cur_id' : '';
+            const escolaWhere = per_tipo === 1 ? ` AND c.esc_id = ${per_escola_id}` : '';
+
+            const [rows] = await db.query(
+                `SELECT d.doc_id, d.usu_id, d.doc_tipo, d.doc_status, u.usu_verificacao
+                 FROM DOCUMENTOS_VERIFICACAO d
+                 INNER JOIN USUARIOS u ON d.usu_id = u.usu_id
+                 ${escolaJoin}
+                 WHERE d.doc_id = ?${escolaWhere}`,
+                [doc_id]
+            );
+            if (rows.length === 0) return res.status(404).json({ error: "Documento não encontrado." });
+
+            const doc = rows[0];
+            const novoDocStatus = status === 'aprovado' ? 0 : 2;
+
+            // PASSO 2: Atualiza o status do documento
+            await db.query('UPDATE DOCUMENTOS_VERIFICACAO SET doc_status = ? WHERE doc_id = ?', [novoDocStatus, doc_id]);
+
+            // PASSO 3: Aprovação de comprovante → promove o usuário
+            let promocao = null;
+            if (status === 'aprovado' && doc.doc_tipo === 0 && [5, 6].includes(doc.usu_verificacao)) {
+                const { proximaFronteiraSemestral } = require('../utils/queryHelpers');
+                const novoNivel  = doc.usu_verificacao === 6 ? 2 : 1;
+                const novaExpira = proximaFronteiraSemestral();
+                await db.query(
+                    'UPDATE USUARIOS SET usu_verificacao = ?, usu_verificacao_expira = ? WHERE usu_id = ?',
+                    [novoNivel, novaExpira, doc.usu_id]
+                );
+                promocao = { usu_verificacao: novoNivel, usu_verificacao_expira: novaExpira };
+            }
+
+            return res.status(200).json({
+                message:   `Documento ${status}.`,
+                doc_id:    parseInt(doc_id),
+                doc_status: novoDocStatus,
+                observacao: observacao || null,
+                promocao
+            });
+
+        } catch (error) {
+            console.error("[ERRO] atualizarStatusDocumento:", error);
+            return res.status(500).json({ error: "Erro ao atualizar status do documento." });
+        }
+    }
 }
 
 module.exports = new AdminController();

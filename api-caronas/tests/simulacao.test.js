@@ -193,7 +193,9 @@ describe('Usuário 1 — Motorista', () => {
                 car_desc:        'Carona simulada — saída do centro',
                 car_data:        '2026-06-15 08:00:00',
                 car_hor_saida:   '08:00:00',
-                car_vagas_dispo: 2
+                car_vagas_dispo: 2,
+                origem: { pon_nome: 'Origem Simulação', pon_endereco: 'Rua Centro, 100, São Paulo' },
+                destino: { pon_nome: 'Destino Simulação', pon_endereco: 'Rua Destino, 200, São Paulo' }
             });
 
         // PASSO 2: valida e guarda o car_id (necessário para o usuário 2 solicitar)

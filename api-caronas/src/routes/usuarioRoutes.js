@@ -104,6 +104,15 @@ router.post('/refresh', UsuarioController.refreshToken);
  */
 router.get('/me', authMiddleware, UsuarioController.me);
 
+// GET /api/usuarios/me/dashboard — resumo consolidado para a tela inicial do app
+router.get('/me/dashboard', authMiddleware, UsuarioController.dashboard);
+
+// DELETE /api/usuarios/me/conta — agenda exclusão com 30 dias de graça (LGPD)
+router.delete('/me/conta', authMiddleware, UsuarioController.agendarExclusao);
+
+// POST /api/usuarios/me/conta/cancelar-exclusao — cancela agendamento dentro do prazo
+router.post('/me/conta/cancelar-exclusao', authMiddleware, UsuarioController.cancelarExclusao);
+
 /**
  * ROTA: POST /api/usuarios/logout
  * Descrição: Invalida o refresh token do usuário no banco (logout server-side).

@@ -71,7 +71,14 @@ async function criarCarona(token, vei_id) {
     const data = amanha.toISOString().slice(0, 10);
     const res = await request(app).post('/api/caronas/oferecer')
         .set('Authorization', `Bearer ${token}`)
-        .send({ vei_id, car_data: data, car_hor_saida: '08:00', car_vagas_dispo: 1 });
+        .send({
+            vei_id,
+            car_data: data,
+            car_hor_saida: '08:00',
+            car_vagas_dispo: 1,
+            origem: { pon_nome: 'Origem V14', pon_endereco: 'Rua A, 100, São Paulo' },
+            destino: { pon_nome: 'Destino V14', pon_endereco: 'Rua B, 200, São Paulo' }
+        });
     return res.body?.carona?.car_id;
 }
 
@@ -96,7 +103,14 @@ describe('Grupo 1 — Avaliações [v14-T01-T03]', () => {
         const data = amanha.toISOString().slice(0, 10);
         const r = await request(app).post('/api/caronas/oferecer')
             .set('Authorization', `Bearer ${motorista.token}`)
-            .send({ vei_id, car_data: data, car_hor_saida: '09:00', car_vagas_dispo: 1 });
+            .send({
+                vei_id,
+                car_data: data,
+                car_hor_saida: '09:00',
+                car_vagas_dispo: 1,
+                origem: { pon_nome: 'Origem V14', pon_endereco: 'Rua A, 100, São Paulo' },
+                destino: { pon_nome: 'Destino V14', pon_endereco: 'Rua B, 200, São Paulo' }
+            });
         car_id_finalizada = r.body?.carona?.car_id;
 
         const db = await getDb();
@@ -181,6 +195,11 @@ describe('Grupo 2 — Solicitações [v14-T04-T06]', () => {
     });
 
     it('T-06: cancelar solicitação aceita deve devolver vaga à carona', async () => {
+        // Finaliza a carona existente para liberar o motorista (que só pode ter 1 ativa)
+        const db0 = await getDb();
+        await db0.execute('UPDATE CARONAS SET car_status = 3 WHERE car_id = ? AND car_status IN (1, 2)', [car_id]);
+        await db0.end();
+
         // Cria nova carona com 1 vaga
         const car_id2 = await criarCarona(motorista.token, vei_id);
 

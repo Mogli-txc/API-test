@@ -89,7 +89,7 @@ function dataAmanha() {
 // ──────────────────────────────────────────────
 describe('Grupo 1 — cur_usu_id opcional em POST /api/caronas/oferecer [v13]', () => {
 
-    let token, vei_id, cur_usu_id;
+    let token, vei_id, cur_usu_id, ultimoCarId;
 
     beforeAll(async () => {
         const u = await criarUsuario('g1');
@@ -97,6 +97,15 @@ describe('Grupo 1 — cur_usu_id opcional em POST /api/caronas/oferecer [v13]', 
         vei_id  = await cadastrarVeiculo(token);
         const m = await matricular(u.usu_id);
         cur_usu_id = m?.cur_usu_id;
+    });
+
+    // Cancela a carona criada no teste anterior para que o próximo possa criar uma nova
+    afterEach(async () => {
+        if (!ultimoCarId) return;
+        await request(app)
+            .delete(`/api/caronas/${ultimoCarId}`)
+            .set('Authorization', `Bearer ${token}`);
+        ultimoCarId = null;
     });
 
     it('deve criar carona COM cur_usu_id (comportamento existente mantido)', async () => {
@@ -109,7 +118,10 @@ describe('Grupo 1 — cur_usu_id opcional em POST /api/caronas/oferecer [v13]', 
                 car_data:        dataAmanha(),
                 car_hor_saida:   '08:00',
                 car_vagas_dispo: 2,
+                origem: { pon_nome: 'Origem V13', pon_endereco: 'Rua A, 100, São Paulo' },
+                destino: { pon_nome: 'Destino V13', pon_endereco: 'Rua B, 200, São Paulo' }
             });
+        ultimoCarId = res.body.carona?.car_id;
         expect(res.status).toBe(201);
         expect(res.body.carona).toHaveProperty('car_id');
         expect(res.body.carona.cur_usu_id).toBe(cur_usu_id);
@@ -124,7 +136,10 @@ describe('Grupo 1 — cur_usu_id opcional em POST /api/caronas/oferecer [v13]', 
                 car_data:        dataAmanha(),
                 car_hor_saida:   '09:00',
                 car_vagas_dispo: 1,
+                origem: { pon_nome: 'Origem V13', pon_endereco: 'Rua A, 100, São Paulo' },
+                destino: { pon_nome: 'Destino V13', pon_endereco: 'Rua B, 200, São Paulo' }
             });
+        ultimoCarId = res.body.carona?.car_id;
         expect(res.status).toBe(201);
         expect(res.body.carona).toHaveProperty('car_id');
         expect(res.body.carona.cur_usu_id).toBeNull();
@@ -162,6 +177,8 @@ describe('Grupo 1 — cur_usu_id opcional em POST /api/caronas/oferecer [v13]', 
                 car_data:        dataAmanha(),
                 car_hor_saida:   '11:00',
                 car_vagas_dispo: 1,
+                origem: { pon_nome: 'Origem V13', pon_endereco: 'Rua A, 100, São Paulo' },
+                destino: { pon_nome: 'Destino V13', pon_endereco: 'Rua B, 200, São Paulo' }
             });
         expect(res.status).toBe(403);
         expect(res.body.error).toMatch(/matrícula/i);

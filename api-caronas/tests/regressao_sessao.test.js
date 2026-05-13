@@ -204,6 +204,8 @@ async function criarCarona(motorista, vagas = 2, descricao = 'Carona de regress�
             car_data:        '2027-09-01',
             car_hor_saida:   '08:00:00',
             car_vagas_dispo: vagas,
+            origem: { pon_nome: 'Origem Regressão', pon_endereco: 'Rua Origem, 100, São Paulo' },
+            destino: { pon_nome: 'Destino Regressão', pon_endereco: 'Rua Destino, 200, São Paulo' }
         });
     const car_id = carRes.body?.carona?.car_id;
     if (!car_id) throw new Error(`[helper] Carona falhou: ${JSON.stringify(carRes.body)}`);

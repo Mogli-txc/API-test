@@ -52,51 +52,31 @@ router.post('/oferecer', authMiddleware, CaronaController.criar);
  */
 router.get('/buscar', authMiddleware, CaronaController.buscar);
 
+// GET /api/caronas/buscar/proximas — deve vir ANTES de /:car_id para não capturar "proximas" como ID
+router.get('/buscar/proximas', authMiddleware, CaronaController.buscarProximas);
+
 // Solicitações de carona: use POST /api/solicitacoes/criar (SolicitacaoController)
 
-/**
- * ROTA: GET /api/caronas/:car_id/resumo
- * Descrição: Resumo completo da carona — pontos, passageiros, avaliações em uma chamada.
- * Acesso: PROTEGIDO - Requer autenticação
- * ENR-03
- */
+// GET /api/caronas/:car_id/resumo — deve vir ANTES de /:car_id
 router.get('/:car_id/resumo', authMiddleware, CaronaController.resumo);
+
+// GET /api/caronas/:car_id/timeline — histórico cronológico de eventos da carona
+router.get('/:car_id/timeline', authMiddleware, CaronaController.timeline);
+
+// GET/POST /api/caronas/:car_id/checkpoints — localização em tempo real do motorista
+router.post('/:car_id/checkpoints', authMiddleware, CaronaController.adicionarCheckpoint);
+router.get('/:car_id/checkpoints', authMiddleware, CaronaController.obterCheckpoints);
 
 /**
  * ROTA: PATCH /api/caronas/:car_id/vagas
- * Descrição: Motorista ajusta manualmente car_vagas_dispo (ex: passageiro desistiu sem cancelar)
+ * Descrição: Motorista ajusta manualmente car_vagas_dispo
  * Acesso: PROTEGIDO - Apenas o motorista da carona
- * Body: { car_vagas_dispo: 0-6 }
- * [v16 — REST-A03]
  */
 router.patch('/:car_id/vagas', authMiddleware, CaronaController.ajustarVagas);
 
-/**
- * ROTA: GET /api/caronas/:car_id
- * Descrição: Recupera detalhes de uma carona específica
- * Acesso: PROTEGIDO - Requer autenticação
- */
 router.get('/:car_id', authMiddleware, CaronaController.obterPorId);
-
-/**
- * ROTA: PUT /api/caronas/:car_id
- * Descrição: Atualiza os dados de uma carona (apenas o proprietário pode)
- * Acesso: PROTEGIDO - Requer Token JWT
- */
 router.put('/:car_id', authMiddleware, CaronaController.atualizar);
-
-/**
- * ROTA: POST /api/caronas/:car_id/finalizar
- * Descrição: Finaliza uma carona (car_status = 3) — exclusivo para o motorista dono
- * Acesso: PROTEGIDO - Requer Token JWT
- */
 router.post('/:car_id/finalizar', authMiddleware, CaronaController.finalizar);
-
-/**
- * ROTA: DELETE /api/caronas/:car_id
- * Descrição: Cancela uma carona (apenas o proprietário pode)
- * Acesso: PROTEGIDO - Requer Token JWT
- */
 router.delete('/:car_id', authMiddleware, CaronaController.deletar);
 
 module.exports = router;

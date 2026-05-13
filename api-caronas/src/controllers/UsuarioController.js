@@ -1219,6 +1219,171 @@ class UsuarioController {
             return res.status(500).json({ error: 'Erro ao listar penalidades.' });
         }
     }
+
+    /**
+     * MÉTODO: dashboard
+     * Retorna em uma única chamada os dados essenciais da tela inicial do app.
+     * Elimina 4–5 chamadas paralelas que o cliente faria individualmente.
+     *
+     * PASSO 1: Executa todas as queries em paralelo com Promise.allSettled.
+     * PASSO 2: Compõe resposta mesmo que alguma query falhe (degrada graciosamente).
+     *
+     * GET /api/usuarios/me/dashboard
+     */
+    dashboard = async (req, res) => {
+        try {
+            const usu_id = req.user.id;
+
+            // PASSO 1: Consultas em paralelo — falha individual não derruba o dashboard
+            const [
+                rCaronasAtivas,
+                rSolPendentes,
+                rNotiNaoLidas,
+                rPenalidadesAtivas,
+                rReputacao
+            ] = await Promise.allSettled([
+                db.query(
+                    `SELECT COUNT(*) AS total FROM CARONAS c
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     WHERE v.usu_id = ? AND c.car_status IN (1, 2)`,
+                    [usu_id]
+                ),
+                db.query(
+                    `SELECT COUNT(*) AS total FROM SOLICITACOES_CARONA sc
+                     INNER JOIN CARONAS c ON sc.car_id = c.car_id
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     WHERE v.usu_id = ? AND sc.sol_status = 1`,
+                    [usu_id]
+                ),
+                db.query(
+                    'SELECT COUNT(*) AS total FROM NOTIFICACOES WHERE usu_id = ? AND noti_lida = 0',
+                    [usu_id]
+                ),
+                db.query(
+                    `SELECT COUNT(*) AS total FROM PENALIDADES
+                     WHERE usu_id = ? AND pen_ativo = 1
+                       AND (pen_expira_em IS NULL OR pen_expira_em > NOW())`,
+                    [usu_id]
+                ),
+                db.query(
+                    `SELECT ROUND(AVG(ava_nota), 2) AS media, COUNT(*) AS total
+                     FROM AVALIACOES WHERE usu_id_avaliado = ?`,
+                    [usu_id]
+                )
+            ]);
+
+            // PASSO 2: Extrai valores com fallback seguro para cada query
+            const val = (r, path) => {
+                if (r.status !== 'fulfilled') return null;
+                const [rows] = r.value;
+                return path ? rows[0]?.[path] : rows[0];
+            };
+
+            const reputacaoRow = val(rReputacao);
+
+            return res.status(200).json({
+                caronas_ativas:       val(rCaronasAtivas, 'total') ?? 0,
+                solicitacoes_pendentes: val(rSolPendentes, 'total') ?? 0,
+                notificacoes_nao_lidas: val(rNotiNaoLidas, 'total') ?? 0,
+                penalidades_ativas:   val(rPenalidadesAtivas, 'total') ?? 0,
+                reputacao: {
+                    media: reputacaoRow?.media ? parseFloat(reputacaoRow.media) : null,
+                    total: reputacaoRow?.total ?? 0
+                }
+            });
+
+        } catch (error) {
+            console.error('[ERRO] dashboard:', error);
+            return res.status(500).json({ error: 'Erro ao carregar dashboard.' });
+        }
+    }
+
+    /**
+     * MÉTODO: agendarExclusao
+     * Agenda exclusão da conta com período de graça de 30 dias (LGPD).
+     * Marca usu_exclusao_agendada = NOW() + 30 dias em vez de deletar imediatamente.
+     * O usuário pode cancelar o agendamento durante o prazo.
+     *
+     * DELETE /api/usuarios/me/conta
+     */
+    agendarExclusao = async (req, res) => {
+        try {
+            const usu_id = req.user.id;
+
+            // Verifica se já há exclusão agendada
+            const [[usuario]] = await db.query(
+                'SELECT usu_exclusao_agendada FROM USUARIOS WHERE usu_id = ? AND usu_status = 1',
+                [usu_id]
+            );
+            if (!usuario) return res.status(404).json({ error: "Usuário não encontrado." });
+            if (usuario.usu_exclusao_agendada) {
+                const expira = new Date(usuario.usu_exclusao_agendada).toISOString().slice(0, 10);
+                return res.status(409).json({
+                    error:    "Exclusão já agendada.",
+                    expira_em: expira
+                });
+            }
+
+            const expira = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+            await db.query(
+                'UPDATE USUARIOS SET usu_exclusao_agendada = ? WHERE usu_id = ?',
+                [expira, usu_id]
+            );
+
+            // Invalida sessão — força novo login se o usuário mudar de ideia
+            await db.query(
+                'UPDATE USUARIOS SET usu_refresh_hash = NULL, usu_refresh_expira = NULL WHERE usu_id = ?',
+                [usu_id]
+            );
+
+            await registrarAudit({ tabela: 'USUARIOS', registroId: usu_id, acao: 'EXCLUSAO_AGENDADA', usuId: usu_id, ip: req.ip });
+
+            return res.status(200).json({
+                message:   "Conta marcada para exclusão em 30 dias. Você pode cancelar durante este período.",
+                expira_em: expira.toISOString().slice(0, 10)
+            });
+
+        } catch (error) {
+            console.error('[ERRO] agendarExclusao:', error);
+            return res.status(500).json({ error: 'Erro ao agendar exclusão da conta.' });
+        }
+    }
+
+    /**
+     * MÉTODO: cancelarExclusao
+     * Cancela o agendamento de exclusão durante o período de graça.
+     * Limpa usu_exclusao_agendada e reativa a sessão.
+     *
+     * POST /api/usuarios/me/conta/cancelar-exclusao
+     */
+    cancelarExclusao = async (req, res) => {
+        try {
+            const usu_id = req.user.id;
+
+            const [[usuario]] = await db.query(
+                'SELECT usu_exclusao_agendada FROM USUARIOS WHERE usu_id = ? AND usu_status = 1',
+                [usu_id]
+            );
+            if (!usuario) return res.status(404).json({ error: "Usuário não encontrado." });
+            if (!usuario.usu_exclusao_agendada) {
+                return res.status(409).json({ error: "Nenhuma exclusão agendada para esta conta." });
+            }
+
+            await db.query(
+                'UPDATE USUARIOS SET usu_exclusao_agendada = NULL WHERE usu_id = ?',
+                [usu_id]
+            );
+
+            await registrarAudit({ tabela: 'USUARIOS', registroId: usu_id, acao: 'EXCLUSAO_CANCELADA', usuId: usu_id, ip: req.ip });
+
+            return res.status(200).json({ message: "Exclusão cancelada. Sua conta está ativa." });
+
+        } catch (error) {
+            console.error('[ERRO] cancelarExclusao:', error);
+            return res.status(500).json({ error: 'Erro ao cancelar exclusão da conta.' });
+        }
+    }
 }
 
 module.exports = new UsuarioController();

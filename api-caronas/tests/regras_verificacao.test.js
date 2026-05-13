@@ -106,7 +106,9 @@ describe('Oferecer carona — regras de verificação', () => {
         car_desc:        'Carona teste',
         car_data:        '2027-01-01 08:00:00',
         car_hor_saida:   '08:00:00',
-        car_vagas_dispo: 1
+        car_vagas_dispo: 1,
+        origem: { pon_nome: 'Origem Teste', pon_endereco: 'Rua A, 100, São Paulo' },
+        destino: { pon_nome: 'Destino Teste', pon_endereco: 'Rua B, 200, São Paulo' }
     };
 
     it('CASO A — usu_verificacao=0: deve retornar 403 com mensagem de nível insuficiente', async () => {
@@ -269,7 +271,9 @@ describe('Oferecer carona — temporário com veículo (verificacao=6)', () => {
         car_desc:        'Carona teste tipo 6',
         car_data:        '2027-01-01 08:00:00',
         car_hor_saida:   '08:00:00',
-        car_vagas_dispo: 1
+        car_vagas_dispo: 1,
+        origem: { pon_nome: 'Origem Teste', pon_endereco: 'Rua A, 100, São Paulo' },
+        destino: { pon_nome: 'Destino Teste', pon_endereco: 'Rua B, 200, São Paulo' }
     };
 
     it('CASO H — usu_verificacao=6 com validade ativa: deve passar a verificação para oferecer', async () => {

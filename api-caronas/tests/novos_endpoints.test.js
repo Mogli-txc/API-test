@@ -107,6 +107,17 @@ async function criarCenariaMotoristaComPonto() {
         vei_id = veiRes.insertId;
     }
 
+    // Cancela caronas ativas residuais do admin para garantir estado limpo
+    const [ativas] = await db.query(
+        `SELECT c.car_id FROM CARONAS c
+         INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+         WHERE v.usu_id = ? AND c.car_status IN (1, 2)`,
+        [motorId]
+    );
+    for (const row of ativas) {
+        await db.execute('UPDATE CARONAS SET car_status = 0 WHERE car_id = ?', [row.car_id]);
+    }
+
     await db.end();
 
     // Cria carona via API
@@ -116,7 +127,16 @@ async function criarCenariaMotoristaComPonto() {
     const caronaRes  = await request(app)
         .post('/api/caronas/oferecer')
         .set('Authorization', `Bearer ${devToken}`)
-        .send({ cur_usu_id, vei_id, car_desc: 'Carona de teste NVE', car_data, car_hor_saida: '08:00', car_vagas_dispo: 3 });
+        .send({
+            cur_usu_id,
+            vei_id,
+            car_desc: 'Carona de teste NVE',
+            car_data,
+            car_hor_saida: '08:00',
+            car_vagas_dispo: 3,
+            origem: { pon_nome: 'Origem NVE', pon_endereco: 'Rua Teste, 100, São Paulo' },
+            destino: { pon_nome: 'Destino NVE', pon_endereco: 'Rua Destino, 200, São Paulo' }
+        });
 
     if (!caronaRes.body?.carona?.car_id) {
         throw new Error(`[helper] Criar carona falhou: ${JSON.stringify(caronaRes.body)}`);
@@ -333,12 +353,14 @@ describe('Grupo 4 — DELETE /api/pontos/:pon_id', () => {
             .post('/api/caronas/oferecer')
             .set('Authorization', `Bearer ${cenario.devToken}`)
             .send({
-                cur_usu_id: cenario.caronaId, // reusar
-                vei_id: 1, // admin tem vei_id 1
+                cur_usu_id: cenario.caronaId,
+                vei_id: 1,
                 car_desc: 'Carona 2 NVE',
                 car_data: tomorrow.toISOString().slice(0, 10),
                 car_hor_saida: '09:00',
-                car_vagas_dispo: 2
+                car_vagas_dispo: 2,
+                origem: { pon_nome: 'Origem 2 NVE', pon_endereco: 'Rua Teste 2, 100, São Paulo' },
+                destino: { pon_nome: 'Destino 2 NVE', pon_endereco: 'Rua Destino 2, 200, São Paulo' }
             });
         // Se a criação falhar, testa com ID arbitrário
         const pontoRes = await request(app)

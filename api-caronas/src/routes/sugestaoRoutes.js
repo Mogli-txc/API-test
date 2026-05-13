@@ -38,6 +38,9 @@ router.put('/:sug_id/analisar', auth, checkRole([1, 2]), controller.marcarEmAnal
 // Responde e fecha o registro — Admin (escopo escola) ou Dev (ADMIN/DEV)
 router.put('/:sug_id/responder', auth, checkRole([1, 2]), controller.responder.bind(controller));
 
+// Arquiva sem resposta formal — Admin (escopo escola) ou Dev (ADMIN/DEV)
+router.post('/:sug_id/arquivar', auth, checkRole([1, 2]), controller.arquivar.bind(controller));
+
 // Remove permanentemente — apenas Desenvolvedor (DEV)
 router.delete('/:sug_id', auth, checkRole([2]), controller.deletar.bind(controller));
 

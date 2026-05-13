@@ -19,6 +19,9 @@ router.post('/', auth, VeiculoController.cadastrarVeiculo);
 // Lista veículos do usuário — deve vir ANTES de /:vei_id para não capturar "usuario" como ID
 router.get('/usuario/:usu_id', auth, VeiculoController.listarPorUsuario);
 
+// Histórico de caronas de um veículo — deve vir ANTES de /:vei_id
+router.get('/:vei_id/caronas', auth, VeiculoController.listarCaronasPorVeiculo);
+
 // Detalhes de um veículo específico — apenas dono ou Desenvolvedor
 router.get('/:vei_id', auth, VeiculoController.obterPorId);
 

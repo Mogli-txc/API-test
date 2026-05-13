@@ -20,6 +20,10 @@ const authMiddleware = require('../middlewares/authMiddleware');
  */
 router.post('/enviar', authMiddleware, MensagemController.enviarMensagem);
 
+// GET /api/mensagens/inbox — lista conversas agrupadas por carona com não-lidas
+// Deve vir ANTES de /:men_id para não capturar "inbox" como ID numérico
+router.get('/inbox', authMiddleware, MensagemController.inbox);
+
 /**
  * ROTA: GET /api/mensagens/carona/:car_id
  * Descrição: Lista todas as mensagens de uma carona específica (thread de conversa)

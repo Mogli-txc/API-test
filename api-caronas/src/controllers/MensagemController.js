@@ -308,6 +308,74 @@ class MensagemController {
     }
 
     /**
+     * MÉTODO: inbox
+     * Lista as últimas conversas do usuário agrupadas por carona.
+     * Retorna última mensagem e contagem de não lidas — similar ao WhatsApp.
+     *
+     * PASSO 1: Agrupa mensagens por car_id (enviadas ou recebidas).
+     * PASSO 2: Para cada carona, retorna última mensagem e total de não lidas.
+     *
+     * GET /api/mensagens/inbox
+     */
+    async inbox(req, res) {
+        try {
+            const usu_id = req.user.id;
+
+            const page   = Math.max(1, parseInt(req.query.page) || 1);
+            const limit  = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+            const offset = (page - 1) * limit;
+
+            // PASSO 1: Última mensagem por carona + contagem de não lidas para o usuário
+            const [conversas] = await db.query(
+                `SELECT
+                    m.car_id,
+                    c.car_data,
+                    c.car_hor_saida,
+                    (SELECT men_texto FROM MENSAGENS
+                     WHERE car_id = m.car_id AND men_deletado_em IS NULL
+                       AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
+                     ORDER BY men_id DESC LIMIT 1) AS ultima_mensagem,
+                    (SELECT men_criado_em FROM MENSAGENS
+                     WHERE car_id = m.car_id AND men_deletado_em IS NULL
+                       AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
+                     ORDER BY men_id DESC LIMIT 1) AS em,
+                    (SELECT COUNT(*) FROM MENSAGENS
+                     WHERE car_id = m.car_id AND men_deletado_em IS NULL
+                       AND usu_id_destinatario = ? AND men_status != 3) AS nao_lidas
+                 FROM MENSAGENS m
+                 INNER JOIN CARONAS c ON m.car_id = c.car_id
+                 WHERE m.men_deletado_em IS NULL
+                   AND (m.usu_id_remetente = ? OR m.usu_id_destinatario = ?)
+                 GROUP BY m.car_id, c.car_data, c.car_hor_saida
+                 ORDER BY MAX(m.men_id) DESC
+                 LIMIT ? OFFSET ?`,
+                [usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(DISTINCT car_id) AS totalGeral
+                 FROM MENSAGENS
+                 WHERE men_deletado_em IS NULL
+                   AND (usu_id_remetente = ? OR usu_id_destinatario = ?)`,
+                [usu_id, usu_id]
+            );
+
+            return res.status(200).json({
+                message:    "Inbox recuperado.",
+                totalGeral,
+                total:      conversas.length,
+                page,
+                limit,
+                conversas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] inbox:", error);
+            return res.status(500).json({ error: "Erro ao buscar inbox." });
+        }
+    }
+
+    /**
      * MÉTODO: deletarMensagem
      * Descrição: Soft delete — marca men_deletado_em em vez de remover do banco.
      *   Preserva o histórico e evita quebra de referências via men_id_resposta.

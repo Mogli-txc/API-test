@@ -159,7 +159,9 @@ beforeAll(async () => {
                 car_desc:        'Carona de teste',
                 car_data:        '2026-06-15',
                 car_hor_saida:   '08:00:00',
-                car_vagas_dispo: 3
+                car_vagas_dispo: 3,
+                origem: { pon_nome: 'Origem Teste', pon_endereco: 'Rua A, 100, São Paulo' },
+                destino: { pon_nome: 'Destino Teste', pon_endereco: 'Rua B, 200, São Paulo' }
             });
         const car_id = carRes.body.carona.car_id;
 

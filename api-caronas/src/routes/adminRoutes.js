@@ -146,4 +146,16 @@ router.get('/cursos', ...adminGuard, AdminController.listarCursos);
 
 router.get('/relatorios/atividade', ...adminGuard, AdminController.relatorioAtividade);
 
+// GET /api/admin/relatorios/caronas — relatório de caronas por período (?inicio=, ?fim=, ?formato=csv)
+router.get('/relatorios/caronas', ...adminGuard, AdminController.relatorioCaronas);
+
+// GET /api/admin/sugestoes/stats — estatísticas de sugestões/denúncias (?dias=30)
+router.get('/sugestoes/stats', ...adminGuard, AdminController.statsSugestoesDetalhado);
+
+// GET /api/admin/documentos/:doc_id — detalhes de um documento de verificação
+router.get('/documentos/:doc_id', ...adminGuard, AdminController.obterDocumento);
+
+// PATCH /api/admin/documentos/:doc_id/status — aprova ou rejeita documento manualmente
+router.patch('/documentos/:doc_id/status', ...adminGuard, AdminController.atualizarStatusDocumento);
+
 module.exports = router;

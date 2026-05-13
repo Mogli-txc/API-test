@@ -464,6 +464,56 @@ class SugestaoDenunciaController {
             return res.status(500).json({ error: "Erro ao deletar sugestão/denúncia." });
         }
     }
+
+    /**
+     * MÉTODO: arquivar
+     * Arquiva uma sugestão/denúncia — sug_status = 2 (Arquivada).
+     * Permite fechar registros sem resposta formal. Não reverte fechamentos (status=0).
+     *
+     * POST /api/sugestoes/:sug_id/arquivar
+     */
+    async arquivar(req, res) {
+        try {
+            const { sug_id } = req.params;
+            const { per_tipo, per_escola_id } = req.user;
+
+            if (!sug_id || isNaN(sug_id)) return res.status(400).json({ error: "ID inválido." });
+
+            // PASSO 1: Admin verifica escopo da escola
+            if (per_tipo === 1) {
+                const [pertence] = await db.query(
+                    `SELECT s.sug_id FROM SUGESTAO_DENUNCIA s
+                     INNER JOIN USUARIOS u         ON s.usu_id  = u.usu_id
+                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                     INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                     WHERE s.sug_id = ? AND c.esc_id = ? LIMIT 1`,
+                    [sug_id, per_escola_id]
+                );
+                if (pertence.length === 0) return res.status(403).json({ error: "Sem permissão para arquivar esta sugestão/denúncia." });
+            }
+
+            // PASSO 2: Verifica status atual
+            const [atual] = await db.query(
+                'SELECT sug_status FROM SUGESTAO_DENUNCIA WHERE sug_id = ? AND sug_deletado_em IS NULL',
+                [sug_id]
+            );
+            if (atual.length === 0) return res.status(404).json({ error: "Sugestão/Denúncia não encontrada." });
+            if (atual[0].sug_status === 0) return res.status(409).json({ error: "Não é possível arquivar uma sugestão/denúncia já fechada." });
+            if (atual[0].sug_status === 2) return res.status(409).json({ error: "Sugestão/Denúncia já está arquivada." });
+
+            // PASSO 3: Arquiva (sug_status = 2)
+            await db.query('UPDATE SUGESTAO_DENUNCIA SET sug_status = 2 WHERE sug_id = ?', [sug_id]);
+
+            return res.status(200).json({
+                message:  "Sugestão/Denúncia arquivada.",
+                sugestao: { sug_id: parseInt(sug_id), sug_status: 2 }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] arquivar sugestão:", error);
+            return res.status(500).json({ error: "Erro ao arquivar sugestão/denúncia." });
+        }
+    }
 }
 
 module.exports = new SugestaoDenunciaController();
