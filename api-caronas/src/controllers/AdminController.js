@@ -1626,6 +1626,349 @@ class AdminController {
             return res.status(500).json({ error: "Erro ao atualizar status do documento." });
         }
     }
+
+    /**
+     * MÉTODO: dashboard
+     * Overview consolidado para a tela inicial da interface web do Admin/Dev.
+     * Admin: escopo da escola. Dev: escopo global ou filtrado por ?esc_id=.
+     *
+     * PASSO 1: Valida escopo e resolve esc_id.
+     * PASSO 2: Executa todas as queries em paralelo (Promise.allSettled).
+     * PASSO 3: Inclui dados do contrato da escola para o Admin.
+     *
+     * GET /api/admin/dashboard
+     */
+    async dashboard(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+            if (per_tipo === 1 && !per_escola_id) return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
+
+            const esc_id = per_tipo === 1
+                ? per_escola_id
+                : (req.query.esc_id ? parseInt(req.query.esc_id) : null);
+
+            // PASSO 1: Monta condições de escopo
+            const escolaJoinUsu = esc_id
+                ? `INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id
+                   INNER JOIN CURSOS c ON cu.cur_id = c.cur_id`
+                : '';
+            const whereUsu  = esc_id ? `WHERE c.esc_id = ${esc_id} AND u.usu_status = 1` : 'WHERE u.usu_status = 1';
+            const whereCarV = esc_id
+                ? `INNER JOIN VEICULOS v ON cr.vei_id = v.vei_id
+                   INNER JOIN CURSOS_USUARIOS cu2 ON v.usu_id = cu2.usu_id
+                   INNER JOIN CURSOS co ON cu2.cur_id = co.cur_id
+                   WHERE co.esc_id = ${esc_id}`
+                : '';
+            const whereSug  = esc_id
+                ? `INNER JOIN USUARIOS us ON s.usu_id = us.usu_id
+                   INNER JOIN CURSOS_USUARIOS cu3 ON us.usu_id = cu3.usu_id
+                   INNER JOIN CURSOS co2 ON cu3.cur_id = co2.cur_id
+                   WHERE co2.esc_id = ${esc_id} AND s.sug_deletado_em IS NULL AND s.sug_status IN (1, 3)`
+                : 'WHERE s.sug_deletado_em IS NULL AND s.sug_status IN (1, 3)';
+            const whereDoc  = esc_id
+                ? `INNER JOIN USUARIOS ud ON d.usu_id = ud.usu_id
+                   INNER JOIN CURSOS_USUARIOS cu4 ON ud.usu_id = cu4.usu_id
+                   INNER JOIN CURSOS co3 ON cu4.cur_id = co3.cur_id
+                   WHERE co3.esc_id = ${esc_id} AND d.doc_status = 2`
+                : 'WHERE d.doc_status = 2';
+            const wherePen  = esc_id
+                ? `INNER JOIN CURSOS_USUARIOS cu5 ON p.usu_id = cu5.usu_id
+                   INNER JOIN CURSOS co4 ON cu5.cur_id = co4.cur_id
+                   WHERE co4.esc_id = ${esc_id} AND p.pen_ativo = 1
+                     AND (p.pen_expira_em IS NULL OR p.pen_expira_em > NOW())`
+                : 'WHERE p.pen_ativo = 1 AND (p.pen_expira_em IS NULL OR p.pen_expira_em > NOW())';
+
+            // PASSO 2: Consultas paralelas — falha individual não derruba o dashboard
+            const [
+                rUsuarios, rCaronas, rSugestoes, rDocumentos, rPenalidades, rContrato
+            ] = await Promise.allSettled([
+                db.query(
+                    `SELECT COUNT(DISTINCT u.usu_id) AS total,
+                            SUM(u.usu_verificacao IN (1,2)) AS verificados,
+                            SUM(u.usu_verificacao IN (5,6)) AS temporarios,
+                            SUM(u.usu_verificacao = 0) AS aguardando_otp
+                     FROM USUARIOS u ${escolaJoinUsu} ${whereUsu}`
+                ),
+                db.query(
+                    `SELECT COUNT(*) AS total,
+                            SUM(cr.car_status = 1) AS abertas,
+                            SUM(cr.car_status = 2) AS em_espera,
+                            SUM(cr.car_status = 3) AS finalizadas,
+                            SUM(cr.car_status = 0) AS canceladas
+                     FROM CARONAS cr ${whereCarV}`
+                ),
+                db.query(
+                    `SELECT COUNT(DISTINCT s.sug_id) AS total FROM SUGESTAO_DENUNCIA s ${whereSug}`
+                ),
+                db.query(
+                    `SELECT COUNT(DISTINCT d.doc_id) AS total FROM DOCUMENTOS_VERIFICACAO d ${whereDoc}`
+                ),
+                db.query(
+                    `SELECT COUNT(DISTINCT p.pen_id) AS total FROM PENALIDADES p ${wherePen}`
+                ),
+                esc_id
+                    ? db.query(
+                        `SELECT esc_nome, esc_contrato_duracao, esc_contrato_inicio,
+                                esc_contrato_expira,
+                                DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes
+                         FROM ESCOLAS WHERE esc_id = ?`,
+                        [esc_id]
+                    )
+                    : Promise.resolve([[]])
+            ]);
+
+            const val = (r, field) => r.status === 'fulfilled' ? (r.value[0][0]?.[field] ?? 0) : null;
+            const row = (r) => r.status === 'fulfilled' ? (r.value[0][0] ?? null) : null;
+
+            return res.status(200).json({
+                esc_id: esc_id || null,
+                contrato:   row(rContrato),
+                usuarios: {
+                    total:         val(rUsuarios, 'total'),
+                    verificados:   val(rUsuarios, 'verificados'),
+                    temporarios:   val(rUsuarios, 'temporarios'),
+                    aguardando_otp: val(rUsuarios, 'aguardando_otp')
+                },
+                caronas: {
+                    total:      val(rCaronas, 'total'),
+                    abertas:    val(rCaronas, 'abertas'),
+                    em_espera:  val(rCaronas, 'em_espera'),
+                    finalizadas: val(rCaronas, 'finalizadas'),
+                    canceladas: val(rCaronas, 'canceladas')
+                },
+                sugestoes_abertas:       val(rSugestoes, 'total'),
+                documentos_pendentes:    val(rDocumentos, 'total'),
+                penalidades_ativas:      val(rPenalidades, 'total')
+            });
+
+        } catch (error) {
+            console.error("[ERRO] dashboard (admin):", error);
+            return res.status(500).json({ error: "Erro ao carregar dashboard." });
+        }
+    }
+
+    /**
+     * MÉTODO: listarCaronasAdmin
+     * Lista caronas da escola do Admin (todos os status) para fins de moderação.
+     * Dev: acessa globalmente ou filtra por ?esc_id=.
+     *
+     * PASSO 1: Resolve escopo.
+     * PASSO 2: Aplica filtros opcionais de status e período.
+     * PASSO 3: Retorna lista paginada com dados do motorista.
+     *
+     * GET /api/admin/caronas?status=&data_inicio=&data_fim=&page=&limit=
+     */
+    async listarCaronasAdmin(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+            if (per_tipo === 1 && !per_escola_id) return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
+
+            const esc_id = per_tipo === 1
+                ? per_escola_id
+                : (req.query.esc_id ? parseInt(req.query.esc_id) : null);
+
+            const { page, limit, offset } = parsePagination(req);
+
+            // PASSO 2: Filtros opcionais
+            const filtros = [];
+            const params  = [];
+
+            if (esc_id) {
+                filtros.push('co.esc_id = ?');
+                params.push(esc_id);
+            }
+            if (req.query.status !== undefined) {
+                const st = parseInt(req.query.status);
+                if (isNaN(st) || ![0, 1, 2, 3].includes(st)) {
+                    return res.status(400).json({ error: "status deve ser 0, 1, 2 ou 3." });
+                }
+                filtros.push('c.car_status = ?');
+                params.push(st);
+            }
+            if (req.query.data_inicio) {
+                filtros.push('c.car_data >= ?');
+                params.push(req.query.data_inicio);
+            }
+            if (req.query.data_fim) {
+                filtros.push('c.car_data <= ?');
+                params.push(req.query.data_fim);
+            }
+
+            const joinEscola = esc_id
+                ? `INNER JOIN CURSOS_USUARIOS cu ON v.usu_id = cu.usu_id
+                   INNER JOIN CURSOS co ON cu.cur_id = co.cur_id`
+                : '';
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            // PASSO 3: Busca caronas com dados do motorista
+            const [caronas] = await db.query(
+                `SELECT c.car_id, c.car_data, c.car_hor_saida, c.car_vagas_dispo,
+                        c.car_status, c.car_desc,
+                        u.usu_id AS motorista_id, u.usu_nome AS motorista, u.usu_email AS motorista_email,
+                        v.vei_placa, v.vei_tipo
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
+                 ${joinEscola}
+                 ${where}
+                 ORDER BY c.car_data DESC, c.car_hor_saida DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 ${joinEscola}
+                 ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Caronas listadas.",
+                totalGeral, total: caronas.length, page, limit,
+                esc_id: esc_id || null,
+                caronas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarCaronasAdmin:", error);
+            return res.status(500).json({ error: "Erro ao listar caronas." });
+        }
+    }
+
+    /**
+     * MÉTODO: obterContrato
+     * Retorna os detalhes do contrato da escola do Admin autenticado.
+     * Exclusivo para Admin (per_tipo=1) — Dev usa GET /api/dev/escolas.
+     *
+     * GET /api/admin/contrato
+     */
+    async obterContrato(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+            if (per_tipo !== 1) {
+                return res.status(403).json({ error: "Endpoint exclusivo para Administradores. Dev: use GET /api/dev/escolas." });
+            }
+            if (!per_escola_id) return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
+
+            const [[escola]] = await db.query(
+                `SELECT esc_id, esc_nome, esc_dominio, esc_max_usuarios,
+                        esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira,
+                        DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes,
+                        CASE
+                            WHEN esc_contrato_expira IS NULL THEN 'sem_contrato'
+                            WHEN esc_contrato_expira < CURDATE() THEN 'expirado'
+                            WHEN DATEDIFF(esc_contrato_expira, CURDATE()) <= 90 THEN 'vencendo'
+                            ELSE 'ativo'
+                        END AS status_contrato
+                 FROM ESCOLAS WHERE esc_id = ?`,
+                [per_escola_id]
+            );
+
+            if (!escola) return res.status(404).json({ error: "Escola não encontrada." });
+
+            return res.status(200).json({
+                message: "Contrato da escola recuperado.",
+                contrato: escola
+            });
+
+        } catch (error) {
+            console.error("[ERRO] obterContrato:", error);
+            return res.status(500).json({ error: "Erro ao obter contrato da escola." });
+        }
+    }
+
+    /**
+     * MÉTODO: notificarEscola
+     * Envia notificação em massa para todos os usuários ativos de uma escola.
+     * Admin: escola própria. Dev: requer ?esc_id= no body.
+     *
+     * PASSO 1: Resolve esc_id e valida.
+     * PASSO 2: Busca todos os usu_id ativos da escola.
+     * PASSO 3: Insere notificações em lote e emite via Socket.io (fire-and-forget).
+     *
+     * POST /api/admin/notificacoes/escola
+     * Body: { titulo, mensagem, tipo? }
+     */
+    async notificarEscola(req, res) {
+        try {
+            const { per_tipo, per_escola_id } = req.user;
+            const { titulo, mensagem, esc_id: esc_id_body, tipo } = req.body;
+
+            if (!titulo || !mensagem) {
+                return res.status(400).json({ error: "Campos obrigatórios: titulo, mensagem." });
+            }
+
+            // PASSO 1: Resolve escopo
+            let esc_id;
+            if (per_tipo === 1) {
+                if (!per_escola_id) return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
+                esc_id = per_escola_id;
+            } else {
+                // Dev precisa informar esc_id no body
+                if (!esc_id_body || isNaN(parseInt(esc_id_body))) {
+                    return res.status(400).json({ error: "Dev deve informar esc_id no body para envio em massa." });
+                }
+                esc_id = parseInt(esc_id_body);
+            }
+
+            // Verifica se a escola existe
+            const [[escola]] = await db.query('SELECT esc_nome FROM ESCOLAS WHERE esc_id = ?', [esc_id]);
+            if (!escola) return res.status(404).json({ error: "Escola não encontrada." });
+
+            // PASSO 2: Busca todos os usu_id ativos e verificados da escola
+            const [usuarios] = await db.query(
+                `SELECT DISTINCT u.usu_id
+                 FROM USUARIOS u
+                 INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id
+                 INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
+                 WHERE c.esc_id = ? AND u.usu_status = 1 AND u.usu_verificacao NOT IN (0, 9)`,
+                [esc_id]
+            );
+
+            if (usuarios.length === 0) {
+                return res.status(200).json({
+                    message: "Nenhum usuário ativo encontrado na escola.",
+                    enviadas: 0
+                });
+            }
+
+            // PASSO 3: Insere notificações em lote
+            const tipoNotif = tipo || 'SISTEMA';
+            const tituloLimpo   = require('../utils/sanitize').stripHtml(titulo.trim()).slice(0, 100);
+            const mensagemLimpa = require('../utils/sanitize').stripHtml(mensagem.trim()).slice(0, 500);
+
+            const valores = usuarios.map(u => [u.usu_id, tipoNotif, tituloLimpo, mensagemLimpa]);
+            await db.query(
+                `INSERT INTO NOTIFICACOES (usu_id, noti_tipo, noti_titulo, noti_mensagem)
+                 VALUES ?`,
+                [valores]
+            );
+
+            // Notifica via Socket.io (fire-and-forget)
+            const { notificar, TIPOS } = require('../utils/notificar');
+            for (const u of usuarios) {
+                notificar({
+                    usu_id:   u.usu_id,
+                    tipo:     TIPOS.SISTEMA || tipoNotif,
+                    titulo:   tituloLimpo,
+                    mensagem: mensagemLimpa
+                }).catch(() => {});
+            }
+
+            return res.status(200).json({
+                message:  `Notificação enviada para ${usuarios.length} usuário(s) da escola "${escola.esc_nome}".`,
+                escola:   { esc_id, esc_nome: escola.esc_nome },
+                enviadas: usuarios.length
+            });
+
+        } catch (error) {
+            console.error("[ERRO] notificarEscola:", error);
+            return res.status(500).json({ error: "Erro ao enviar notificação em massa." });
+        }
+    }
 }
 
 module.exports = new AdminController();

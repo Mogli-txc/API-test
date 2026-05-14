@@ -106,6 +106,29 @@ router.post('/escolas/:esc_id/contrato', ...devGuard, DevController.definirContr
  */
 router.delete('/escolas/:esc_id/contrato', ...devGuard, DevController.cancelarContrato);
 
+// ── Relatórios globais ────────────────────────────────────────────────────────
+
+/**
+ * GET /api/dev/escolas
+ * Lista todas as escolas com dados completos de contrato.
+ * Query: ?q= (busca por nome), ?status_contrato= (ativo|expirado|vencendo|sem_contrato)
+ */
+router.get('/escolas', ...devGuard, DevController.listarEscolas);
+
+/**
+ * GET /api/dev/relatorios/penalidades
+ * Relatório de usuários penalizados com exportação CSV.
+ * Query: ?esc_id=, ?pen_tipo=, ?ativo=, ?page=, ?limit=, ?formato=csv
+ */
+router.get('/relatorios/penalidades', ...devGuard, DevController.relatorioPenalidades);
+
+/**
+ * GET /api/dev/relatorios/usuarios
+ * Relatório de usuários por escola/nível de verificação com exportação CSV.
+ * Query: ?esc_id=, ?verificacao=, ?status=, ?page=, ?limit=, ?formato=csv
+ */
+router.get('/relatorios/usuarios', ...devGuard, DevController.relatorioUsuarios);
+
 // ── CRUD de Cursos ────────────────────────────────────────────────────────────
 
 /**

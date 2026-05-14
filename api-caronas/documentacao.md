@@ -909,6 +909,73 @@ paths:
         '401':
           description: Não autenticado
 
+  /api/usuarios/me/dashboard:
+    get:
+      tags: [Usuários]
+      summary: Dashboard consolidado do usuário autenticado
+      description: |
+        Retorna em uma única chamada os dados essenciais da tela inicial do app mobile:
+        caronas ativas como motorista, solicitações pendentes, notificações não lidas,
+        penalidades ativas e reputação. Elimina 4–5 chamadas paralelas.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dashboard consolidado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  caronas_ativas: { type: integer }
+                  solicitacoes_pendentes: { type: integer }
+                  notificacoes_nao_lidas: { type: integer }
+                  penalidades_ativas: { type: integer }
+                  reputacao:
+                    type: object
+                    properties:
+                      media: { type: number, nullable: true }
+                      total: { type: integer }
+
+  /api/usuarios/me/conta:
+    delete:
+      tags: [Usuários]
+      summary: Agenda exclusão de conta com 30 dias de graça (LGPD)
+      description: |
+        Marca a conta para exclusão em 30 dias em vez de deletar imediatamente.
+        O usuário pode cancelar durante o prazo usando `POST /me/conta/cancelar-exclusao`.
+        Invalida a sessão ativa (force re-login se cancelar a exclusão).
+
+        Requer coluna `USUARIOS.usu_exclusao_agendada DATETIME NULL`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Conta marcada para exclusão
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  expira_em: { type: string, format: date }
+        '409': { description: Exclusão já agendada }
+
+  /api/usuarios/me/conta/cancelar-exclusao:
+    post:
+      tags: [Usuários]
+      summary: Cancela o agendamento de exclusão dentro do prazo de graça
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Exclusão cancelada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SucessoSimples'
+        '409': { description: Nenhuma exclusão agendada para esta conta }
+
   /api/usuarios/perfil/{id}:
     get:
       tags: [Usuários]
@@ -1470,6 +1537,43 @@ paths:
         '409':
           description: Placa já cadastrada no sistema
 
+  /api/veiculos/{vei_id}/caronas:
+    get:
+      tags: [Veículos]
+      summary: Histórico de caronas de um veículo específico
+      description: |
+        Lista caronas realizadas com o veículo. Acessível pelo dono do veículo ou por Admin/Dev.
+        Útil para o Admin auditar um veículo suspeito reportado em denúncia.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: vei_id, in: path, required: true, schema: { type: integer } }
+        - { name: status, in: query, schema: { type: integer, enum: [0,1,2,3] }, description: "Filtra por car_status" }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        '200':
+          description: Lista de caronas do veículo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vei_id: { type: integer }
+                  totalGeral: { type: integer }
+                  caronas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        car_id: { type: integer }
+                        car_data: { type: string, format: date }
+                        car_hor_saida: { type: string }
+                        car_vagas_dispo: { type: integer }
+                        car_status: { type: integer }
+        '403': { description: Sem permissão para ver as caronas deste veículo }
+        '404': { description: Veículo não encontrado }
+
   /api/veiculos/usuario/{usu_id}:
     get:
       tags: [Veículos]
@@ -1691,6 +1795,35 @@ paths:
         '401':
           description: Não autenticado
 
+  /api/caronas/buscar/proximas:
+    get:
+      tags: [Caronas]
+      summary: Caronas próximas por geolocalização
+      description: |
+        Retorna caronas abertas cujo ponto de partida esteja dentro do raio informado.
+        Usa bounding box SQL + refinamento Haversine em JS (mesmo padrão do filtro de proximidade existente).
+        Raio máximo: 25 km.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number, format: float }, example: -23.55 }
+        - { name: lon, in: query, required: true, schema: { type: number, format: float }, example: -46.63 }
+        - { name: raio_km, in: query, schema: { type: number, default: 5, maximum: 25 }, example: 5 }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        '200':
+          description: Lista de caronas dentro do raio
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  raio_km: { type: number }
+                  total: { type: integer }
+                  caronas: { type: array, items: { $ref: '#/components/schemas/Carona' } }
+        '400': { description: lat ou lon ausentes, ou raio_km inválido }
+
   /api/caronas/minhas:
     get:
       tags: [Caronas]
@@ -1820,6 +1953,106 @@ paths:
             - Data/hora no passado
         '401':
           description: Não autenticado
+
+  /api/caronas/{car_id}/timeline:
+    get:
+      tags: [Caronas]
+      summary: Histórico cronológico de eventos de uma carona
+      description: |
+        Retorna todos os eventos da carona em ordem cronológica:
+        criação, solicitações recebidas, aceites/recusas, cancelamentos, finalização e avaliações.
+        Útil para o motorista ver o ciclo completo e para suporte auditar denúncias.
+
+        Acesso restrito a participantes confirmados (motorista e passageiros aceitos).
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: car_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Lista de eventos ordenada por timestamp
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  car_id: { type: integer }
+                  total: { type: integer }
+                  eventos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tipo: { type: string, enum: [CRIACAO, SOLICITACAO, ACEITE, RECUSA, CANCELAMENTO, FINALIZACAO, AVALIACAO] }
+                        em: { type: string, format: date-time, nullable: true }
+                        usu_nome: { type: string, nullable: true }
+                        ava_nota: { type: integer, nullable: true }
+                        detalhe: { type: string, nullable: true }
+        '403': { description: Não é participante desta carona }
+        '404': { description: Carona não encontrada }
+
+  /api/caronas/{car_id}/checkpoints:
+    post:
+      tags: [Caronas]
+      summary: Registrar checkpoint de localização (motorista)
+      description: |
+        Motorista envia sua localização atual durante a viagem.
+        Restrito ao motorista da carona. Carona deve estar ativa (status 1 ou 2).
+
+        **Requer a tabela:** `CARONAS_CHECKPOINTS (car_id, lat, lng, criado_em)` — migration pendente.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: car_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lat, lng]
+              properties:
+                lat: { type: number, format: float, example: -23.55 }
+                lng: { type: number, format: float, example: -46.63 }
+      responses:
+        '201':
+          description: Checkpoint registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkpoint: { type: object, properties: { chk_id: { type: integer }, lat: { type: number }, lng: { type: number } } }
+        '403': { description: Apenas o motorista pode registrar checkpoints }
+        '409': { description: Carona não está ativa }
+    get:
+      tags: [Caronas]
+      summary: Obter último checkpoint do motorista (passageiros)
+      description: |
+        Retorna a última localização registrada pelo motorista.
+        Acessível para passageiros confirmados — permite acompanhar a chegada.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: car_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Último checkpoint
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  car_id: { type: integer }
+                  ultimo_checkpoint:
+                    nullable: true
+                    type: object
+                    properties:
+                      chk_id: { type: integer }
+                      lat: { type: number, format: float }
+                      lng: { type: number, format: float }
+                      criado_em: { type: string, format: date-time }
+        '403': { description: Não é participante desta carona }
 
   /api/caronas/{car_id}:
     get:
@@ -2333,6 +2566,40 @@ paths:
   # ────────────────────────────────────────────────────────────────────────────
   # MENSAGENS — /api/mensagens
   # ────────────────────────────────────────────────────────────────────────────
+  /api/mensagens/inbox:
+    get:
+      tags: [Mensagens]
+      summary: Caixa de entrada — conversas agrupadas por carona
+      description: |
+        Lista todas as caronas onde o usuário tem mensagens (enviadas ou recebidas),
+        com o último texto e contagem de mensagens não lidas.
+        Funciona como a tela de lista de conversas do WhatsApp.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 50 } }
+      responses:
+        '200':
+          description: Lista de conversas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalGeral: { type: integer }
+                  total: { type: integer }
+                  conversas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        car_id: { type: integer }
+                        car_data: { type: string, format: date }
+                        ultima_mensagem: { type: string, nullable: true }
+                        em: { type: string, format: date-time, nullable: true }
+                        nao_lidas: { type: integer }
+
   /api/mensagens/enviar:
     post:
       tags: [Mensagens]
@@ -3020,6 +3287,31 @@ paths:
           description: Registro respondido e fechado
         '403':
           description: Sem permissão
+
+  /api/sugestoes/{sug_id}/arquivar:
+    post:
+      tags: [Sugestões e Denúncias]
+      summary: Arquivar sugestão/denúncia sem resposta formal (Admin/Dev)
+      description: |
+        Muda o status para `2 = Arquivada` — permite fechar registros sem precisar respondê-los.
+        Não reverte registros já fechados (`sug_status = 0`).
+        Admin: escopo da escola. Dev: qualquer registro.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: sug_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Registro arquivado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sugestao: { type: object, properties: { sug_id: { type: integer }, sug_status: { type: integer, example: 2 } } }
+        '403': { description: Sem permissão (Admin fora da escola) }
+        '404': { description: Sugestão/Denúncia não encontrada }
+        '409': { description: Já está fechada ou já está arquivada }
 
   # ────────────────────────────────────────────────────────────────────────────
   # MATRÍCULAS — /api/matriculas
@@ -5061,4 +5353,321 @@ paths:
         '204': { description: Curso removido }
         '403': { description: Apenas Desenvolvedor }
         '409': { description: Curso tem matrículas ativas }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # ADMIN — Interface Web (v19)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /api/admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: Dashboard consolidado para a interface web [v19]
+      description: |
+        Overview em uma única chamada: usuários ativos, caronas, sugestões abertas,
+        documentos pendentes de revisão, penalidades ativas e dados do contrato da escola.
+
+        **Admin:** escopo da escola. **Dev:** global ou filtrado por `?esc_id=`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: esc_id
+          in: query
+          required: false
+          schema: { type: integer }
+          description: Dev apenas — filtra os dados por escola específica
+      responses:
+        '200':
+          description: Dados consolidados do dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  esc_id: { type: integer, nullable: true }
+                  contrato:
+                    type: object
+                    nullable: true
+                    properties:
+                      esc_nome: { type: string }
+                      esc_contrato_expira: { type: string, format: date }
+                      dias_restantes: { type: integer, nullable: true }
+                  usuarios:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      verificados: { type: integer }
+                      temporarios: { type: integer }
+                      aguardando_otp: { type: integer }
+                  caronas:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      abertas: { type: integer }
+                      em_espera: { type: integer }
+                      finalizadas: { type: integer }
+                      canceladas: { type: integer }
+                  sugestoes_abertas: { type: integer }
+                  documentos_pendentes: { type: integer }
+                  penalidades_ativas: { type: integer }
+        '403': { description: Admin sem escola associada }
+
+  /api/admin/caronas:
+    get:
+      tags: [Admin]
+      summary: Lista caronas da escola para moderação [v19]
+      description: |
+        Retorna caronas da escola em **todos os status** (aberta, em espera, finalizada, cancelada).
+        Permite ao Admin investigar caronas específicas reportadas em denúncias.
+
+        **Admin:** escopo da escola. **Dev:** global ou `?esc_id=`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: status, in: query, schema: { type: integer, enum: [0,1,2,3] }, description: "0=Cancelada 1=Aberta 2=Em espera 3=Finalizada" }
+        - { name: data_inicio, in: query, schema: { type: string, format: date } }
+        - { name: data_fim, in: query, schema: { type: string, format: date } }
+        - { name: esc_id, in: query, schema: { type: integer }, description: Dev apenas }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        '200':
+          description: Lista de caronas com dados do motorista
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalGeral: { type: integer }
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  caronas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        car_id: { type: integer }
+                        car_data: { type: string, format: date }
+                        car_hor_saida: { type: string }
+                        car_vagas_dispo: { type: integer }
+                        car_status: { type: integer }
+                        motorista_id: { type: integer }
+                        motorista: { type: string }
+                        motorista_email: { type: string }
+                        vei_placa: { type: string }
+
+  /api/admin/contrato:
+    get:
+      tags: [Admin]
+      summary: Detalhes do contrato da própria escola [v19]
+      description: |
+        Retorna dados completos do contrato vigente da escola do Admin autenticado:
+        duração, data de início, data de expiração, dias restantes e status.
+
+        **Exclusivo para Admin** — Dev consulta via `GET /api/dev/escolas`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dados do contrato da escola
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contrato:
+                    type: object
+                    properties:
+                      esc_id: { type: integer }
+                      esc_nome: { type: string }
+                      esc_contrato_duracao: { type: string, enum: [1ano, 2anos, 5anos], nullable: true }
+                      esc_contrato_inicio: { type: string, format: date, nullable: true }
+                      esc_contrato_expira: { type: string, format: date, nullable: true }
+                      dias_restantes: { type: integer, nullable: true }
+                      status_contrato: { type: string, enum: [ativo, expirado, vencendo, sem_contrato] }
+        '403': { description: Endpoint exclusivo para Administradores }
+
+  /api/admin/notificacoes/escola:
+    post:
+      tags: [Admin]
+      summary: Broadcast de notificação para todos os usuários da escola [v19]
+      description: |
+        Envia notificação em massa para **todos os usuários ativos e verificados** da escola.
+        Inserção em lote na tabela NOTIFICACOES + push via Socket.io (fire-and-forget).
+
+        **Admin:** escola própria. **Dev:** deve informar `esc_id` no body.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [titulo, mensagem]
+              properties:
+                titulo:
+                  type: string
+                  maxLength: 100
+                  example: Manutenção programada
+                mensagem:
+                  type: string
+                  maxLength: 500
+                  example: O sistema estará em manutenção das 22h às 23h de hoje.
+                tipo:
+                  type: string
+                  default: SISTEMA
+                  example: SISTEMA
+                esc_id:
+                  type: integer
+                  description: Obrigatório apenas para Dev
+      responses:
+        '200':
+          description: Notificação enviada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  escola:
+                    type: object
+                    properties:
+                      esc_id: { type: integer }
+                      esc_nome: { type: string }
+                  enviadas: { type: integer, description: Número de usuários notificados }
+        '400': { description: titulo ou mensagem ausentes, ou esc_id inválido (Dev) }
+        '404': { description: Escola não encontrada }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # DEV — Relatórios e visão global (v19)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /api/dev/escolas:
+    get:
+      tags: [Dev]
+      summary: Lista todas as escolas com dados de contrato [v19]
+      description: |
+        Retorna todas as escolas com campos completos de contrato, status calculado
+        e contagem de usuários e cursos vinculados.
+
+        **Exclusivo para Desenvolvedor.** Admin usa `GET /api/admin/contrato`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: Busca por nome da escola }
+        - name: status_contrato
+          in: query
+          schema: { type: string, enum: [ativo, expirado, vencendo, sem_contrato] }
+          description: Filtra pelo status do contrato
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        '200':
+          description: Lista de escolas com contrato
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalGeral: { type: integer }
+                  escolas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        esc_id: { type: integer }
+                        esc_nome: { type: string }
+                        esc_dominio: { type: string, nullable: true }
+                        esc_contrato_duracao: { type: string, nullable: true }
+                        esc_contrato_expira: { type: string, format: date, nullable: true }
+                        dias_restantes: { type: integer, nullable: true }
+                        status_contrato: { type: string, enum: [ativo, expirado, vencendo, sem_contrato] }
+                        total_cursos: { type: integer }
+                        total_usuarios: { type: integer }
+
+  /api/dev/relatorios/penalidades:
+    get:
+      tags: [Dev]
+      summary: Relatório de usuários penalizados com exportação CSV [v19]
+      description: |
+        Lista penalidades com dados do usuário. Padrão: apenas penalidades ativas e não expiradas.
+        `?formato=csv` exporta até 5.000 registros em CSV.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: esc_id, in: query, schema: { type: integer }, description: Filtra por escola }
+        - { name: pen_tipo, in: query, schema: { type: integer, enum: [1,2,3,4] } }
+        - { name: ativo, in: query, schema: { type: integer, enum: [0,1] }, description: "Padrão: 1 (apenas ativas)" }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: formato, in: query, schema: { type: string, enum: [csv] }, description: Exporta CSV }
+      responses:
+        '200':
+          description: Lista de penalidades ou arquivo CSV
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalGeral: { type: integer }
+                  penalidades:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        pen_id: { type: integer }
+                        usu_id: { type: integer }
+                        usu_nome: { type: string }
+                        usu_email: { type: string }
+                        pen_tipo: { type: integer }
+                        pen_motivo: { type: string, nullable: true }
+                        pen_aplicado_em: { type: string, format: date-time }
+                        pen_expira_em: { type: string, format: date-time, nullable: true }
+            text/csv:
+              schema: { type: string }
+
+  /api/dev/relatorios/usuarios:
+    get:
+      tags: [Dev]
+      summary: Relatório de usuários com exportação CSV [v19]
+      description: |
+        Relatório de usuários filtrado por escola, nível de verificação e status.
+        `?formato=csv` exporta até 10.000 registros em CSV.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: esc_id, in: query, schema: { type: integer }, description: Filtra por escola }
+        - name: verificacao
+          in: query
+          schema: { type: integer, enum: [0,1,2,5,6,9] }
+          description: "0=aguardando OTP, 1=matrícula, 2=completo, 5/6=temporário, 9=suspenso"
+        - { name: status, in: query, schema: { type: integer, enum: [0,1] }, description: "Padrão: 1 (ativos)" }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: formato, in: query, schema: { type: string, enum: [csv] }, description: Exporta CSV }
+      responses:
+        '200':
+          description: Lista de usuários ou arquivo CSV
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalGeral: { type: integer }
+                  usuarios:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        usu_id: { type: integer }
+                        usu_nome: { type: string }
+                        usu_email: { type: string }
+                        usu_status: { type: integer }
+                        usu_verificacao: { type: integer }
+                        usu_verificacao_expira: { type: string, format: date-time, nullable: true }
+                        usu_criado_em: { type: string, format: date-time }
+                        usu_data_login: { type: string, format: date-time, nullable: true }
+            text/csv:
+              schema: { type: string }
 ```

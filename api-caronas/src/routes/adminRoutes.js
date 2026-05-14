@@ -158,4 +158,18 @@ router.get('/documentos/:doc_id', ...adminGuard, AdminController.obterDocumento)
 // PATCH /api/admin/documentos/:doc_id/status — aprova ou rejeita documento manualmente
 router.patch('/documentos/:doc_id/status', ...adminGuard, AdminController.atualizarStatusDocumento);
 
+// ── Novos endpoints web (Admin/Dev) ──────────────────────────────────────────
+
+// GET /api/admin/dashboard — overview consolidado para a tela inicial da interface web
+router.get('/dashboard', ...adminGuard, AdminController.dashboard);
+
+// GET /api/admin/caronas — listagem de caronas da escola para moderação (?status=, ?data_inicio=, ?data_fim=)
+router.get('/caronas', ...adminGuard, AdminController.listarCaronasAdmin);
+
+// GET /api/admin/contrato — detalhes do contrato da própria escola (Admin only)
+router.get('/contrato', ...adminGuard, AdminController.obterContrato);
+
+// POST /api/admin/notificacoes/escola — broadcast de notificação para todos os usuários da escola
+router.post('/notificacoes/escola', ...adminGuard, AdminController.notificarEscola);
+
 module.exports = router;

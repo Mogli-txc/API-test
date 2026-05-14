@@ -1097,6 +1097,296 @@ class DevController {
             return res.status(500).json({ error: "Erro ao remover curso." });
         }
     }
+
+    /**
+     * MÉTODO: listarEscolas
+     * Lista todas as escolas com dados completos de contrato.
+     * Visão exclusiva do Desenvolvedor — inclui status_contrato e dias_restantes.
+     * Query params: ?q= (busca por nome), ?status_contrato= (ativo|expirado|vencendo|sem_contrato)
+     *
+     * GET /api/dev/escolas
+     */
+    async listarEscolas(req, res) {
+        try {
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem acessar este endpoint." });
+            }
+
+            const { parsePagination } = require('../utils/queryHelpers');
+            const { page, limit, offset } = parsePagination(req);
+
+            const filtros = [];
+            const params  = [];
+
+            if (req.query.q) {
+                filtros.push('esc_nome LIKE ?');
+                params.push(`%${req.query.q.trim()}%`);
+            }
+
+            // Filtro por status de contrato
+            if (req.query.status_contrato) {
+                switch (req.query.status_contrato) {
+                    case 'ativo':
+                        filtros.push('esc_contrato_expira > CURDATE()');
+                        break;
+                    case 'expirado':
+                        filtros.push('esc_contrato_expira IS NOT NULL AND esc_contrato_expira <= CURDATE()');
+                        break;
+                    case 'vencendo':
+                        filtros.push('esc_contrato_expira BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 90 DAY)');
+                        break;
+                    case 'sem_contrato':
+                        filtros.push('esc_contrato_expira IS NULL');
+                        break;
+                    default:
+                        return res.status(400).json({ error: "status_contrato inválido. Use: ativo, expirado, vencendo, sem_contrato." });
+                }
+            }
+
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            const [escolas] = await db.query(
+                `SELECT esc_id, esc_nome, esc_dominio, esc_max_usuarios,
+                        esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira,
+                        DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes,
+                        CASE
+                            WHEN esc_contrato_expira IS NULL THEN 'sem_contrato'
+                            WHEN esc_contrato_expira < CURDATE() THEN 'expirado'
+                            WHEN DATEDIFF(esc_contrato_expira, CURDATE()) <= 90 THEN 'vencendo'
+                            ELSE 'ativo'
+                        END AS status_contrato,
+                        (SELECT COUNT(*) FROM CURSOS WHERE esc_id = e.esc_id) AS total_cursos,
+                        (SELECT COUNT(DISTINCT cu.usu_id)
+                         FROM CURSOS_USUARIOS cu
+                         INNER JOIN CURSOS c ON cu.cur_id = c.cur_id
+                         WHERE c.esc_id = e.esc_id) AS total_usuarios
+                 FROM ESCOLAS e
+                 ${where}
+                 ORDER BY esc_id ASC
+                 LIMIT ? OFFSET ?`,
+                [...params, limit, offset]
+            );
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(*) AS totalGeral FROM ESCOLAS ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Escolas listadas.",
+                totalGeral, total: escolas.length, page, limit, escolas
+            });
+
+        } catch (error) {
+            console.error("[ERRO] listarEscolas (dev):", error);
+            return res.status(500).json({ error: "Erro ao listar escolas." });
+        }
+    }
+
+    /**
+     * MÉTODO: relatorioPenalidades
+     * Lista usuários penalizados com detalhes da penalidade.
+     * Suporta filtros por escola, tipo, status e exportação CSV.
+     *
+     * PASSO 1: Monta filtros.
+     * PASSO 2: Busca lista de penalidades com dados do usuário.
+     * PASSO 3: Exporta CSV se ?formato=csv.
+     *
+     * GET /api/dev/relatorios/penalidades?esc_id=&pen_tipo=&ativo=&formato=csv
+     */
+    async relatorioPenalidades(req, res) {
+        try {
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem acessar relatórios globais." });
+            }
+
+            const { parsePagination } = require('../utils/queryHelpers');
+            const { page, limit, offset } = parsePagination(req, 50, 500);
+            const formato = (req.query.formato || '').toLowerCase();
+
+            const filtros = [];
+            const params  = [];
+
+            if (req.query.esc_id) {
+                const esc_id = parseInt(req.query.esc_id);
+                if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser numérico." });
+                filtros.push('co.esc_id = ?');
+                params.push(esc_id);
+            }
+            if (req.query.pen_tipo !== undefined) {
+                const tipo = parseInt(req.query.pen_tipo);
+                if (![1, 2, 3, 4].includes(tipo)) return res.status(400).json({ error: "pen_tipo deve ser 1, 2, 3 ou 4." });
+                filtros.push('p.pen_tipo = ?');
+                params.push(tipo);
+            }
+            if (req.query.ativo !== undefined) {
+                const ativo = parseInt(req.query.ativo);
+                if (![0, 1].includes(ativo)) return res.status(400).json({ error: "ativo deve ser 0 ou 1." });
+                filtros.push('p.pen_ativo = ?');
+                params.push(ativo);
+            } else {
+                // PASSO 1: Padrão: apenas ativas e não expiradas
+                filtros.push('p.pen_ativo = 1 AND (p.pen_expira_em IS NULL OR p.pen_expira_em > NOW())');
+            }
+
+            const joinEscola = req.query.esc_id
+                ? `INNER JOIN CURSOS_USUARIOS cu ON p.usu_id = cu.usu_id
+                   INNER JOIN CURSOS co ON cu.cur_id = co.cur_id`
+                : '';
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            // PASSO 2: Busca penalidades com dados do usuário
+            const queryLimit = formato === 'csv' ? 5000 : limit;
+            const queryOffset = formato === 'csv' ? 0 : offset;
+
+            const [penalidades] = await db.query(
+                `SELECT DISTINCT p.pen_id, p.usu_id, u.usu_nome, u.usu_email,
+                        p.pen_tipo, p.pen_motivo, p.pen_aplicado_em,
+                        p.pen_expira_em, p.pen_ativo, p.pen_aplicado_por
+                 FROM PENALIDADES p
+                 INNER JOIN USUARIOS u ON p.usu_id = u.usu_id
+                 ${joinEscola}
+                 ${where}
+                 ORDER BY p.pen_aplicado_em DESC
+                 LIMIT ? OFFSET ?`,
+                [...params, queryLimit, queryOffset]
+            );
+
+            // PASSO 3: Exportação CSV
+            if (formato === 'csv') {
+                const esc = (v) => {
+                    if (v == null) return '';
+                    const s = String(v);
+                    return s.includes(',') || s.includes('"') || s.includes('\n')
+                        ? `"${s.replace(/"/g, '""')}"` : s;
+                };
+                const cabecalho = 'pen_id,usu_id,usu_nome,usu_email,pen_tipo,pen_motivo,pen_aplicado_em,pen_expira_em,pen_ativo\n';
+                const linhas = penalidades.map(r =>
+                    [r.pen_id, r.usu_id, r.usu_nome, r.usu_email, r.pen_tipo,
+                     r.pen_motivo, r.pen_aplicado_em, r.pen_expira_em, r.pen_ativo].map(esc).join(',')
+                ).join('\n');
+                const dataHoje = new Date().toISOString().slice(0, 10);
+                res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+                res.setHeader('Content-Disposition', `attachment; filename="penalidades_${dataHoje}.csv"`);
+                return res.send(cabecalho + linhas);
+            }
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(DISTINCT p.pen_id) AS totalGeral
+                 FROM PENALIDADES p INNER JOIN USUARIOS u ON p.usu_id = u.usu_id
+                 ${joinEscola} ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Relatório de penalidades.",
+                totalGeral, total: penalidades.length, page, limit, penalidades
+            });
+
+        } catch (error) {
+            console.error("[ERRO] relatorioPenalidades:", error);
+            return res.status(500).json({ error: "Erro ao gerar relatório de penalidades." });
+        }
+    }
+
+    /**
+     * MÉTODO: relatorioUsuarios
+     * Relatório de usuários com filtros por escola, nível de verificação e status.
+     * Suporta exportação CSV (?formato=csv).
+     *
+     * GET /api/dev/relatorios/usuarios?esc_id=&verificacao=&status=&formato=csv
+     */
+    async relatorioUsuarios(req, res) {
+        try {
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem acessar relatórios globais." });
+            }
+
+            const { parsePagination } = require('../utils/queryHelpers');
+            const { page, limit, offset } = parsePagination(req, 50, 500);
+            const formato = (req.query.formato || '').toLowerCase();
+
+            const filtros = [];
+            const params  = [];
+
+            if (req.query.esc_id) {
+                const esc_id = parseInt(req.query.esc_id);
+                if (isNaN(esc_id)) return res.status(400).json({ error: "esc_id deve ser numérico." });
+                filtros.push('c.esc_id = ?');
+                params.push(esc_id);
+            }
+            if (req.query.verificacao !== undefined) {
+                const v = parseInt(req.query.verificacao);
+                if (![0, 1, 2, 5, 6, 9].includes(v)) return res.status(400).json({ error: "verificacao inválida." });
+                filtros.push('u.usu_verificacao = ?');
+                params.push(v);
+            }
+            if (req.query.status !== undefined) {
+                const st = parseInt(req.query.status);
+                if (![0, 1].includes(st)) return res.status(400).json({ error: "status deve ser 0 ou 1." });
+                filtros.push('u.usu_status = ?');
+                params.push(st);
+            } else {
+                filtros.push('u.usu_status = 1');
+            }
+
+            const joinEscola = req.query.esc_id
+                ? `INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id
+                   INNER JOIN CURSOS c ON cu.cur_id = c.cur_id`
+                : '';
+            const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
+
+            const queryLimit  = formato === 'csv' ? 10000 : limit;
+            const queryOffset = formato === 'csv' ? 0 : offset;
+
+            const [usuarios] = await db.query(
+                `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status,
+                        u.usu_verificacao, u.usu_verificacao_expira,
+                        r.usu_criado_em, r.usu_data_login
+                 FROM USUARIOS u
+                 LEFT JOIN USUARIOS_REGISTROS r ON u.usu_id = r.usu_id
+                 ${joinEscola}
+                 ${where}
+                 ORDER BY u.usu_id ASC
+                 LIMIT ? OFFSET ?`,
+                [...params, queryLimit, queryOffset]
+            );
+
+            // Exportação CSV
+            if (formato === 'csv') {
+                const esc = (v) => {
+                    if (v == null) return '';
+                    const s = String(v);
+                    return s.includes(',') || s.includes('"') || s.includes('\n')
+                        ? `"${s.replace(/"/g, '""')}"` : s;
+                };
+                const cabecalho = 'usu_id,usu_nome,usu_email,usu_status,usu_verificacao,usu_verificacao_expira,usu_criado_em,usu_data_login\n';
+                const linhas = usuarios.map(r =>
+                    [r.usu_id, r.usu_nome, r.usu_email, r.usu_status, r.usu_verificacao,
+                     r.usu_verificacao_expira, r.usu_criado_em, r.usu_data_login].map(esc).join(',')
+                ).join('\n');
+                const dataHoje = new Date().toISOString().slice(0, 10);
+                res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+                res.setHeader('Content-Disposition', `attachment; filename="usuarios_${dataHoje}.csv"`);
+                return res.send(cabecalho + linhas);
+            }
+
+            const [[{ totalGeral }]] = await db.query(
+                `SELECT COUNT(DISTINCT u.usu_id) AS totalGeral
+                 FROM USUARIOS u ${joinEscola} ${where}`,
+                params
+            );
+
+            return res.status(200).json({
+                message: "Relatório de usuários.",
+                totalGeral, total: usuarios.length, page, limit, usuarios
+            });
+
+        } catch (error) {
+            console.error("[ERRO] relatorioUsuarios:", error);
+            return res.status(500).json({ error: "Erro ao gerar relatório de usuários." });
+        }
+    }
 }
 
 module.exports = new DevController();

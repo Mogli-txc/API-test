@@ -132,11 +132,14 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | POST   | `/refresh`         | —    | Troca refresh token válido por novo par de tokens           |
 | POST   | `/logout`          | JWT  | Invalida o refresh token server-side                        |
 | GET    | `/me`              | JWT  | Perfil do próprio usuário autenticado                       |
+| GET    | `/me/dashboard`    | JWT  | Dashboard consolidado: caronas ativas, solicitações pendentes, notificações, penalidades, reputação |
+| DELETE | `/me/conta`        | JWT  | Agenda exclusão com 30 dias de graça — LGPD                 |
+| POST   | `/me/conta/cancelar-exclusao` | JWT | Cancela o agendamento de exclusão dentro do prazo     |
 | GET    | `/perfil/:id`      | JWT  | Dados do perfil (inclui `usu_verificacao`, `per_tipo`)      |
 | PUT    | `/:id`             | JWT  | Atualiza dados do próprio usuário (nome, e-mail, senha, telefone) |
 | PUT    | `/:id/endereco`    | JWT  | Atualiza endereço e regeocodifica via Nominatim             |
 | PUT    | `/:id/foto`        | JWT  | Atualiza foto de perfil (multipart/form-data, campo `foto`) |
-| DELETE | `/:id`             | JWT  | Soft-delete da conta                                        |
+| DELETE | `/:id`             | JWT  | Soft-delete imediato da conta                               |
 | GET    | `/:id/penalidades` | JWT  | Penalidades ativas do próprio usuário                       |
 | GET    | `/:id/reputacao`   | JWT  | Reputação: média de avaliações, total de caronas e ranking  |
 | GET    | `/:id/exportar`    | JWT  | Exportação de dados pessoais em JSON — portabilidade LGPD   |
@@ -145,21 +148,27 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 
 | Método | Rota                  | Auth | Descrição                                                                        |
 |--------|-----------------------|------|----------------------------------------------------------------------------------|
-| GET    | `/`                   | JWT  | Lista caronas abertas (paginação cursor: `?cursor=<car_id>&limit=<n>`)           |
-| GET    | `/buscar`             | JWT  | Busca com filtros: `?car_status=`, `?data=YYYY-MM-DD`, `?esc_id=`, `?cur_id=`   |
-| GET    | `/minhas`             | JWT  | Lista caronas do motorista autenticado (`?status=` opcional)                     |
-| GET    | `/passageiro`         | JWT  | Lista caronas onde o usuário é passageiro confirmado (`?status=` opcional)       |
-| GET    | `/:car_id`            | JWT  | Detalhes de uma carona                                                           |
-| GET    | `/:car_id/resumo`     | JWT  | Resumo completo: pontos, passageiros, avaliações e solicitação do usuário        |
-| POST   | `/oferecer`           | JWT  | Cria nova carona                                                                 |
-| PUT    | `/:car_id`            | JWT  | Atualiza carona (apenas o motorista; bloqueado se cancelada/finalizada)          |
-| PATCH  | `/:car_id/vagas`      | JWT  | Ajuste manual de vagas disponíveis — bloqueado se abaixo dos aceitos             |
-| POST   | `/:car_id/finalizar`  | JWT  | Finaliza uma carona (`car_status = 3`) — exclusivo para o motorista              |
-| DELETE | `/:car_id`            | JWT  | Cancela carona e solicitações ativas (apenas o motorista)                        |
+| GET    | `/`                         | JWT  | Lista caronas abertas (paginação cursor: `?cursor=<car_id>&limit=<n>`)                     |
+| GET    | `/buscar`                   | JWT  | Busca com filtros: `?car_status=`, `?data=YYYY-MM-DD`, `?esc_id=`, `?cur_id=`             |
+| GET    | `/buscar/proximas`          | JWT  | Caronas próximas por geolocalização (`?lat=`, `?lon=`, `?raio_km=`, máx. 25 km)           |
+| GET    | `/minhas`                   | JWT  | Lista caronas do motorista autenticado (`?status=` opcional)                               |
+| GET    | `/passageiro`               | JWT  | Lista caronas onde o usuário é passageiro confirmado (`?status=` opcional)                 |
+| GET    | `/:car_id`                  | JWT  | Detalhes de uma carona                                                                     |
+| GET    | `/:car_id/resumo`           | JWT  | Resumo completo: pontos, passageiros, avaliações e solicitação do usuário                  |
+| GET    | `/:car_id/timeline`         | JWT  | Histórico cronológico de eventos: criação, solicitações, aceites, finalização, avaliações  |
+| POST   | `/:car_id/checkpoints`      | JWT  | Motorista registra localização atual durante a carona (`lat`, `lng`)                       |
+| GET    | `/:car_id/checkpoints`      | JWT  | Último checkpoint do motorista — visível para passageiros confirmados                      |
+| POST   | `/oferecer`                 | JWT  | Cria nova carona                                                                           |
+| PUT    | `/:car_id`                  | JWT  | Atualiza carona (apenas o motorista; bloqueado se cancelada/finalizada)                    |
+| PATCH  | `/:car_id/vagas`            | JWT  | Ajuste manual de vagas disponíveis — bloqueado se abaixo dos aceitos                       |
+| POST   | `/:car_id/finalizar`        | JWT  | Finaliza uma carona (`car_status = 3`) — exclusivo para o motorista                        |
+| DELETE | `/:car_id`                  | JWT  | Cancela carona e solicitações ativas (apenas o motorista)                                  |
 
 **Paginação cursor:** `GET /api/caronas?cursor=50&limit=10` retorna caronas com `car_id < 50`. A resposta inclui `next_cursor` quando há mais páginas.
 
 **Filtro de proximidade:** `GET /api/caronas?lat=-23.5614&lon=-46.6560&raio=10` retorna apenas caronas cujo ponto de partida esteja a até 10 km.
+
+**Checkpoints (tempo real):** `POST /:car_id/checkpoints` é restrito ao motorista. `GET /:car_id/checkpoints` retorna o último ponto registrado para passageiros acompanharem a chegada. Requer a tabela `CARONAS_CHECKPOINTS (car_id, lat, lng, criado_em)`.
 
 ### Solicitações — `/api/solicitacoes`
 
@@ -198,11 +207,12 @@ Regras: apenas participantes confirmados podem avaliar; nota de 1–5; um avalia
 
 | Método | Rota              | Auth | Descrição                                    |
 |--------|-------------------|------|----------------------------------------------|
-| POST   | `/enviar`         | JWT  | Envia mensagem em uma carona                 |
-| GET    | `/carona/:car_id` | JWT  | Histórico de mensagens de uma carona         |
-| PUT    | `/:men_id`        | JWT  | Edita mensagem (apenas o remetente)          |
-| PATCH  | `/:men_id/ler`    | JWT  | Marca mensagem como lida (`men_status = 3`)  |
-| DELETE | `/:men_id`        | JWT  | Soft-delete de mensagem (apenas o remetente) |
+| POST   | `/enviar`         | JWT  | Envia mensagem em uma carona                                                         |
+| GET    | `/inbox`          | JWT  | Caixa de entrada: conversas agrupadas por carona com contagem de não lidas           |
+| GET    | `/carona/:car_id` | JWT  | Histórico de mensagens de uma carona                                                 |
+| PUT    | `/:men_id`        | JWT  | Edita mensagem (apenas o remetente)                                                  |
+| PATCH  | `/:men_id/ler`    | JWT  | Marca mensagem como lida (`men_status = 3`)                                          |
+| DELETE | `/:men_id`        | JWT  | Soft-delete de mensagem (apenas o remetente)                                         |
 
 #### WebSocket (Socket.io)
 
@@ -256,11 +266,12 @@ socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
 
 | Método | Rota               | Auth | Descrição                                                         |
 |--------|--------------------|------|-------------------------------------------------------------------|
-| POST   | `/`                | JWT  | Cadastra novo veículo                                             |
-| GET    | `/usuario/:usu_id` | JWT  | Lista veículos do usuário                                         |
-| GET    | `/:vei_id`         | JWT  | Detalhes de um veículo (dono ou Dev)                              |
-| PUT    | `/:vei_id`         | JWT  | Atualiza dados do veículo                                         |
-| DELETE | `/:vei_id`         | JWT  | Desativa veículo (`vei_status = 0`) — bloqueado se há carona ativa |
+| POST   | `/`                   | JWT  | Cadastra novo veículo                                                              |
+| GET    | `/usuario/:usu_id`    | JWT  | Lista veículos do usuário                                                          |
+| GET    | `/:vei_id`            | JWT  | Detalhes de um veículo (dono ou Dev)                                               |
+| GET    | `/:vei_id/caronas`    | JWT  | Histórico de caronas do veículo — dono ou Admin/Dev (`?status=`, `?page=`)         |
+| PUT    | `/:vei_id`            | JWT  | Atualiza dados do veículo                                                          |
+| DELETE | `/:vei_id`            | JWT  | Desativa veículo (`vei_status = 0`) — bloqueado se há carona ativa                 |
 
 ### Pontos de encontro — `/api/pontos`
 
@@ -276,15 +287,16 @@ socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
 
 | Método | Rota                 | Auth      | Descrição                                                              |
 |--------|----------------------|-----------|------------------------------------------------------------------------|
-| POST   | `/`                  | JWT       | Registra sugestão ou denúncia                                          |
-| GET    | `/minhas`            | JWT       | Lista submissões do próprio usuário (`?tipo=0/1`, `?page=`, `?limit=`) |
-| GET    | `/`                  | ADMIN/DEV | Lista todos (Admin: escola; Dev: todos)                                |
-| GET    | `/:sug_id`           | JWT       | Detalhes de um registro                                                |
-| PUT    | `/:sug_id/analisar`  | ADMIN/DEV | Muda status para Em análise (`sug_status = 3`)                         |
-| PUT    | `/:sug_id/responder` | ADMIN/DEV | Responde e fecha o registro (`sug_status = 0`)                         |
-| DELETE | `/:sug_id`           | DEV       | Remove permanentemente                                                 |
+| POST   | `/`                     | JWT       | Registra sugestão ou denúncia                                          |
+| GET    | `/minhas`               | JWT       | Lista submissões do próprio usuário (`?tipo=0/1`, `?page=`, `?limit=`) |
+| GET    | `/`                     | ADMIN/DEV | Lista todos (Admin: escola; Dev: todos)                                |
+| GET    | `/:sug_id`              | JWT       | Detalhes de um registro                                                |
+| PUT    | `/:sug_id/analisar`     | ADMIN/DEV | Muda status para Em análise (`sug_status = 3`)                         |
+| PUT    | `/:sug_id/responder`    | ADMIN/DEV | Responde e fecha o registro (`sug_status = 0`)                         |
+| POST   | `/:sug_id/arquivar`     | ADMIN/DEV | Arquiva sem resposta formal (`sug_status = 2`)                         |
+| DELETE | `/:sug_id`              | DEV       | Remove permanentemente                                                 |
 
-Fluxo de status: `1=Aberto` → `3=Em análise` → `0=Fechado`.
+Fluxo de status: `1=Aberto` → `3=Em análise` → `2=Arquivado` | `0=Fechado`.
 
 ### Matrículas — `/api/matriculas`
 
@@ -312,7 +324,13 @@ Rota **pública** (sem autenticação). Necessário na tela de cadastro, antes d
 
 ### Admin — `/api/admin`
 
-Exige JWT + Admin (1) ou Desenvolvedor (2). Administrador tem escopo restrito à sua escola; Desenvolvedor acessa o sistema inteiro.
+Exige JWT + Admin (1) ou Desenvolvedor (2). **Admin** tem escopo restrito à sua escola e acessa a plataforma via **interface web** — não usa o app mobile para caronas. **Dev** acessa o sistema inteiro sem restrição de escola.
+
+#### Interface web — tela inicial
+
+| Método | Rota          | Acesso    | Descrição                                                                                       |
+|--------|---------------|-----------|-------------------------------------------------------------------------------------------------|
+| GET    | `/dashboard`  | Admin/Dev | Overview consolidado: usuários, caronas, sugestões abertas, documentos pendentes, contrato      |
 
 #### Estatísticas
 
@@ -323,6 +341,8 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Administrador tem escopo restrito à
 | GET    | `/stats/sugestoes`      | Admin/Dev | Totais de sugestões/denúncias por tipo e status                       |
 | GET    | `/stats/documentos`     | Admin/Dev | Totais de documentos por tipo e status OCR                            |
 | GET    | `/relatorios/atividade` | Admin/Dev | Relatório consolidado: caronas, usuários, avaliações no período       |
+| GET    | `/relatorios/caronas`   | Admin/Dev | Relatório de caronas por período (`?inicio=`, `?fim=`, `?formato=csv`) |
+| GET    | `/sugestoes/stats`      | Admin/Dev | Estatísticas detalhadas de sugestões/denúncias (`?dias=30`)           |
 
 #### Gestão de usuários
 
@@ -335,6 +355,12 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Administrador tem escopo restrito à
 | POST   | `/usuarios/:usu_id/penalidades`     | Admin/Dev | Aplica penalidade (tipos 1–4, durações 1semana a 6meses)                 |
 | DELETE | `/penalidades/:pen_id`              | Admin/Dev | Remove/desativa uma penalidade                                           |
 
+#### Moderação de caronas
+
+| Método | Rota      | Acesso    | Descrição                                                                            |
+|--------|-----------|-----------|--------------------------------------------------------------------------------------|
+| GET    | `/caronas`| Admin/Dev | Lista caronas da escola (todos os status; `?status=`, `?data_inicio=`, `?data_fim=`) |
+
 #### Listagens avançadas
 
 | Método | Rota          | Acesso    | Descrição                                                               |
@@ -343,6 +369,13 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Administrador tem escopo restrito à
 | GET    | `/avaliacoes` | Admin/Dev | Lista avaliações com nomes dos participantes (`?esc_id=`)               |
 | GET    | `/veiculos`   | Admin/Dev | Lista veículos com dados do proprietário (`?esc_id=`, `?vei_status=`)   |
 
+#### Documentos de verificação
+
+| Método | Rota                          | Acesso    | Descrição                                              |
+|--------|-------------------------------|-----------|--------------------------------------------------------|
+| GET    | `/documentos/:doc_id`         | Admin/Dev | Detalhes de um documento específico                    |
+| PATCH  | `/documentos/:doc_id/status`  | Admin/Dev | Aprova ou rejeita documento manualmente (`aprovado\|rejeitado`) |
+
 #### Escolas e cursos (somente leitura)
 
 | Método | Rota               | Acesso    | Descrição                                                       |
@@ -350,19 +383,34 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). Administrador tem escopo restrito à
 | GET    | `/escolas`         | Admin/Dev | Lista escolas (Admin: apenas a própria; `?q=`)                  |
 | GET    | `/escolas/:esc_id` | Admin/Dev | Dados da escola com cursos vinculados                           |
 | GET    | `/cursos`          | Admin/Dev | Lista cursos (Admin: escola; Dev: todos; `?esc_id=`)            |
+| GET    | `/contrato`        | Admin     | Detalhes do contrato da própria escola (status, dias restantes) |
+
+#### Notificações
+
+| Método | Rota                   | Acesso    | Descrição                                                                          |
+|--------|------------------------|-----------|------------------------------------------------------------------------------------|
+| POST   | `/notificacoes/escola` | Admin/Dev | Broadcast para todos os usuários ativos da escola (`titulo`, `mensagem`, `tipo?`)  |
 
 ---
 
 ### Dev — `/api/dev`
 
-Exclusivo para Desenvolvedor (`per_tipo = 2`). Admins recebem 403.
+Exclusivo para Desenvolvedor (`per_tipo = 2`). Admins recebem 403. O Dev também acessa todos os endpoints `/api/admin` com escopo global (sem filtro de escola).
 
-#### Estatísticas globais
+#### Visão global e contratos
 
-| Método | Rota                | Acesso | Descrição                                                               |
-|--------|---------------------|--------|-------------------------------------------------------------------------|
-| GET    | `/stats/sistema`    | Dev    | Resumo consolidado de todos os módulos                                  |
-| GET    | `/stats/contratos`  | Dev    | Contratos: ativos, expirados, sem contrato, alertas de vencimento (90d) |
+| Método | Rota                | Acesso | Descrição                                                                                           |
+|--------|---------------------|--------|-----------------------------------------------------------------------------------------------------|
+| GET    | `/stats/sistema`    | Dev    | Resumo consolidado de todos os módulos                                                              |
+| GET    | `/stats/contratos`  | Dev    | Contratos: ativos, expirados, sem contrato, alertas de vencimento (90d)                             |
+| GET    | `/escolas`          | Dev    | Todas as escolas com dados de contrato e contagem de usuários (`?q=`, `?status_contrato=`)          |
+
+#### Relatórios exportáveis
+
+| Método | Rota                         | Acesso | Descrição                                                                              |
+|--------|------------------------------|--------|----------------------------------------------------------------------------------------|
+| GET    | `/relatorios/penalidades`    | Dev    | Usuários penalizados (`?esc_id=`, `?pen_tipo=`, `?ativo=`, `?formato=csv`)             |
+| GET    | `/relatorios/usuarios`       | Dev    | Relatório de usuários (`?esc_id=`, `?verificacao=`, `?status=`, `?formato=csv`)        |
 
 #### Audit Log
 
@@ -480,6 +528,8 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v16    | Race condition em overbooking (`FOR UPDATE`); promoção 1→2 com CNH; `TOKEN_EXPIRED`/`TOKEN_INVALID`; guard de env vars |
 | v17    | `buscar()` e `listarCaronasComoPassageiro()` corrigidos para `cur_usu_id=NULL`; `COUNT(*)→SUM(sol_vaga_soli)`; `?status=` em listagem de usuários; helper `queryHelpers.js` |
 | v18    | Expiração semestral alinhada a fronteiras fixas (1º fev / 1º ago) via `proximaFronteiraSemestral()`; substitui `+180 dias` em `DocumentoController`, `VeiculoController` e `AdminController` |
+| v18.1  | 10 novos endpoints utilitários: `timeline`, `buscar/proximas`, `checkpoints`, `me/dashboard`, `me/conta` (LGPD), `inbox`, `sugestoes/arquivar`, `veiculos/:id/caronas`; `relatorios/caronas`; `documentos/status` |
+| v19    | Papéis Admin/Dev separados em interface web: 7 novos endpoints (`/dashboard`, `/caronas`, `/contrato`, `/notificacoes/escola`, `/dev/escolas`, `/dev/relatorios/penalidades`, `/dev/relatorios/usuarios`) |
 
 ---
 
