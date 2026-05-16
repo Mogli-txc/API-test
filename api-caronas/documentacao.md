@@ -273,7 +273,7 @@ components:
           properties:
             pon_nome:
               type: string
-              maxLength: 25
+              maxLength: 60
               example: "Portão FFLCH"
             pon_endereco:
               type: string
@@ -293,7 +293,7 @@ components:
           properties:
             pon_nome:
               type: string
-              maxLength: 25
+              maxLength: 60
               example: "Praça da Sé"
             pon_endereco:
               type: string
@@ -485,7 +485,7 @@ components:
           example: 0
         pon_nome:
           type: string
-          maxLength: 25
+          maxLength: 60
           example: Portão FFLCH
         pon_ordem:
           type: integer
@@ -1947,7 +1947,7 @@ paths:
           description: |
             Dados inválidos. Causas comuns:
             - `origem` ou `destino` ausentes
-            - `pon_nome` vazio ou com mais de 25 caracteres
+            - `pon_nome` vazio ou com mais de 60 caracteres
             - `pon_endereco` vazio
             - `vei_id`, `car_data`, `car_hor_saida` ou `car_vagas_dispo` ausentes
             - Data/hora no passado
@@ -4065,7 +4065,7 @@ paths:
               properties:
                 pon_nome:
                   type: string
-                  maxLength: 25
+                  maxLength: 60
                   description: Novo nome descritivo do ponto (opcional)
                 pon_ordem:
                   type: integer

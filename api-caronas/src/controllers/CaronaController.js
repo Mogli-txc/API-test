@@ -418,7 +418,7 @@ class CaronaController {
                 const nome = String(ponto.pon_nome ?? '').trim();
                 const endereco = String(ponto.pon_endereco ?? '').trim();
                 if (!nome) return `"${rotulo}.pon_nome" é obrigatório.`;
-                if (nome.length > 25) return `"${rotulo}.pon_nome" não pode exceder 25 caracteres.`;
+                if (nome.length > 60) return `"${rotulo}.pon_nome" não pode exceder 60 caracteres.`;
                 if (!endereco) return `"${rotulo}.pon_endereco" é obrigatório.`;
                 return null;
             };

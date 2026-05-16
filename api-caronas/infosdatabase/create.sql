@@ -263,7 +263,7 @@ CREATE TABLE PONTO_ENCONTROS (
     pon_lon           DECIMAL(10,7) NULL DEFAULT NULL      COMMENT 'Longitude geocodificada via Nominatim  [v10]',
 
     pon_tipo          TINYINT       NOT NULL               COMMENT '0=Partida, 1=Destino',
-    pon_nome          VARCHAR(25)   NOT NULL               COMMENT 'Descrição do ponto de encontro',
+    pon_nome          VARCHAR(60)   NOT NULL               COMMENT 'Descrição do ponto de encontro',
     pon_ordem         TINYINT                              COMMENT 'Ordem dos pontos na rota (NULL)',
     pon_status        TINYINT(1)    NOT NULL               COMMENT '1=Usado, 0=Inativo',
     PRIMARY KEY (pon_id),

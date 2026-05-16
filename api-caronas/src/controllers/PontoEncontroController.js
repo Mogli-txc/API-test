@@ -341,8 +341,8 @@ class PontoEncontroController {
 
             if (pon_nome) {
                 const nome_limpo = stripHtml(pon_nome.trim());
-                if (nome_limpo.length < 1 || nome_limpo.length > 25) {
-                    return res.status(400).json({ error: "pon_nome deve ter entre 1 e 25 caracteres." });
+                if (nome_limpo.length < 1 || nome_limpo.length > 60) {
+                    return res.status(400).json({ error: "pon_nome deve ter entre 1 e 60 caracteres." });
                 }
                 campos.push('pon_nome = ?');
                 valores.push(nome_limpo);
