@@ -524,6 +524,22 @@ class CaronaController {
                 });
             }
 
+            // REGRA DE NEGÓCIO: Bloqueia criar carona se o usuário tem solicitação pendente ou aceita
+            // Evita o cenário onde o usuário solicita uma carona, cria a própria antes do aceite,
+            // e o motorista aceita a solicitação — deixando-o simultaneamente como passageiro e motorista.
+            const [solAtiva] = await db.query(
+                `SELECT s.sol_id FROM SOLICITACOES_CARONA s
+                 INNER JOIN CARONAS c ON s.car_id = c.car_id
+                 WHERE s.usu_id_passageiro = ? AND s.sol_status IN (1, 2)
+                   AND c.car_status IN (1, 2)`,
+                [usu_id]
+            );
+            if (solAtiva.length > 0) {
+                return res.status(409).json({
+                    error: "Você tem uma solicitação ativa como passageiro. Cancele-a antes de oferecer uma carona."
+                });
+            }
+
             // Valida cur_usu_id apenas quando fornecido — campo opcional [v13]
             let curUsuIdFinal = null;
             if (cur_usu_id) {

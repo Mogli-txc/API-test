@@ -1898,6 +1898,12 @@ paths:
 
         Substitui o fluxo antigo de POST /api/caronas/oferecer + POST /api/pontos
         em duas chamadas separadas (que podia deixar caronas "órfãs" sem pontos).
+
+        **Bloqueios de regra de negócio [v20]:**
+        - Usuário com carona ativa como motorista (`car_status IN (1,2)`) → 409
+        - Usuário com solicitação pendente ou aceita em outra carona (`sol_status IN (1,2)`) → 409
+          Impede o cenário: solicita carona → cria a própria → é aceito como passageiro, ficando
+          simultaneamente motorista e passageiro.
       security:
         - bearerAuth: []
       requestBody:
@@ -1951,6 +1957,11 @@ paths:
             - `pon_endereco` vazio
             - `vei_id`, `car_data`, `car_hor_saida` ou `car_vagas_dispo` ausentes
             - Data/hora no passado
+        '409':
+          description: |
+            Conflito de estado. Causas possíveis:
+            - Motorista já possui carona ativa (status 1 ou 2)
+            - Usuário possui solicitação pendente ou aceita como passageiro em outra carona ativa [v20]
         '401':
           description: Não autenticado
 
@@ -2411,7 +2422,13 @@ paths:
       tags: [Solicitações]
       summary: Motorista responde solicitação
       description: |
-        Se status = **Aceito**, subtrai `sol_vaga_soli` de `car_vagas_dispo`.
+        Se status = **Aceito**, subtrai `sol_vaga_soli` de `car_vagas_dispo` em transação atômica.
+
+        **Bloqueios no aceite [v20]:**
+        - Passageiro já está vinculado a outra carona ativa como passageiro (`sol_status = 2`) → 403
+        - Passageiro tem carona ativa como motorista (`car_status IN (1,2)`) → 403
+          Cobre o cenário: passageiro solicita carona → cria a própria antes do aceite → motorista
+          tenta aceitar.
       security:
         - bearerAuth: []
       parameters:
@@ -2431,9 +2448,15 @@ paths:
         '200':
           description: Solicitação respondida
         '403':
-          description: Apenas o motorista da carona pode responder
+          description: |
+            Sem permissão ou conflito de estado. Causas possíveis:
+            - Apenas o motorista da carona pode responder
+            - Passageiro já vinculado a outra carona ativa como passageiro
+            - Passageiro possui carona ativa como motorista [v20]
         '404':
           description: Solicitação não encontrada
+        '409':
+          description: Solicitação já foi respondida ou vagas insuficientes
 
   /api/solicitacoes/{sol_id}/cancelar:
     put:

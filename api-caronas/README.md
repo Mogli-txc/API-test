@@ -530,6 +530,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v18    | Expiração semestral alinhada a fronteiras fixas (1º fev / 1º ago) via `proximaFronteiraSemestral()`; substitui `+180 dias` em `DocumentoController`, `VeiculoController` e `AdminController` |
 | v18.1  | 10 novos endpoints utilitários: `timeline`, `buscar/proximas`, `checkpoints`, `me/dashboard`, `me/conta` (LGPD), `inbox`, `sugestoes/arquivar`, `veiculos/:id/caronas`; `relatorios/caronas`; `documentos/status` |
 | v19    | Papéis Admin/Dev separados em interface web: 7 novos endpoints (`/dashboard`, `/caronas`, `/contrato`, `/notificacoes/escola`, `/dev/escolas`, `/dev/relatorios/penalidades`, `/dev/relatorios/usuarios`) |
+| v20    | Correção de gap de regra de negócio: `oferecer` bloqueia criação de carona se usuário tem solicitação pendente/aceita; `responderSolicitacao` bloqueia aceite se passageiro tem carona ativa como motorista |
 
 ---
 
@@ -609,7 +610,9 @@ Duas operações críticas usam `SELECT ... FOR UPDATE` dentro de transações p
 
 **1. Solicitação de carona (`solicitarCarona`):** bloqueia a linha da carona antes de verificar vagas disponíveis e inserir a solicitação. Sem o lock, duas requisições simultâneas podem ler "1 vaga disponível" e ambas inserirem — resultado: overbooking.
 
-**2. Aceite de solicitação (`responderSolicitacao`):** bloqueia a linha da carona ao aceitar e re-verifica vagas antes de decrementar. Também verifica se o passageiro já está vinculado a outra carona ativa, evitando que dois motoristas aceitem o mesmo passageiro ao mesmo tempo.
+**2. Aceite de solicitação (`responderSolicitacao`):** bloqueia a linha da carona ao aceitar e re-verifica vagas antes de decrementar. Também verifica se o passageiro já está vinculado a outra carona ativa, evitando que dois motoristas aceitem o mesmo passageiro ao mesmo tempo. Verifica ainda se o passageiro tem carona ativa como motorista (v20).
+
+**3. Criar carona (`oferecer`) [v20]:** antes de criar, verifica se o motorista tem solicitação pendente (`sol_status=1`) ou aceita (`sol_status=2`) em outra carona ativa. Impede o cenário onde o usuário solicita → cria a própria carona → é aceito como passageiro, ficando simultaneamente motorista e passageiro.
 
 ### Validação de documentos por OCR
 

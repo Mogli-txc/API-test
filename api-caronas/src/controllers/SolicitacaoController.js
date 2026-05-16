@@ -516,6 +516,23 @@ class SolicitacaoController {
                     });
                 }
 
+                // REGRA DE NEGÓCIO: Bloqueia aceite se o passageiro tem carona ativa como motorista
+                // Cobre o cenário: usuário solicita carona → cria a própria → motorista tenta aceitar
+                const [passageiroEhMotorista] = await conn.query(
+                    `SELECT c.car_id FROM CARONAS c
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     WHERE v.usu_id = ? AND c.car_status IN (1, 2)`,
+                    [sol[0].usu_id_passageiro]
+                );
+                if (passageiroEhMotorista.length > 0) {
+                    await conn.rollback();
+                    conn.release();
+                    conn = null;
+                    return res.status(403).json({
+                        error: "Passageiro possui carona ativa como motorista. Aceite bloqueado."
+                    });
+                }
+
                 // Bloqueia a linha e re-lê vagas dentro da transação para evitar overbooking concorrente
                 const [carona] = await conn.query(
                     'SELECT car_vagas_dispo FROM CARONAS WHERE car_id = ? FOR UPDATE',
