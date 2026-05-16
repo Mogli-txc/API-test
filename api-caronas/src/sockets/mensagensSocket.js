@@ -82,29 +82,37 @@ function registrarMensagensSocket(io) {
             }
 
             try {
-                // PASSO 2: Verifica se é motorista
+                // PASSO 2: Verifica se a carona existe, está ativa e o usuário é o motorista
+                // Usa VEICULOS (cur_usu_id pode ser NULL desde v13) + filtra car_status IN (1,2)
+                // Se a carona estiver cancelada ou finalizada, motorista.length = 0 → bloqueio
                 const [motorista] = await db.query(
-                    `SELECT cu.usu_id FROM CARONAS c
-                     INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
-                     WHERE c.car_id = ?`,
+                    `SELECT v.usu_id FROM CARONAS c
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     WHERE c.car_id = ? AND c.car_status IN (1, 2)`,
                     [car_id]
                 );
                 const ehMotorista = motorista.length > 0 && motorista[0].usu_id === socket.user.id;
 
                 if (!ehMotorista) {
-                    // PASSO 3: Verifica se é passageiro confirmado (CARONA_PESSOAS ou SOLICITACOES_CARONA)
+                    // PASSO 3: Verifica se é passageiro confirmado em carona ativa
+                    // JOIN com CARONAS garante que a carona ainda está aberta/em espera
                     const [passageiro] = await db.query(
-                        `SELECT 1 FROM CARONA_PESSOAS
-                         WHERE car_id = ? AND usu_id = ? AND car_pes_status = 1
+                        `SELECT 1 FROM CARONA_PESSOAS cp
+                         INNER JOIN CARONAS c ON cp.car_id = c.car_id
+                         WHERE cp.car_id = ? AND cp.usu_id = ? AND cp.car_pes_status = 1
+                           AND c.car_status IN (1, 2)
                          UNION
-                         SELECT 1 FROM SOLICITACOES_CARONA
-                         WHERE car_id = ? AND usu_id_passageiro = ? AND sol_status = 2`,
+                         SELECT 1 FROM SOLICITACOES_CARONA s
+                         INNER JOIN CARONAS c ON s.car_id = c.car_id
+                         WHERE s.car_id = ? AND s.usu_id_passageiro = ? AND s.sol_status = 2
+                           AND c.car_status IN (1, 2)
+                         LIMIT 1`,
                         [car_id, socket.user.id, car_id, socket.user.id]
                     );
                     if (passageiro.length === 0) {
                         return responder(socket, ack, 'erro', {
                             ok: false,
-                            message: 'Sem permissão para entrar nesta sala.'
+                            message: 'Sem permissão para entrar nesta sala. A carona pode ter sido encerrada ou você não é mais participante.'
                         });
                     }
                 }
@@ -169,7 +177,20 @@ function registrarMensagensSocket(io) {
             }
 
             try {
-                // PASSO 5: Persiste no banco
+                // PASSO 5: Re-verifica car_status antes de persistir — cobre o cenário onde o socket
+                // já estava na sala quando a carona foi encerrada/cancelada durante a sessão ativa
+                const [caronaAtual] = await db.query(
+                    'SELECT car_status FROM CARONAS WHERE car_id = ?', [car_id]
+                );
+                if (!caronaAtual.length || ![1, 2].includes(caronaAtual[0].car_status)) {
+                    socket.leave(`carona_${car_id}`); // expulsa da sala
+                    return responder(socket, ack, 'erro', {
+                        ok: false,
+                        message: 'Esta carona foi encerrada. O chat não está mais disponível.'
+                    });
+                }
+
+                // PASSO 6: Persiste no banco
                 const [resultado] = await db.query(
                     `INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_id_resposta)
                      VALUES (?, ?, ?, ?, ?)`,
@@ -187,7 +208,7 @@ function registrarMensagensSocket(io) {
                     men_id_resposta:     men_id_resposta ? parseInt(men_id_resposta) : null
                 };
 
-                // PASSO 6: Broadcast para todos na sala + ack para o remetente
+                // PASSO 7: Broadcast para todos na sala + ack para o remetente
                 io.to(sala).emit('mensagem_recebida', mensagem);
                 if (typeof ack === 'function') ack({ ok: true, mensagem });
 

@@ -531,6 +531,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v18.1  | 10 novos endpoints utilitários: `timeline`, `buscar/proximas`, `checkpoints`, `me/dashboard`, `me/conta` (LGPD), `inbox`, `sugestoes/arquivar`, `veiculos/:id/caronas`; `relatorios/caronas`; `documentos/status` |
 | v19    | Papéis Admin/Dev separados em interface web: 7 novos endpoints (`/dashboard`, `/caronas`, `/contrato`, `/notificacoes/escola`, `/dev/escolas`, `/dev/relatorios/penalidades`, `/dev/relatorios/usuarios`) |
 | v20    | Correção de gap de regra de negócio: `oferecer` bloqueia criação de carona se usuário tem solicitação pendente/aceita; `responderSolicitacao` bloqueia aceite se passageiro tem carona ativa como motorista |
+| v21    | `men_criada_em` + `men_atualizado_em` em MENSAGENS; bloqueio de chat em carona encerrada/cancelada (REST + WebSocket); correção de `men_criado_em` → `men_criada_em` no inbox; `listarConversa` retorna campos completos |
 
 ---
 

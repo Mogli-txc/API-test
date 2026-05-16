@@ -64,20 +64,28 @@ class MensagemController {
                 return res.status(400).json({ error: "Não é possível enviar mensagem para si mesmo." });
             }
 
-            // PASSO 6: Verifica se a carona existe e se o remetente é participante
+            // PASSO 6: Verifica se a carona existe e está ativa
             const [infoCarona] = await db.query(
-                'SELECT car_id FROM CARONAS WHERE car_id = ?',
+                'SELECT car_id, car_status FROM CARONAS WHERE car_id = ?',
                 [car_id]
             );
             if (infoCarona.length === 0) {
                 return res.status(404).json({ error: "Carona não encontrada." });
             }
 
+            // Bloqueia envio em carona encerrada (finalizada=3, cancelada=0)
+            // Cobre também o caso de usuário removido/saído — isParticipanteCarona retorna false
+            if (![1, 2].includes(infoCarona[0].car_status)) {
+                return res.status(409).json({
+                    error: "Não é possível enviar mensagens em uma carona encerrada ou cancelada."
+                });
+            }
+
             if (!await isParticipanteCarona(car_id, usu_id_remetente)) {
                 return res.status(403).json({ error: "Você não é participante desta carona." });
             }
 
-            // PASSO 7: Verifica se o destinatário também é participante da mesma carona
+            // PASSO 7: Verifica se o destinatário também é participante ativo da mesma carona
             if (!await isParticipanteCarona(car_id, parseInt(usu_id_destinatario))) {
                 return res.status(403).json({ error: "O destinatário não é participante desta carona." });
             }
@@ -169,7 +177,10 @@ class MensagemController {
             // Filtra mensagens deletadas (soft delete: men_deletado_em IS NULL = ativas).
             // Restringe ao par do usuário autenticado — evita exposição de mensagens privadas entre outros participantes.
             const [mensagens] = await db.query(
-                `SELECT m.men_id, m.men_texto, m.men_id_resposta,
+                `SELECT m.men_id, m.car_id,
+                        m.usu_id_remetente, m.usu_id_destinatario,
+                        m.men_texto, m.men_status, m.men_id_resposta,
+                        m.men_criada_em, m.men_atualizado_em,
                         u_rem.usu_nome  AS remetente,
                         u_dest.usu_nome AS destinatario
                  FROM MENSAGENS m
@@ -177,7 +188,7 @@ class MensagemController {
                  INNER JOIN USUARIOS u_dest ON m.usu_id_destinatario = u_dest.usu_id
                  WHERE m.car_id = ? AND m.men_deletado_em IS NULL
                    AND (m.usu_id_remetente = ? OR m.usu_id_destinatario = ?)
-                 ORDER BY m.men_id ASC
+                 ORDER BY m.men_criada_em ASC, m.men_id ASC
                  LIMIT ? OFFSET ?`,
                 [car_id, req.user.id, req.user.id, limit, offset]
             );
@@ -291,7 +302,7 @@ class MensagemController {
 
             // PASSO 5: Atualização no banco (usa o texto já trimado)
             await db.query(
-                'UPDATE MENSAGENS SET men_texto = ? WHERE men_id = ?',
+                'UPDATE MENSAGENS SET men_texto = ?, men_atualizado_em = NOW() WHERE men_id = ?',
                 [men_texto_trim, men_id]
             );
 
@@ -335,7 +346,7 @@ class MensagemController {
                      WHERE car_id = m.car_id AND men_deletado_em IS NULL
                        AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
                      ORDER BY men_id DESC LIMIT 1) AS ultima_mensagem,
-                    (SELECT men_criado_em FROM MENSAGENS
+                    (SELECT men_criada_em FROM MENSAGENS
                      WHERE car_id = m.car_id AND men_deletado_em IS NULL
                        AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
                      ORDER BY men_id DESC LIMIT 1) AS em,
