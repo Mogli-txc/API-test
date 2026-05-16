@@ -24,7 +24,7 @@
 --           em DOCUMENTOS_VERIFICACAO; usu_curso_nome/usu_periodo em USUARIOS
 --   v14  — migration-audit-indexes.sql: índices de performance em CARONAS, SOLICITACOES_CARONA,
 --           MENSAGENS, CARONA_PESSOAS; ENUM em NOTIFICACOES.noti_tipo; DEFAULT 1 em doc_status
---   v21  — migration-mensagens-timestamp.sql: men_criada_em + men_atualizado_em em MENSAGENS;
+--   v21  — migration-mensagens-timestamp.sql: men_criado_em + men_atualizado_em em MENSAGENS;
 --           bloqueio de chat em caronas encerradas/canceladas (MensagemController + mensagensSocket)
 -- =====================================================
 
@@ -291,12 +291,12 @@ CREATE TABLE MENSAGENS (
     men_status          TINYINT      NOT NULL DEFAULT 1     COMMENT '0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida',
     men_deletado_em     DATETIME                            COMMENT 'Soft delete — data de remoção (NULL = ativo)',
     men_id_resposta     INT                                 COMMENT 'Mensagem respondida (auto-referência, NULL)',
-    men_criada_em       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora de envio da mensagem  [v21]',
+    men_criado_em       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data e hora de envio da mensagem  [v21]',
     men_atualizado_em   DATETIME     NULL DEFAULT NULL      COMMENT 'Data e hora da última edição (NULL = nunca editada)  [v21]',
     PRIMARY KEY (men_id),
     INDEX idx_men_deletado_em (men_deletado_em),            -- filtro de soft-delete nas listagens
     INDEX idx_men_car_id      (car_id),                     -- conversa de uma carona  [v14 — DB-04]
-    INDEX idx_men_criada_em   (men_criada_em)               -- ordenação cronológica e inbox  [v21]
+    INDEX idx_men_criado_em   (men_criado_em)               -- ordenação cronológica e inbox  [v21]
 ) ENGINE = InnoDB;
 
 

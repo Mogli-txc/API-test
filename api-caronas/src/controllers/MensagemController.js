@@ -180,7 +180,7 @@ class MensagemController {
                 `SELECT m.men_id, m.car_id,
                         m.usu_id_remetente, m.usu_id_destinatario,
                         m.men_texto, m.men_status, m.men_id_resposta,
-                        m.men_criada_em, m.men_atualizado_em,
+                        m.men_criado_em, m.men_atualizado_em,
                         u_rem.usu_nome  AS remetente,
                         u_dest.usu_nome AS destinatario
                  FROM MENSAGENS m
@@ -188,7 +188,7 @@ class MensagemController {
                  INNER JOIN USUARIOS u_dest ON m.usu_id_destinatario = u_dest.usu_id
                  WHERE m.car_id = ? AND m.men_deletado_em IS NULL
                    AND (m.usu_id_remetente = ? OR m.usu_id_destinatario = ?)
-                 ORDER BY m.men_criada_em ASC, m.men_id ASC
+                 ORDER BY m.men_criado_em ASC, m.men_id ASC
                  LIMIT ? OFFSET ?`,
                 [car_id, req.user.id, req.user.id, limit, offset]
             );
@@ -346,7 +346,7 @@ class MensagemController {
                      WHERE car_id = m.car_id AND men_deletado_em IS NULL
                        AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
                      ORDER BY men_id DESC LIMIT 1) AS ultima_mensagem,
-                    (SELECT men_criada_em FROM MENSAGENS
+                    (SELECT men_criado_em FROM MENSAGENS
                      WHERE car_id = m.car_id AND men_deletado_em IS NULL
                        AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
                      ORDER BY men_id DESC LIMIT 1) AS em,
