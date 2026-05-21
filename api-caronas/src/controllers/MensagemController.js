@@ -164,7 +164,18 @@ class MensagemController {
                 return res.status(404).json({ error: "Carona não encontrada." });
             }
 
-            if (!await isParticipanteCarona(car_id, req.user.id)) {
+            // Permite acesso baseado em histórico de mensagens (não participação ativa).
+            // Após finalização da carona, o usuário deixa de ser participante ativo mas
+            // mantém direito de ler o histórico da conversa — comportamento estilo WhatsApp.
+            // Envio (enviarMensagem) continua gated por isParticipanteCarona.
+            const [hasHistory] = await db.query(
+                `SELECT 1 FROM MENSAGENS
+                 WHERE car_id = ? AND men_deletado_em IS NULL
+                   AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
+                 LIMIT 1`,
+                [car_id, req.user.id, req.user.id]
+            );
+            if (hasHistory.length === 0) {
                 return res.status(403).json({ error: "Sem permissão para visualizar esta conversa." });
             }
 
