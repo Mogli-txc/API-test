@@ -104,6 +104,7 @@ class DocumentoController {
             const dados = ocr.dados || {};
             let curUsuId    = null;
             let melhorCurso = null; // { cur_id, cur_nome } — preenchido no bloco abaixo
+            let melhorEscola = null; // esc_nome — preenchido no bloco abaixo
 
             if (ocr.origem !== 'test-bypass') {
                 if (!dados.curso) {
@@ -127,6 +128,11 @@ class DocumentoController {
                 }
 
                 const esc_id = escolas[0].esc_id;
+                const [escolaInfo] = await db.query(
+                    'SELECT esc_nome FROM ESCOLAS WHERE esc_id = ?',
+                    [esc_id]
+                );
+                melhorEscola = escolaInfo[0]?.esc_nome || null;
                 const [cursos] = await db.query(
                     'SELECT cur_id, cur_nome FROM CURSOS WHERE esc_id = ?',
                     [esc_id]
@@ -236,6 +242,7 @@ class DocumentoController {
                 verificacao: novoNivel,
                 expira:      novaExpira,
                 curso:       melhorCurso?.cur_nome || null,
+                escola:      melhorEscola,
                 ocr: {
                     confianca:          ocr.confianca,
                     criteriosAtingidos: ocr.criteriosAtingidos,

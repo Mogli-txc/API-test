@@ -494,13 +494,23 @@ class UsuarioController {
                 return res.status(400).json({ error: "ID de usuário inválido." });
             }
 
+            // LEFT JOIN da matrícula mais recente (maior cur_usu_id) expõe cur_nome e
+            // esc_nome direto no perfil — permite ao app mostrar a escola sem requests extras.
             const [rows] = await db.query(
                 `SELECT u.usu_id, u.usu_nome, u.usu_email, u.usu_telefone,
                         u.usu_descricao, u.usu_foto, u.usu_endereco,
                         u.usu_verificacao, u.usu_verificacao_expira,
-                        p.per_tipo, p.per_habilitado
+                        p.per_tipo, p.per_habilitado,
+                        c.cur_nome, e.esc_nome
                  FROM USUARIOS u
                  INNER JOIN PERFIL p ON u.usu_id = p.usu_id
+                 LEFT JOIN CURSOS_USUARIOS cu ON cu.cur_usu_id = (
+                     SELECT MAX(cu2.cur_usu_id)
+                     FROM CURSOS_USUARIOS cu2
+                     WHERE cu2.usu_id = u.usu_id
+                 )
+                 LEFT JOIN CURSOS c ON c.cur_id = cu.cur_id
+                 LEFT JOIN ESCOLAS e ON e.esc_id = c.esc_id
                  WHERE u.usu_id = ? AND u.usu_status = 1`,
                 [id]
             );

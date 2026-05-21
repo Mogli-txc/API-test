@@ -28,12 +28,18 @@ class InfraController {
             const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
             const offset = (page - 1) * limit;
 
-            // PASSO 2: Filtro opcional por nome
+            // PASSO 2: Filtros opcionais por nome (?q=) ou domínio exato (?dominio=).
+            // ?dominio= permite ao app encontrar a escola do usuário a partir do email
+            // sem precisar baixar a lista inteira e filtrar client-side.
             const filtros = [];
             const params  = [];
             if (req.query.q) {
                 filtros.push('esc_nome LIKE ?');
                 params.push(`%${req.query.q.trim()}%`);
+            }
+            if (req.query.dominio) {
+                filtros.push('LOWER(esc_dominio) = ?');
+                params.push(req.query.dominio.toLowerCase().trim());
             }
             const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
 
