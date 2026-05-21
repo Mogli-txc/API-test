@@ -347,12 +347,16 @@ class MensagemController {
             const limit  = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
             const offset = (page - 1) * limit;
 
-            // PASSO 1: Última mensagem por carona + contagem de não lidas para o usuário
+            // PASSO 1: Última mensagem por carona + contagem de não lidas para o usuário.
+            // JOIN com VEICULOS+USUARIOS expõe motorista_* para o app usar como capa do card.
             const [conversas] = await db.query(
                 `SELECT
                     m.car_id,
                     c.car_data,
                     c.car_hor_saida,
+                    u.usu_id   AS motorista_id,
+                    u.usu_nome AS motorista_nome,
+                    u.usu_foto AS motorista_foto,
                     (SELECT men_texto FROM MENSAGENS
                      WHERE car_id = m.car_id AND men_deletado_em IS NULL
                        AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
@@ -365,10 +369,12 @@ class MensagemController {
                      WHERE car_id = m.car_id AND men_deletado_em IS NULL
                        AND usu_id_destinatario = ? AND men_status != 3) AS nao_lidas
                  FROM MENSAGENS m
-                 INNER JOIN CARONAS c ON m.car_id = c.car_id
+                 INNER JOIN CARONAS  c ON m.car_id = c.car_id
+                 INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                 INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
                  WHERE m.men_deletado_em IS NULL
                    AND (m.usu_id_remetente = ? OR m.usu_id_destinatario = ?)
-                 GROUP BY m.car_id, c.car_data, c.car_hor_saida
+                 GROUP BY m.car_id, c.car_data, c.car_hor_saida, u.usu_id, u.usu_nome, u.usu_foto
                  ORDER BY MAX(m.men_id) DESC
                  LIMIT ? OFFSET ?`,
                 [usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, limit, offset]
