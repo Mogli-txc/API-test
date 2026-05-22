@@ -590,6 +590,20 @@ class CaronaController {
             const origemPreparada  = await prepararPonto(origem);
             const destinoPreparado = await prepararPonto(destino);
 
+            // Coordenadas obrigatórias no destino — o filtro de proximidade em listarTodas
+            // usa INNER JOIN com pon_lat IS NOT NULL; sem coordenadas, a carona fica invisível
+            // para qualquer passageiro com GPS ativo.
+            if (!destinoPreparado.lat || !destinoPreparado.lon) {
+                return res.status(422).json({
+                    error: 'Não foi possível localizar o endereço de destino. Tente um endereço mais específico (ex: "Av. Paulista, 1000, São Paulo").'
+                });
+            }
+            if (!origemPreparada.lat || !origemPreparada.lon) {
+                return res.status(422).json({
+                    error: 'Não foi possível localizar o endereço de origem. Tente um endereço mais específico.'
+                });
+            }
+
             // Transação atômica: CARONA + 2 PONTO_ENCONTROS [v17 — ENR-05]
             conn = await db.getConnection();
             await conn.beginTransaction();
