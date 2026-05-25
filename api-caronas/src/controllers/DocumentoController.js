@@ -177,20 +177,20 @@ class DocumentoController {
                 }
             } // fim bloco validação curso
 
-            // PASSO 7: Determina novo nível (5→1 ou 6→2)
-            // Para nível 6→2: garante que o veículo ainda está ativo antes de promover
+            // PASSO 7: Determina novo nível (5→1 ou 6→1/2)
+            // Nível 6 com veículo ativo → 2; sem veículo ativo → 1 (matrícula verificada).
+            // Não bloqueamos o comprovante por ausência de veículo: o usuário pode
+            // cadastrar/reativar o veículo depois para subir de 1 para 2.
+            let novoNivel;
             if (verificacao === 6) {
                 const [vei] = await db.query(
                     'SELECT vei_id FROM VEICULOS WHERE usu_id = ? AND vei_status = 1 LIMIT 1',
                     [usu_id]
                 );
-                if (vei.length === 0) {
-                    return res.status(409).json({
-                        error: 'Veículo não encontrado. Cadastre um veículo ativo antes de enviar o comprovante.'
-                    });
-                }
+                novoNivel = vei.length > 0 ? 2 : 1;
+            } else {
+                novoNivel = 1;
             }
-            const novoNivel  = verificacao === 6 ? 2 : 1;
             const novaExpira = proximaFronteiraSemestral();
 
             // PASSO 8: Salva documento + atualiza usuário em transação atômica
