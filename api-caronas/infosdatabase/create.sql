@@ -235,6 +235,7 @@ CREATE TABLE CARONAS (
     car_hor_saida   TIME         NOT NULL               COMMENT 'Horário de saída',
     car_vagas_dispo INT          NOT NULL               COMMENT 'Vagas disponíveis (1 a 6)',
     car_status      TINYINT      NOT NULL               COMMENT '1=Aberta, 2=Em espera, 0=Cancelada, 3=Finalizada',
+    car_capacete    TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '1=Passageiro deve trazer capacete próprio (motos); 0=Capacete incluído ou não aplicável',
 
     -- Soft delete com timestamp  [v3]
     car_deletado_em DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de cancelamento com timestamp (NULL = ativo); car_status=0 mantido para compatibilidade',

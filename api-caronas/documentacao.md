@@ -41,7 +41,12 @@ info:
 
     **Autenticação:** Bearer JWT no header `Authorization: Bearer <token>`.
     O token tem validade de 24 horas. Use `/api/usuarios/refresh` para renová-lo.
-  version: 1.7.0
+
+    **Verificação de conta ativa [v22]:** O middleware de autenticação confirma em banco
+    que `usu_status = 1` a cada requisição autenticada. Contas soft-deletadas ou suspensas
+    recebem imediatamente **403** `{ "error": "Conta inativa.", "code": "ACCOUNT_INACTIVE" }`
+    sem esperar o JWT expirar (até 24h). Erros inesperados de banco retornam **500**.
+  version: 1.8.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -105,6 +110,12 @@ components:
           enum: [0, 1]
           description: "0=conta desabilitada pelo admin, 1=ativa"
           example: 1
+        usu_exclusao_agendada:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Data-limite para exclusão agendada pelo próprio usuário (LGPD). NULL = sem exclusão pendente. [v22]"
+          example: "2026-06-24T21:18:59.000Z"
 
     UsuarioCadastroRequest:
       type: object
@@ -946,7 +957,7 @@ paths:
         O usuário pode cancelar durante o prazo usando `POST /me/conta/cancelar-exclusao`.
         Invalida a sessão ativa (force re-login se cancelar a exclusão).
 
-        Requer coluna `USUARIOS.usu_exclusao_agendada DATETIME NULL`.
+        Coluna `USUARIOS.usu_exclusao_agendada DATETIME NULL` implementada em [v22].
       security:
         - bearerAuth: []
       responses:
@@ -965,6 +976,8 @@ paths:
     post:
       tags: [Usuários]
       summary: Cancela o agendamento de exclusão dentro do prazo de graça
+      description: |
+        Cancela a exclusão agendada. Envia notificação `EXCLUSAO_CANCELADA` ao usuário [v22].
       security:
         - bearerAuth: []
       responses:
@@ -1287,9 +1300,10 @@ paths:
         > Compatível com: comprovantes USP, UNICAMP, UNESP, ETEC/FATEC (NSA), SENAC, SENAI,
         > portais SIGAA e outros sistemas governamentais brasileiros.
 
-        **Promoção automática (OCR aprovado + curso validado):**
+        **Promoção automática (OCR aprovado + curso validado) [v22 — lógica ajustada]:**
         - Nível 5 → **1** (matrícula verificada, expira no próximo 1º fev ou 1º ago)
-        - Nível 6 → **2** (matrícula + veículo, expira no próximo 1º fev ou 1º ago)
+        - Nível 6 com veículo ativo → **2** (matrícula + veículo, expira no próximo 1º fev ou 1º ago)
+        - Nível 6 sem veículo ativo → **1** (matrícula verificada; promoção para 2 ocorre ao cadastrar/reativar veículo)
 
         **Falha:** documento salvo com `doc_status=2` para auditoria — retorna 422.
 
@@ -1962,6 +1976,16 @@ paths:
             Conflito de estado. Causas possíveis:
             - Motorista já possui carona ativa (status 1 ou 2)
             - Usuário possui solicitação pendente ou aceita como passageiro em outra carona ativa [v20]
+        '422':
+          description: |
+            Geocodificação falhou — endereço não pôde ser convertido em coordenadas [v22].
+            O filtro de proximidade usa `pon_lat/pon_lon`; caronas sem coordenadas ficam
+            invisíveis para passageiros com GPS ativo. Tente um endereço mais específico
+            (ex: "Av. Paulista, 1000, São Paulo").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
         '401':
           description: Não autenticado
 

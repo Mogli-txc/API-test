@@ -201,7 +201,7 @@ class CaronaController {
 
             const [caronas] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
-                        c.car_vagas_dispo, c.car_status,
+                        c.car_vagas_dispo, c.car_status, c.car_capacete,
                         v.vei_marca_modelo           AS veiculo,
                         CAST(v.vei_tipo AS UNSIGNED) AS vei_tipo,
                         v.vei_placa, v.vei_cor,
@@ -401,7 +401,7 @@ class CaronaController {
     async criar(req, res) {
         let conn;
         try {
-            const { cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, origem, destino } = req.body;
+            const { cur_usu_id, vei_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_capacete, origem, destino } = req.body;
 
             // cur_usu_id é opcional — NULL para cadastros temporários sem curso vinculado [v13]
             if (!vei_id || !car_data || !car_hor_saida || !car_vagas_dispo) {
@@ -608,11 +608,12 @@ class CaronaController {
             conn = await db.getConnection();
             await conn.beginTransaction();
 
+            const capaceteFlag = car_capacete ? 1 : 0;
             const [caronaRes] = await conn.query(
                 `INSERT INTO CARONAS
-                    (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status)
-                 VALUES (?, ?, ?, ?, ?, ?, 1)`,
-                [vei_id, curUsuIdFinal, car_desc_limpa, car_data, car_hor_saida, vagasNum]
+                    (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_capacete, car_status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+                [vei_id, curUsuIdFinal, car_desc_limpa, car_data, car_hor_saida, vagasNum, capaceteFlag]
             );
             const novoCarId = caronaRes.insertId;
 
@@ -638,7 +639,7 @@ class CaronaController {
                 carona: {
                     car_id: novoCarId,
                     cur_usu_id: curUsuIdFinal, vei_id, car_desc: car_desc_limpa, car_data,
-                    car_hor_saida, car_vagas_dispo, car_status: 1,
+                    car_hor_saida, car_vagas_dispo, car_capacete: capaceteFlag, car_status: 1,
                     origem: {
                         pon_id: origemId, pon_nome: origemPreparada.nome, pon_endereco: origemPreparada.endereco,
                         pon_lat: origemPreparada.lat, pon_lon: origemPreparada.lon,
@@ -671,13 +672,13 @@ class CaronaController {
     async atualizar(req, res) {
         try {
             const { car_id } = req.params;
-            const { car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status } = req.body;
+            const { car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status, car_capacete } = req.body;
 
             if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            if (!car_desc && !car_data && !car_hor_saida && !car_vagas_dispo && car_status === undefined) {
+            if (!car_desc && !car_data && !car_hor_saida && !car_vagas_dispo && car_status === undefined && car_capacete === undefined) {
                 return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
             }
 
@@ -765,12 +766,13 @@ class CaronaController {
                 campos.push('car_vagas_dispo = ?');
                 valores.push(parseInt(car_vagas_dispo));
             }
-            if (car_status !== undefined) { campos.push('car_status = ?'); valores.push(parseInt(car_status)); }
+            if (car_status !== undefined)   { campos.push('car_status = ?');   valores.push(parseInt(car_status)); }
+            if (car_capacete !== undefined) { campos.push('car_capacete = ?'); valores.push(car_capacete ? 1 : 0); }
 
             valores.push(car_id); // WHERE car_id = ?
 
             // Whitelist: apenas colunas conhecidas podem entrar na query (car_status=3 bloqueado acima)
-            const COLUNAS_PERMITIDAS = ['car_desc = ?', 'car_data = ?', 'car_hor_saida = ?', 'car_vagas_dispo = ?', 'car_status = ?'];
+            const COLUNAS_PERMITIDAS = ['car_desc = ?', 'car_data = ?', 'car_hor_saida = ?', 'car_vagas_dispo = ?', 'car_status = ?', 'car_capacete = ?'];
             if (!campos.every(c => COLUNAS_PERMITIDAS.includes(c))) {
                 return res.status(400).json({ error: "Campo inválido detectado." });
             }
@@ -832,7 +834,7 @@ class CaronaController {
 
             const [caronas] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
-                        c.car_vagas_dispo, c.car_status,
+                        c.car_vagas_dispo, c.car_status, c.car_capacete,
                         v.vei_marca_modelo AS veiculo,
                         cur.cur_nome       AS curso_motorista
                  FROM CARONAS c
@@ -1381,7 +1383,7 @@ class CaronaController {
             // PASSO 1: Dados principais da carona + motorista via VEICULOS (null-safe para cur_usu_id)
             const [rows] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
-                        c.car_vagas_dispo, c.car_status, c.vei_id, c.cur_usu_id,
+                        c.car_vagas_dispo, c.car_status, c.car_capacete, c.vei_id, c.cur_usu_id,
                         v.vei_marca_modelo, v.vei_placa, v.vei_tipo, v.vei_cor, v.vei_vagas,
                         u.usu_id AS motorista_id, u.usu_nome AS motorista, u.usu_foto AS motorista_foto,
                         cur.cur_nome AS curso_motorista
