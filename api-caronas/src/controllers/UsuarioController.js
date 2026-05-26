@@ -36,6 +36,7 @@ const { gerarOtp, hashOtp } = require('../utils/mailer');
 const { enqueue: enqueueEmail } = require('../utils/emailQueue');
 const { checkDevOrOwner, verificarContratoEscola } = require('../utils/authHelper');
 const { registrarAudit } = require('../utils/auditLog');
+const { notificar, TIPOS } = require('../utils/notificar');
 const { stripHtml } = require('../utils/sanitize');
 
 // Geocodificação do endereço do usuário via Nominatim  [v10]
@@ -500,6 +501,7 @@ class UsuarioController {
                 `SELECT u.usu_id, u.usu_nome, u.usu_email, u.usu_telefone,
                         u.usu_descricao, u.usu_foto, u.usu_endereco,
                         u.usu_verificacao, u.usu_verificacao_expira,
+                        u.usu_exclusao_agendada,
                         p.per_tipo, p.per_habilitado,
                         c.cur_nome, e.esc_nome
                  FROM USUARIOS u
@@ -1386,6 +1388,13 @@ class UsuarioController {
             );
 
             await registrarAudit({ tabela: 'USUARIOS', registroId: usu_id, acao: 'EXCLUSAO_CANCELADA', usuId: usu_id, ip: req.ip });
+
+            await notificar({
+                usu_id,
+                tipo:     TIPOS.EXCLUSAO_CANCELADA,
+                titulo:   'Exclusão cancelada',
+                mensagem: 'Sua solicitação de exclusão de conta foi cancelada. Sua conta está ativa.',
+            }).catch(() => {});
 
             return res.status(200).json({ message: "Exclusão cancelada. Sua conta está ativa." });
 

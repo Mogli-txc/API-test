@@ -122,6 +122,11 @@ CREATE TABLE USUARIOS (
     -- Soft delete com timestamp  [v3]
     usu_deletado_em       DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de remoção lógica (NULL = ativo); usu_status=0 mantido para compatibilidade',
 
+    -- Exclusão agendada pelo próprio usuário (LGPD — 30 dias de carência)  [v22]
+    -- NULL = nenhuma exclusão pendente. Quando preenchido, um job periódico executa o
+    -- soft-delete após a data. O usuário pode cancelar via POST /me/conta/cancelar-exclusao.
+    usu_exclusao_agendada DATETIME     NULL DEFAULT NULL      COMMENT 'Data-limite para exclusão agendada pelo usuário (NULL = sem exclusão pendente)  [v22]',
+
     PRIMARY KEY (usu_id),
     INDEX idx_usu_refresh_hash (usu_refresh_hash),  -- lookup O(1) na rota /refresh  [v4]
     INDEX idx_usu_deletado_em  (usu_deletado_em)    -- filtro de registros ativos     [v3]
@@ -592,7 +597,8 @@ CREATE TABLE NOTIFICACOES (
     noti_tipo      ENUM(
                        'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
                        'CARONA_CANCELADA','CARONA_FINALIZADA','AVALIACAO_RECEBIDA',
-                       'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL'
+                       'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL',
+                       'EXCLUSAO_CANCELADA'
                    )            NOT NULL               COMMENT 'Tipo de notificação — ENUM garante integridade  [v14 — DB-06]',
     noti_titulo    VARCHAR(100) NOT NULL               COMMENT 'Título curto',
     noti_mensagem  VARCHAR(255) NOT NULL               COMMENT 'Texto da notificação',
