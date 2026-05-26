@@ -832,27 +832,20 @@ class UsuarioController {
 
             const usu_id = rows[0].usu_id;
 
-            // PASSO 2: Token de 32 bytes em hex (URL-safe) + hash para armazenamento
-            const token     = crypto.randomBytes(32).toString('hex');
-            const tokenHash = crypto
-                .createHmac('sha256', process.env.OTP_SECRET)
-                .update(token)
-                .digest('hex');
+            // PASSO 2: Gera OTP de 6 dígitos + hash para armazenamento
+            const otp     = gerarOtp();
+            const otpHash = hashOtp(otp);
 
             await db.query(
                 `UPDATE USUARIOS
                  SET usu_reset_hash   = ?,
                      usu_reset_expira = DATE_ADD(NOW(), INTERVAL 15 MINUTE)
                  WHERE usu_id = ?`,
-                [tokenHash, usu_id]
+                [otpHash, usu_id]
             );
 
-            // PASSO 3: Envia email com link de redefinição
-            const appUrl  = process.env.APP_URL || 'http://localhost:3000';
-            const resetUrl = `${appUrl}/redefinir-senha?token=${token}`;
-
-            // Enfileira o email de reset em background — falhas são logadas na fila
-            enqueueEmail({ type: 'reset', email: usu_email, resetUrl });
+            // PASSO 3: Envia código de recuperação por email
+            enqueueEmail({ type: 'reset-otp', email: usu_email, otp });
 
             return res.status(200).json({ message: msgPadrao });
 
@@ -863,21 +856,65 @@ class UsuarioController {
     }
 
     /**
+     * MÉTODO: verificarOtpReset
+     * Valida o OTP de recuperação sem alterar a senha.
+     * Usado pelo app para confirmar o código antes de exibir o formulário de nova senha.
+     *
+     * Campos obrigatórios no body: usu_email, otp
+     */
+    verificarOtpReset = async (req, res) => {
+        try {
+            const { usu_email, otp } = req.body;
+
+            if (!usu_email || !otp) {
+                return res.status(400).json({ error: "Campos obrigatórios: usu_email, otp." });
+            }
+
+            const [rows] = await db.query(
+                `SELECT usu_id, usu_reset_hash, usu_reset_expira
+                 FROM USUARIOS WHERE usu_email = ? AND usu_status = 1`,
+                [usu_email]
+            );
+
+            if (rows.length === 0 || !rows[0].usu_reset_hash) {
+                return res.status(400).json({ error: "Nenhuma solicitação de recuperação ativa para este email." });
+            }
+
+            const usuario = rows[0];
+
+            const expirado = new Date(usuario.usu_reset_expira) < new Date();
+            if (expirado) {
+                return res.status(410).json({ error: "Código expirado. Solicite um novo." });
+            }
+
+            if (hashOtp(otp) !== usuario.usu_reset_hash) {
+                return res.status(401).json({ error: "Código inválido." });
+            }
+
+            return res.status(200).json({ message: "Código válido." });
+
+        } catch (error) {
+            console.error("[ERRO] verificarOtpReset:", error);
+            return res.status(500).json({ error: "Erro ao verificar código." });
+        }
+    }
+
+    /**
      * MÉTODO: redefinirSenha
-     * Valida o token de redefinição e atualiza a senha do usuário.
+     * Valida o OTP de recuperação e atualiza a senha do usuário.
      *
      * PASSO 1: Busca usuário pelo email e verifica se tem reset pendente.
-     * PASSO 2: Confere se o token não expirou e se o hash bate.
-     * PASSO 3: Atualiza a senha e limpa o token do banco.
+     * PASSO 2: Confere se o OTP não expirou e se o hash bate.
+     * PASSO 3: Atualiza a senha e limpa o OTP do banco.
      *
-     * Campos obrigatórios no body: usu_email, token, nova_senha
+     * Campos obrigatórios no body: usu_email, otp, nova_senha
      */
     redefinirSenha = async (req, res) => {
         try {
-            const { usu_email, token, nova_senha } = req.body;
+            const { usu_email, otp, nova_senha } = req.body;
 
-            if (!usu_email || !token || !nova_senha) {
-                return res.status(400).json({ error: "Campos obrigatórios: usu_email, token, nova_senha." });
+            if (!usu_email || !otp || !nova_senha) {
+                return res.status(400).json({ error: "Campos obrigatórios: usu_email, otp, nova_senha." });
             }
 
             if (nova_senha.length < 8) {
@@ -892,33 +929,28 @@ class UsuarioController {
             );
 
             if (rows.length === 0 || !rows[0].usu_reset_hash) {
-                return res.status(400).json({ error: "Solicitação de redefinição inválida ou expirada." });
+                return res.status(400).json({ error: "Nenhuma solicitação de recuperação ativa." });
             }
 
             const usuario = rows[0];
 
-            // PASSO 2: Verifica expiração e hash do token
+            // PASSO 2: Verifica expiração e hash do OTP
             const expirado = new Date(usuario.usu_reset_expira) < new Date();
             if (expirado) {
-                return res.status(410).json({ error: "Link de redefinição expirado. Solicite um novo." });
+                return res.status(410).json({ error: "Código expirado. Solicite um novo." });
             }
 
-            const tokenHash = crypto
-                .createHmac('sha256', process.env.OTP_SECRET)
-                .update(token)
-                .digest('hex');
-
-            if (tokenHash !== usuario.usu_reset_hash) {
-                return res.status(401).json({ error: "Token de redefinição inválido." });
+            if (hashOtp(otp) !== usuario.usu_reset_hash) {
+                return res.status(401).json({ error: "Código inválido." });
             }
 
-            // PASSO 3: Atualiza a senha e limpa o token
+            // PASSO 3: Atualiza a senha e limpa o OTP
             const senhaHash = await bcrypt.hash(nova_senha, 12);
 
             await db.query(
                 `UPDATE USUARIOS
-                 SET usu_senha       = ?,
-                     usu_reset_hash  = NULL,
+                 SET usu_senha        = ?,
+                     usu_reset_hash   = NULL,
                      usu_reset_expira = NULL
                  WHERE usu_id = ?`,
                 [senhaHash, usuario.usu_id]

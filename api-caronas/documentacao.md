@@ -46,7 +46,7 @@ info:
     que `usu_status = 1` a cada requisição autenticada. Contas soft-deletadas ou suspensas
     recebem imediatamente **403** `{ "error": "Conta inativa.", "code": "ACCOUNT_INACTIVE" }`
     sem esperar o JWT expirar (até 24h). Erros inesperados de banco retornam **500**.
-  version: 1.8.0
+  version: 1.9.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -782,8 +782,23 @@ paths:
   /api/usuarios/forgot-password:
     post:
       tags: [Usuários]
-      summary: Solicitar redefinição de senha
-      description: Sempre retorna 200 (evita enumeração de emails).
+      summary: Solicitar recuperação de senha via OTP
+      description: |
+        Sempre retorna 200 (evita enumeração de emails).
+
+        **Fluxo anterior (até v22):** gerava um token hex de 32 bytes e enviava um link
+        de redefinição por email (`{APP_URL}/redefinir-senha?token=...`).
+
+        **Fluxo atual [v23]:** gera um código OTP de 6 dígitos (mesmo mecanismo do
+        `gerarOtp`/`hashOtp` usado na verificação de email) e envia por email usando o
+        template `enviarOtpRecuperacao`. O OTP expira em **15 minutos** e é armazenado
+        como hash HMAC-SHA256 em `usu_reset_hash` / `usu_reset_expira`.
+
+        **Fluxo esperado no app:**
+        1. Usuário informa email → `POST /forgot-password`
+        2. App exibe campo de código → usuário digita OTP do email
+        3. App valida o código antes de exibir o form de nova senha → `POST /reset-password/verificar-otp`
+        4. Usuário informa nova senha → `POST /reset-password`
       requestBody:
         required: true
         content:
@@ -798,31 +813,95 @@ paths:
                   example: carlos@usp.br
       responses:
         '200':
-          description: Se o email existir, link de redefinição enviado
+          description: Se o email existir, código OTP de recuperação enviado
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SucessoSimples'
 
-  /api/usuarios/reset-password:
+  /api/usuarios/reset-password/verificar-otp:
     post:
       tags: [Usuários]
-      summary: Redefinir senha com token
+      summary: Validar OTP de recuperação sem redefinir a senha [v23]
+      description: |
+        Step intermediário do fluxo de recuperação: confirma que o OTP digitado pelo
+        usuário é válido **antes** de exibir o formulário de nova senha. Não altera
+        nenhum dado — apenas valida o código.
+
+        **Antes:** este endpoint não existia. O token só era validado no `POST /reset-password`,
+        o que obrigava o app a enviar email + nova_senha juntos sem poder separar as telas.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [usu_email, token, nova_senha]
+              required: [usu_email, otp]
               properties:
                 usu_email:
                   type: string
                   format: email
                   example: carlos@usp.br
-                token:
+                otp:
                   type: string
-                  example: abc123xyz
+                  example: "483921"
+      responses:
+        '200':
+          description: Código válido — prosseguir para redefinição de senha
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SucessoSimples'
+        '400':
+          description: Email não encontrado ou sem solicitação de recuperação ativa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '401':
+          description: Código inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '410':
+          description: Código expirado (OTP válido por 15 min) — solicitar novo via `/forgot-password`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+
+  /api/usuarios/reset-password:
+    post:
+      tags: [Usuários]
+      summary: Redefinir senha com OTP [v23 — substitui token por link]
+      description: |
+        Valida o OTP de recuperação e atualiza a senha do usuário em uma única operação.
+        Após sucesso, limpa `usu_reset_hash` e `usu_reset_expira` do banco.
+
+        **Mudança em relação à versão anterior:**
+        | Campo | Antes (≤ v22) | Agora (v23) |
+        |-------|--------------|-------------|
+        | Identificador | `token` — hex 64 chars gerado com `crypto.randomBytes(32)` | `otp` — 6 dígitos numéricos |
+        | Envio | Link de URL no email (`?token=...`) | Código no corpo do email |
+        | Validação | HMAC-SHA256 do token hex | HMAC-SHA256 do OTP (mesmo `hashOtp` do cadastro) |
+        | Erro expirado | "Link de redefinição expirado." | "Código expirado. Solicite um novo." |
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usu_email, otp, nova_senha]
+              properties:
+                usu_email:
+                  type: string
+                  format: email
+                  example: carlos@usp.br
+                otp:
+                  type: string
+                  description: "Código de 6 dígitos recebido por email"
+                  example: "483921"
                 nova_senha:
                   type: string
                   minLength: 8
@@ -835,7 +914,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/SucessoSimples'
         '400':
-          description: Token inválido ou expirado
+          description: Campos faltando, senha curta demais ou sem solicitação ativa para o email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '401':
+          description: Código inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErroResponse'
+        '410':
+          description: Código expirado — solicitar novo via `/forgot-password`
           content:
             application/json:
               schema:

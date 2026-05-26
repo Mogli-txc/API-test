@@ -20,7 +20,7 @@
  *   enqueue({ type: 'reset', email: 'user@exemplo.com', resetUrl: 'https://...' });
  */
 
-const { enviarOtp, enviarEmailReset, enviarRespostaSolicitacao } = require('./mailer');
+const { enviarOtp, enviarEmailReset, enviarOtpRecuperacao, enviarRespostaSolicitacao } = require('./mailer');
 
 // ── Configuração de retry ────────────────────────────────────────────────────
 const MAX_TENTATIVAS = 3;
@@ -51,6 +51,9 @@ async function despachar(job) {
             break;
         case 'reset':
             await enviarEmailReset(job.email, job.resetUrl);
+            break;
+        case 'reset-otp':
+            await enviarOtpRecuperacao(job.email, job.otp);
             break;
         case 'solicitacao_resposta':
             // job: { email, nome, caronaDesc, aceito }

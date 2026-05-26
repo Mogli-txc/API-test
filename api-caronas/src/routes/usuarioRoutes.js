@@ -67,10 +67,19 @@ router.post('/reenviar-otp', UsuarioController.reenviarOtp);
 router.post('/forgot-password', UsuarioController.esqueceuSenha);
 
 /**
- * ROTA: POST /api/usuarios/reset-password
- * Descrição: Valida o token e redefine a senha do usuário
+ * ROTA: POST /api/usuarios/reset-password/verificar-otp
+ * Descrição: Valida o OTP de recuperação sem alterar a senha (step intermediário)
  * Acesso: Público
- * Campos obrigatórios: usu_email, token, nova_senha
+ * Campos obrigatórios: usu_email, otp
+ * Retorno: Status 200 se válido; 401 se inválido; 410 se expirado
+ */
+router.post('/reset-password/verificar-otp', UsuarioController.verificarOtpReset);
+
+/**
+ * ROTA: POST /api/usuarios/reset-password
+ * Descrição: Valida o OTP e redefine a senha do usuário
+ * Acesso: Público
+ * Campos obrigatórios: usu_email, otp, nova_senha
  * Retorno: Status 200 após redefinição bem-sucedida
  */
 router.post('/reset-password', UsuarioController.redefinirSenha);
