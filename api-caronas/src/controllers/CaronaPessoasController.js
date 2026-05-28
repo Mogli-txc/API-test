@@ -212,7 +212,7 @@ class CaronaPessoasController {
             // PASSO 5: Busca passageiros com nome do usuário via JOIN (sem expor e-mail)
             const [passageiros] = await db.query(
                 `SELECT cp.car_pes_id, cp.usu_id, cp.car_pes_data, cp.car_pes_status,
-                        u.usu_nome AS passageiro
+                        u.usu_nome AS passageiro, u.usu_foto
                  FROM CARONA_PESSOAS cp
                  INNER JOIN USUARIOS u ON cp.usu_id = u.usu_id
                  WHERE cp.car_id = ?${filtroStatus}

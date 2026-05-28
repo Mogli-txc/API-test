@@ -177,18 +177,18 @@ class CaronaController {
                 : '';
 
             // JOIN com PONTO_ENCONTROS apenas quando filtro de proximidade está ativo  [v10]
-            // Filtra por ponto de DESTINO (pon_tipo=1): o usuário busca caronas que vão
-            // até o endereço pesquisado, não que partem dele.
+            // Filtra pelo ponto de PARTIDA da carona (pon_tipo=0): exibe caronas que
+            // saem perto da localização atual do passageiro, não que chegam até ele.
             const joinPontos = proximidadeAtiva
                 ? `INNER JOIN PONTO_ENCONTROS pe ON pe.car_id = c.car_id
-                       AND pe.pon_tipo   = 1
+                       AND pe.pon_tipo   = 0
                        AND pe.pon_status = 1
                        AND pe.pon_lat IS NOT NULL`
                 : '';
 
             // Inclui pon_lat/pon_lon na projeção apenas quando filtro ativo (necessário para Haversine em JS)
             const selecaoCoordenadas = proximidadeAtiva
-                ? ', pe.pon_lat AS destino_lat, pe.pon_lon AS destino_lon'
+                ? ', pe.pon_lat AS partida_lat, pe.pon_lon AS partida_lon'
                 : '';
 
             const whereExtra = cursor !== null ? 'AND c.car_id < ?' : '';
@@ -248,9 +248,9 @@ class CaronaController {
             let caronasFiltradas = caronas;
             if (proximidadeAtiva) {
                 caronasFiltradas = caronas.filter(c => {
-                    const dist = calcularDistanciaKm(latUsuario, lonUsuario, c.destino_lat, c.destino_lon);
+                    const dist = calcularDistanciaKm(latUsuario, lonUsuario, c.partida_lat, c.partida_lon);
                     return dist <= raioKm;
-                }).map(({ destino_lat, destino_lon, ...rest }) => rest); // remove coords internas da resposta
+                }).map(({ partida_lat, partida_lon, ...rest }) => rest); // remove coords internas da resposta
             }
             // ────────────────────────────────────────────────────────────────────────────
 
