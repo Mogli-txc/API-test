@@ -46,7 +46,12 @@ info:
     que `usu_status = 1` a cada requisição autenticada. Contas soft-deletadas ou suspensas
     recebem imediatamente **403** `{ "error": "Conta inativa.", "code": "ACCOUNT_INACTIVE" }`
     sem esperar o JWT expirar (até 24h). Erros inesperados de banco retornam **500**.
-  version: 1.9.0
+
+    **Campo `car_capacete` [v24]:** campo booleano em `CARONAS` que indica se o passageiro
+    precisa trazer capacete próprio. Aplicável a motos (`vei_tipo = 0`). Aceito em
+    `POST /api/caronas/oferecer` e `PUT /api/caronas/{car_id}`. Retornado em todas as
+    consultas de carona. Default `0` (não aplicável).
+  version: 1.10.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -279,6 +284,11 @@ components:
           type: integer
           minimum: 1
           example: 3
+        car_capacete:
+          type: integer
+          enum: [0, 1]
+          description: "Indica se o passageiro deve trazer capacete próprio. Aplicável a motos. Default: 0."
+          example: 0
         origem:
           type: object
           description: "Ponto de partida (pon_tipo=0). Obrigatório [v17 — ENR-05]."
@@ -343,6 +353,11 @@ components:
           type: string
           enum: [Aberta, Em espera, Finalizada, Cancelada]
           example: Aberta
+        car_capacete:
+          type: integer
+          enum: [0, 1]
+          description: "1 = passageiro deve trazer capacete próprio (motos); 0 = não aplicável ou capacete incluído [v24]"
+          example: 0
 
     # ─── Solicitação ────────────────────────────────────────────────────────────
     SolicitacaoCriarRequest:
@@ -2325,6 +2340,10 @@ paths:
                   type: integer
                   enum: [0, 1, 2]
                   description: "0=Cancelada, 1=Aberta, 2=Em espera. Status 3 usa /finalizar."
+                car_capacete:
+                  type: integer
+                  enum: [0, 1]
+                  description: "Indica se o passageiro deve trazer capacete próprio. Aplicável a motos."
       responses:
         '200':
           description: Carona atualizada

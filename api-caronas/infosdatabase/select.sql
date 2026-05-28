@@ -36,6 +36,7 @@
 --                   usu_reset_expira    (DATETIME NULL — expiração do token reset, 15 min)
 -- =====================================================
 
+USE bd_tcc_des_125_caronas;
 
 -- =====================================================
 -- 1. ESCOLAS

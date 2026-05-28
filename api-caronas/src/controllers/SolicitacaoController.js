@@ -339,7 +339,7 @@ class SolicitacaoController {
 
             const [solicitacoes] = await db.query(
                 `SELECT s.sol_id, s.usu_id_passageiro, s.sol_vaga_soli, s.sol_status,
-                        u.usu_nome AS passageiro
+                        u.usu_nome AS passageiro, u.usu_foto
                  FROM SOLICITACOES_CARONA s
                  INNER JOIN USUARIOS u ON s.usu_id_passageiro = u.usu_id
                  WHERE s.car_id = ?${filtroStatus}
