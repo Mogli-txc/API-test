@@ -34,6 +34,11 @@
     --           restrição de escola em CARONAS: origem OU destino = escola do motorista (raio 500 m);
     --           caronas sem agendamento futuro — car_data obrigatoriamente = data atual;
     --           auto-close às 00:00 via node-cron (caronas abertas do dia anterior → status 3)
+    --   v24  — migration-perfil-config.sql:
+    --           per_push_notif TINYINT DEFAULT 1 + per_raio_busca TINYINT DEFAULT 5 em PERFIL;
+    --           5 novos endpoints: GET /caronas/buscar/mapa, GET /caronas/:id/participantes,
+    --           POST /mensagens/carona/:id/ler-todas, GET /notificacoes/resumo,
+    --           PATCH /usuarios/me/config
     -- =====================================================
 
     USE bd_tcc_des_125_caronas;
@@ -176,6 +181,8 @@
         per_tipo       TINYINT      NOT NULL               COMMENT '0=Usuário, 1=Administrador (escopo escola), 2=Desenvolvedor (acesso total)',
         per_habilitado TINYINT      NOT NULL               COMMENT '0=Não habilitado, 1=Habilitado',
         per_escola_id  INT                                 COMMENT 'Escola do Administrador (FK, NULL para Usuário e Desenvolvedor)',
+        per_push_notif TINYINT      NOT NULL DEFAULT 1    COMMENT '1=Ativado, 0=Desativado — preferência de notificação push',
+        per_raio_busca TINYINT      NOT NULL DEFAULT 5    COMMENT 'Raio de busca padrão em km (1–25)',
         PRIMARY KEY (per_id),
         UNIQUE KEY UQ_perfil_usu_id (usu_id)              -- garante relação 1:1 com USUARIOS — impede perfil duplicado  [v16 — DB-A01]
     ) ENGINE = InnoDB;
@@ -719,6 +726,12 @@
     ALTER TABLE PENALIDADES
         ADD CONSTRAINT chk_pen_tipo
             CHECK (pen_tipo IN (1, 2, 3, 4));
+
+    ALTER TABLE PERFIL
+        ADD CONSTRAINT chk_per_push_notif
+            CHECK (per_push_notif IN (0, 1)),
+        ADD CONSTRAINT chk_per_raio_busca
+            CHECK (per_raio_busca BETWEEN 1 AND 25);
 
     ALTER TABLE DENUNCIAS
         ADD CONSTRAINT chk_den_tipo

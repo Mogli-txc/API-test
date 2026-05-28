@@ -404,6 +404,48 @@ class MensagemController {
     }
 
     /**
+     * MÉTODO: lerTodasDaConversa
+     * Marca como lidas todas as mensagens recebidas pelo usuário em uma carona.
+     * Equivalente a "abrir a conversa" — zera o badge de não lidas daquele chat.
+     *
+     * PASSO 1: Valida car_id e confirma participação.
+     * PASSO 2: UPDATE em lote — men_status = 3 para mensagens recebidas e não lidas.
+     *
+     * POST /api/mensagens/carona/:car_id/ler-todas
+     */
+    async lerTodasDaConversa(req, res) {
+        try {
+            // PASSO 1: Valida o ID da carona e confirma participação
+            const { car_id } = req.params;
+            if (!car_id || isNaN(car_id)) {
+                return res.status(400).json({ error: 'ID de carona inválido.' });
+            }
+
+            if (!await isParticipanteCarona(car_id, req.user.id)) {
+                return res.status(403).json({ error: 'Você não é participante desta carona.' });
+            }
+
+            // PASSO 2: Marca como lidas todas as mensagens recebidas não lidas nesta conversa
+            const [result] = await db.query(
+                `UPDATE MENSAGENS
+                 SET men_status = 3
+                 WHERE car_id = ? AND usu_id_destinatario = ? AND men_status != 3 AND men_deletado_em IS NULL`,
+                [car_id, req.user.id]
+            );
+
+            return res.status(200).json({
+                message:  'Mensagens marcadas como lidas.',
+                marcadas: result.affectedRows,
+                car_id:   parseInt(car_id)
+            });
+
+        } catch (error) {
+            console.error('[ERRO] lerTodasDaConversa:', error);
+            return res.status(500).json({ error: 'Erro ao marcar mensagens como lidas.' });
+        }
+    }
+
+    /**
      * MÉTODO: deletarMensagem
      * Descrição: Soft delete — marca men_deletado_em em vez de remover do banco.
      *   Preserva o histórico e evita quebra de referências via men_id_resposta.

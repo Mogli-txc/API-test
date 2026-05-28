@@ -72,6 +72,43 @@ class NotificacaoController {
     }
 
     /**
+     * MÉTODO: resumo
+     * Retorna contagem de não lidas + última notificação em uma única chamada.
+     * Elimina dois round-trips no carregamento inicial do app (badge + preview).
+     *
+     * PASSO 1: Executa contagem e busca da última notificação em paralelo.
+     *
+     * GET /api/notificacoes/resumo
+     */
+    async resumo(req, res) {
+        try {
+            // PASSO 1: Contagem e última notificação em paralelo
+            const [[[{ nao_lidas }]], [ultimas]] = await Promise.all([
+                db.query(
+                    'SELECT COUNT(*) AS nao_lidas FROM NOTIFICACOES WHERE usu_id = ? AND noti_lida = 0',
+                    [req.user.id]
+                ),
+                db.query(
+                    `SELECT noti_id, noti_tipo, noti_titulo, noti_mensagem, noti_lida, noti_criada_em
+                     FROM NOTIFICACOES
+                     WHERE usu_id = ?
+                     ORDER BY noti_criada_em DESC LIMIT 1`,
+                    [req.user.id]
+                )
+            ]);
+
+            return res.status(200).json({
+                nao_lidas,
+                ultima: ultimas[0] || null
+            });
+
+        } catch (error) {
+            console.error('[ERRO] resumo notificações:', error);
+            return res.status(500).json({ error: 'Erro ao buscar resumo de notificações.' });
+        }
+    }
+
+    /**
      * MÉTODO: contarNaoLidas
      * Retorna somente a contagem de notificações não lidas. Usado para badge no app.
      */

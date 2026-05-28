@@ -116,6 +116,9 @@ router.get('/me', authMiddleware, UsuarioController.me);
 // GET /api/usuarios/me/dashboard — resumo consolidado para a tela inicial do app
 router.get('/me/dashboard', authMiddleware, UsuarioController.dashboard);
 
+// PATCH /api/usuarios/me/config — atualiza preferências do usuário (push, raio de busca)
+router.patch('/me/config', authMiddleware, UsuarioController.atualizarConfig);
+
 // DELETE /api/usuarios/me/conta — agenda exclusão com 30 dias de graça (LGPD)
 router.delete('/me/conta', authMiddleware, UsuarioController.agendarExclusao);
 

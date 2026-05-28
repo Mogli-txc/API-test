@@ -1083,6 +1083,58 @@ paths:
                       media: { type: number, nullable: true }
                       total: { type: integer }
 
+  /api/usuarios/me/config:
+    patch:
+      tags: [Usuários]
+      summary: Atualizar preferências do usuário [v24]
+      description: |
+        Atualiza as preferências pessoais armazenadas na tabela PERFIL.
+        Ao menos um campo deve ser informado.
+
+        **Campos disponíveis:**
+        - `per_push_notif`: `0` = notificações push desativadas | `1` = ativadas (padrão)
+        - `per_raio_busca`: raio padrão de busca de caronas em km (1–25; padrão: 5)
+
+        O front-end pode usar `per_raio_busca` como valor inicial do slider de proximidade
+        na tela de busca, sem precisar de armazenamento local.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                per_push_notif:
+                  type: integer
+                  enum: [0, 1]
+                  description: "0=desativado, 1=ativado"
+                  example: 1
+                per_raio_busca:
+                  type: integer
+                  minimum: 1
+                  maximum: 25
+                  description: "Raio padrão de busca em km"
+                  example: 10
+      responses:
+        '200':
+          description: Configurações atualizadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  config:
+                    type: object
+                    properties:
+                      per_push_notif: { type: integer, enum: [0, 1] }
+                      per_raio_busca: { type: integer }
+        '400':
+          description: Nenhum campo informado, ou valor fora do intervalo permitido
+        '401': { description: Não autenticado }
+
   /api/usuarios/me/conta:
     delete:
       tags: [Usuários]
@@ -1972,6 +2024,46 @@ paths:
                   total: { type: integer }
                   caronas: { type: array, items: { $ref: '#/components/schemas/Carona' } }
         '400': { description: lat ou lon ausentes, ou raio_km inválido }
+
+  /api/caronas/buscar/mapa:
+    get:
+      tags: [Caronas]
+      summary: Pins leves para mapa [v24]
+      description: |
+        Retorna apenas os campos necessários para renderizar pins de caronas num mapa.
+        Inclui somente caronas abertas (`car_status = 1`) e lotadas (`car_status = 2`)
+        com ponto de partida geocodificado. Limite fixo de 500 registros — sem paginação.
+
+        **Uso recomendado:** chamar uma vez no carregamento do mapa e atualizar periodicamente.
+        Para detalhes de uma carona, use `GET /api/caronas/:car_id`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: esc_id, in: query, schema: { type: integer }, description: "Filtra por escola" }
+        - { name: cur_id, in: query, schema: { type: integer }, description: "Filtra por curso" }
+      responses:
+        '200':
+          description: Lista de pins do mapa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  total: { type: integer }
+                  pins:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        car_id:       { type: integer, example: 3 }
+                        car_status:   { type: integer, enum: [1, 2], example: 1 }
+                        car_hor_saida: { type: string, example: "07:30" }
+                        car_vagas_dispo: { type: integer, example: 2 }
+                        lat_origem:   { type: number, format: float, example: -23.5614 }
+                        lon_origem:   { type: number, format: float, example: -46.7215 }
+        '400': { description: esc_id ou cur_id não numérico }
+        '401': { description: Não autenticado }
 
   /api/caronas/minhas:
     get:
@@ -2871,6 +2963,40 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Mensagem'
+
+  /api/mensagens/carona/{car_id}/ler-todas:
+    post:
+      tags: [Mensagens]
+      summary: Marcar todas as mensagens da conversa como lidas [v24]
+      description: |
+        Marca como lidas (`men_status = 3`) todas as mensagens recebidas
+        pelo usuário autenticado em uma carona específica. Equivalente a
+        "abrir a conversa" — zera o badge de não lidas daquele chat.
+
+        Acesso restrito a participantes da carona.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: car_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 3
+      responses:
+        '200':
+          description: Mensagens marcadas como lidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:  { type: string }
+                  marcadas: { type: integer, description: "Quantidade de mensagens atualizadas", example: 5 }
+                  car_id:   { type: integer }
+        '400': { description: car_id inválido }
+        '403': { description: Usuário não é participante desta carona }
+        '401': { description: Não autenticado }
 
   /api/mensagens/{men_id}:
     put:
@@ -4840,6 +4966,39 @@ paths:
         '400': { description: Parâmetro lida inválido }
         '401': { description: Não autenticado }
 
+  /api/notificacoes/resumo:
+    get:
+      summary: Resumo de notificações — badge + última [v24]
+      tags: [Notificações]
+      description: |
+        Retorna a contagem de notificações não lidas e a última notificação
+        em uma única chamada. Substitui dois requests separados no carregamento
+        inicial do app (`/nao-lidas` + `/` com limit=1).
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Resumo de notificações
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nao_lidas:
+                    type: integer
+                    example: 4
+                  ultima:
+                    description: "Última notificação ou null se não houver nenhuma"
+                    nullable: true
+                    type: object
+                    properties:
+                      noti_id:       { type: integer }
+                      noti_tipo:     { type: string }
+                      noti_titulo:   { type: string }
+                      noti_mensagem: { type: string }
+                      noti_lida:     { type: integer, enum: [0, 1] }
+                      noti_criada_em: { type: string, format: date-time }
+        '401': { description: Não autenticado }
+
   /api/notificacoes/nao-lidas:
     get:
       summary: Contagem de notificações não lidas (badge)
@@ -4995,6 +5154,59 @@ paths:
                       $ref: '#/components/schemas/Penalidade'
         '403':
           description: Sem permissão para ver penalidades de outro usuário
+
+  /api/caronas/{car_id}/participantes:
+    get:
+      tags: [Caronas]
+      summary: Motorista + passageiros confirmados com nota média [v24]
+      description: |
+        Retorna uma lista compacta dos participantes confirmados da carona:
+        motorista no topo e passageiros confirmados (`car_pes_status = 1`) a seguir.
+        Cada item inclui foto, nota média e total de avaliações.
+
+        Acesso restrito a participantes da carona (motorista ou passageiro confirmado).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: car_id
+          in: path
+          required: true
+          schema: { type: integer }
+          example: 2
+      responses:
+        '200':
+          description: Lista de participantes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:  { type: string }
+                  car_id:   { type: integer }
+                  total:    { type: integer, description: "1 (motorista) + número de passageiros confirmados" }
+                  motorista:
+                    type: object
+                    properties:
+                      usu_id:           { type: integer }
+                      usu_nome:         { type: string }
+                      usu_foto:         { type: string, nullable: true }
+                      nota_media:       { type: number, format: float, example: 4.7 }
+                      total_avaliacoes: { type: integer, example: 12 }
+                      papel:            { type: string, example: "motorista" }
+                  passageiros:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        usu_id:           { type: integer }
+                        usu_nome:         { type: string }
+                        usu_foto:         { type: string, nullable: true }
+                        nota_media:       { type: number, format: float }
+                        total_avaliacoes: { type: integer }
+                        papel:            { type: string, example: "passageiro" }
+        '403': { description: Usuário não é participante desta carona }
+        '404': { description: Carona não encontrada }
+        '401': { description: Não autenticado }
 
   /api/caronas/{car_id}/resumo:
     get:

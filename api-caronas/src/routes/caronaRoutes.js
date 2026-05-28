@@ -55,10 +55,16 @@ router.get('/buscar', authMiddleware, CaronaController.buscar);
 // GET /api/caronas/buscar/proximas — deve vir ANTES de /:car_id para não capturar "proximas" como ID
 router.get('/buscar/proximas', authMiddleware, CaronaController.buscarProximas);
 
+// GET /api/caronas/buscar/mapa — pins leves para mapa (?esc_id=, ?cur_id=); deve vir ANTES de /:car_id
+router.get('/buscar/mapa', authMiddleware, CaronaController.buscarMapa);
+
 // Solicitações de carona: use POST /api/solicitacoes/criar (SolicitacaoController)
 
 // GET /api/caronas/:car_id/resumo — deve vir ANTES de /:car_id
 router.get('/:car_id/resumo', authMiddleware, CaronaController.resumo);
+
+// GET /api/caronas/:car_id/participantes — motorista + passageiros confirmados com nota média
+router.get('/:car_id/participantes', authMiddleware, CaronaController.listarParticipantes);
 
 // GET /api/caronas/:car_id/timeline — histórico cronológico de eventos da carona
 router.get('/:car_id/timeline', authMiddleware, CaronaController.timeline);

@@ -25,6 +25,9 @@ router.get('/', auth, controller.listar.bind(controller));
 // Contagem de não lidas — deve vir ANTES de /:noti_id para não capturar "nao-lidas"
 router.get('/nao-lidas', auth, controller.contarNaoLidas.bind(controller));
 
+// Resumo consolidado: nao_lidas + última notificação — deve vir ANTES de /:noti_id
+router.get('/resumo', auth, controller.resumo.bind(controller));
+
 // Marca todas como lidas — deve vir ANTES de /:noti_id/ler
 router.patch('/ler-todas', auth, controller.lerTodas.bind(controller));
 

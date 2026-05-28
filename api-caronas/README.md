@@ -134,6 +134,7 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | POST   | `/logout`          | JWT  | Invalida o refresh token server-side                        |
 | GET    | `/me`              | JWT  | Perfil do próprio usuário autenticado                       |
 | GET    | `/me/dashboard`    | JWT  | Dashboard consolidado: caronas ativas, solicitações pendentes, notificações, penalidades, reputação |
+| PATCH  | `/me/config`       | JWT  | Atualiza preferências do usuário (`per_push_notif`: 0/1; `per_raio_busca`: 1–25 km) |
 | DELETE | `/me/conta`        | JWT  | Agenda exclusão com 30 dias de graça — LGPD                 |
 | POST   | `/me/conta/cancelar-exclusao` | JWT | Cancela o agendamento de exclusão dentro do prazo     |
 | GET    | `/perfil/:id`      | JWT  | Dados do perfil (inclui `usu_verificacao`, `per_tipo`)      |
@@ -152,10 +153,12 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | GET    | `/`                         | JWT  | Lista caronas abertas (paginação cursor: `?cursor=<car_id>&limit=<n>`)                     |
 | GET    | `/buscar`                   | JWT  | Busca com filtros: `?car_status=`, `?data=YYYY-MM-DD`, `?esc_id=`, `?cur_id=`             |
 | GET    | `/buscar/proximas`          | JWT  | Caronas próximas por geolocalização (`?lat=`, `?lon=`, `?raio_km=`, máx. 25 km)           |
+| GET    | `/buscar/mapa`              | JWT  | Pins leves para mapa: car_id, status, horário, lat/lon da origem (`?esc_id=`, `?cur_id=`) |
 | GET    | `/minhas`                   | JWT  | Lista caronas do motorista autenticado (`?status=` opcional)                               |
 | GET    | `/passageiro`               | JWT  | Lista caronas onde o usuário é passageiro confirmado (`?status=` opcional)                 |
 | GET    | `/:car_id`                  | JWT  | Detalhes de uma carona                                                                     |
 | GET    | `/:car_id/resumo`           | JWT  | Resumo completo: pontos, passageiros, avaliações e solicitação do usuário                  |
+| GET    | `/:car_id/participantes`    | JWT  | Motorista + passageiros confirmados com foto e nota média — apenas participantes           |
 | GET    | `/:car_id/timeline`         | JWT  | Histórico cronológico de eventos: criação, solicitações, aceites, finalização, avaliações  |
 | POST   | `/:car_id/checkpoints`      | JWT  | Motorista registra localização atual durante a carona (`lat`, `lng`)                       |
 | GET    | `/:car_id/checkpoints`      | JWT  | Último checkpoint do motorista — visível para passageiros confirmados                      |
@@ -210,8 +213,9 @@ Regras: apenas participantes confirmados podem avaliar; nota de 1–5; um avalia
 |--------|-------------------|------|----------------------------------------------|
 | POST   | `/enviar`         | JWT  | Envia mensagem em uma carona                                                         |
 | GET    | `/inbox`          | JWT  | Caixa de entrada: conversas agrupadas por carona com contagem de não lidas           |
-| GET    | `/carona/:car_id` | JWT  | Histórico de mensagens de uma carona                                                 |
-| PUT    | `/:men_id`        | JWT  | Edita mensagem (apenas o remetente)                                                  |
+| GET    | `/carona/:car_id`          | JWT  | Histórico de mensagens de uma carona                                                |
+| POST   | `/carona/:car_id/ler-todas`| JWT  | Marca todas as mensagens recebidas desta carona como lidas (zera badge do chat)     |
+| PUT    | `/:men_id`                 | JWT  | Edita mensagem (apenas o remetente)                                                 |
 | PATCH  | `/:men_id/ler`    | JWT  | Marca mensagem como lida (`men_status = 3`)                                          |
 | DELETE | `/:men_id`        | JWT  | Soft-delete de mensagem (apenas o remetente)                                         |
 
@@ -248,6 +252,7 @@ socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
 | Método | Rota              | Acesso    | Descrição                           |
 |--------|-------------------|-----------|-------------------------------------|
 | GET    | `/`               | JWT       | Lista notificações (`?lida=0/1`)    |
+| GET    | `/resumo`         | JWT       | Contagem de não lidas + última notificação em uma chamada (badge + preview) |
 | GET    | `/nao-lidas`      | JWT       | Contagem de não lidas (badge)       |
 | PATCH  | `/ler-todas`      | JWT       | Marca todas como lidas              |
 | PATCH  | `/:id/ler`        | JWT       | Marca uma notificação como lida     |
@@ -470,7 +475,6 @@ Exclusivo para Desenvolvedor (`per_tipo = 2`). Admins recebem 403. O Dev também
 |-----------------------|---------------------------------------------------------------------------|
 | `authMiddleware.js`   | Valida JWT; diferencia token expirado (`TOKEN_EXPIRED`) de inválido (`TOKEN_INVALID`) |
 | `roleMiddleware.js`   | Valida `per_tipo` e `per_habilitado`; injeta `per_tipo` e `per_escola_id` em `req.user`; retorna 503 em falha de infraestrutura |
-| `penaltyMiddleware.js`| Verifica penalidades ativas antes de oferecer/solicitar caronas           |
 | `uploadHelper.js`     | Multer para imagens (5 MB) e documentos PDF (10 MB); valida magic bytes   |
 | `ocrValidator.js`     | Pipeline OCR — texto nativo (pdfjs-dist) → fallback Tesseract.js; critérios por grupo de palavras-chave |
 
@@ -555,6 +559,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v21    | `men_criado_em` + `men_atualizado_em` em MENSAGENS (padrão masculino consistente com schema); bloqueio de chat em carona encerrada/cancelada (REST + WebSocket); `listarConversa` retorna campos completos |
 | v22    | `SUGESTAO_DENUNCIA` separada em `SUGESTOES` (Dev-only) + `DENUNCIAS` (Admin escola-scoped + Dev); `/api/denuncias` com RBAC por FK chain; `car_data` restrito a hoje; auto-close de caronas às 00:00 via node-cron |
 | v23    | Restrição geográfica: origem ou destino da carona deve estar a ≤ 500 m da escola do motorista (Haversine); endpoints Dev para upload de contrato e template OCR por escola (`esc_contrato_arquivo`, `esc_ocr_base`) |
+| v24    | Preferências de usuário em PERFIL (`per_push_notif`, `per_raio_busca`); 5 endpoints: `GET /caronas/buscar/mapa`, `GET /caronas/:id/participantes`, `POST /mensagens/carona/:id/ler-todas`, `GET /notificacoes/resumo`, `PATCH /usuarios/me/config` |
 
 ---
 

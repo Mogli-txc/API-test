@@ -1435,6 +1435,70 @@ class UsuarioController {
             return res.status(500).json({ error: 'Erro ao cancelar exclusão da conta.' });
         }
     }
+
+    /**
+     * MÉTODO: atualizarConfig
+     * Atualiza preferências do usuário armazenadas no PERFIL.
+     *   per_push_notif: 0=desativado, 1=ativado (notificações push)
+     *   per_raio_busca: 1–25 km (raio padrão na tela de busca de caronas)
+     *
+     * PASSO 1: Valida que ao menos um campo foi enviado.
+     * PASSO 2: Valida os valores individuais.
+     * PASSO 3: Atualiza PERFIL e retorna o estado atual.
+     *
+     * PATCH /api/usuarios/me/config
+     */
+    atualizarConfig = async (req, res) => {
+        try {
+            const usu_id = req.user.id;
+            const { per_push_notif, per_raio_busca } = req.body;
+
+            // PASSO 1: Ao menos um campo obrigatório
+            if (per_push_notif === undefined && per_raio_busca === undefined) {
+                return res.status(400).json({ error: 'Informe ao menos um campo: per_push_notif ou per_raio_busca.' });
+            }
+
+            const sets   = [];
+            const params = [];
+
+            // PASSO 2: Valida campos individualmente
+            if (per_push_notif !== undefined) {
+                const val = parseInt(per_push_notif);
+                if (![0, 1].includes(val)) {
+                    return res.status(400).json({ error: 'per_push_notif deve ser 0 (desativado) ou 1 (ativado).' });
+                }
+                sets.push('per_push_notif = ?');
+                params.push(val);
+            }
+
+            if (per_raio_busca !== undefined) {
+                const val = parseInt(per_raio_busca);
+                if (isNaN(val) || val < 1 || val > 25) {
+                    return res.status(400).json({ error: 'per_raio_busca deve ser entre 1 e 25 km.' });
+                }
+                sets.push('per_raio_busca = ?');
+                params.push(val);
+            }
+
+            // PASSO 3: Atualiza e retorna estado atual
+            params.push(usu_id);
+            await db.query(`UPDATE PERFIL SET ${sets.join(', ')} WHERE usu_id = ?`, params);
+
+            const [[config]] = await db.query(
+                'SELECT per_push_notif, per_raio_busca FROM PERFIL WHERE usu_id = ?',
+                [usu_id]
+            );
+
+            return res.status(200).json({
+                message: 'Configurações atualizadas.',
+                config
+            });
+
+        } catch (error) {
+            console.error('[ERRO] atualizarConfig:', error);
+            return res.status(500).json({ error: 'Erro ao atualizar configurações.' });
+        }
+    }
 }
 
 module.exports = new UsuarioController();

@@ -46,6 +46,10 @@ router.get('/inbox', authMiddleware, MensagemController.inbox);
  */
 router.get('/carona/:car_id', authMiddleware, MensagemController.listarConversa);
 
+// POST /api/mensagens/carona/:car_id/ler-todas — marca todas as mensagens recebidas como lidas
+// Deve vir ANTES de /:men_id para não capturar "carona" como ID numérico
+router.post('/carona/:car_id/ler-todas', authMiddleware, MensagemController.lerTodasDaConversa);
+
 /**
  * ROTA: DELETE /api/mensagens/:men_id
  * Descrição: Deleta uma mensagem enviada pelo usuário

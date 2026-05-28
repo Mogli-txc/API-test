@@ -1747,6 +1747,154 @@ class CaronaController {
      *
      * GET /api/caronas/:car_id/checkpoints
      */
+    /**
+     * MÉTODO: buscarMapa
+     * Retorna apenas os campos necessários para renderizar pins no mapa (lat/lon da origem).
+     * Leve por design — não carrega dados de motorista, escola ou paginação complexa.
+     *
+     * PASSO 1: Filtros opcionais por escola e curso.
+     * PASSO 2: Busca coordenadas de origem de caronas abertas/lotadas (car_status IN 1,2).
+     * Limite fixo de 500 registros — suficiente para um mapa de cidade.
+     *
+     * GET /api/caronas/buscar/mapa?esc_id=&cur_id=
+     */
+    async buscarMapa(req, res) {
+        try {
+            // PASSO 1: Filtros opcionais
+            const filtros = [
+                'c.car_status IN (1, 2)',
+                'pe.pon_lat IS NOT NULL',
+                'pe.pon_lon IS NOT NULL'
+            ];
+            const params = [];
+
+            if (req.query.esc_id !== undefined) {
+                const esc_id = parseInt(req.query.esc_id);
+                if (isNaN(esc_id)) return res.status(400).json({ error: 'esc_id deve ser numérico.' });
+                filtros.push('e.esc_id = ?');
+                params.push(esc_id);
+            }
+
+            if (req.query.cur_id !== undefined) {
+                const cur_id = parseInt(req.query.cur_id);
+                if (isNaN(cur_id)) return res.status(400).json({ error: 'cur_id deve ser numérico.' });
+                filtros.push('cur.cur_id = ?');
+                params.push(cur_id);
+            }
+
+            const where = 'WHERE ' + filtros.join(' AND ');
+
+            // PASSO 2: Retorna apenas campos necessários para pins no mapa
+            const [pins] = await db.query(
+                `SELECT c.car_id, c.car_status, c.car_hor_saida, c.car_vagas_dispo,
+                        pe.pon_lat AS lat_origem, pe.pon_lon AS lon_origem
+                 FROM CARONAS c
+                 INNER JOIN PONTO_ENCONTROS pe ON pe.car_id    = c.car_id
+                     AND pe.pon_tipo   = 0
+                     AND pe.pon_status = 1
+                 LEFT  JOIN VEICULOS        v      ON c.vei_id      = v.vei_id
+                 LEFT  JOIN CURSOS_USUARIOS cu_mot ON c.cur_usu_id = cu_mot.cur_usu_id
+                 LEFT  JOIN CURSOS          cur    ON cu_mot.cur_id = cur.cur_id
+                 LEFT  JOIN ESCOLAS         e      ON cur.esc_id    = e.esc_id
+                 ${where}
+                 LIMIT 500`,
+                params
+            );
+
+            return res.status(200).json({
+                message: 'Pins do mapa recuperados.',
+                total:   pins.length,
+                pins
+            });
+
+        } catch (error) {
+            console.error('[ERRO] buscarMapa:', error);
+            return res.status(500).json({ error: 'Erro ao buscar pins do mapa.' });
+        }
+    }
+
+    /**
+     * MÉTODO: listarParticipantes
+     * Lista motorista + passageiros confirmados de uma carona, com foto e nota média.
+     * Útil para exibir avatares na tela de carona em andamento.
+     *
+     * PASSO 1: Valida car_id e verifica existência da carona.
+     * PASSO 2: Confirma que o usuário autenticado é participante.
+     * PASSO 3: Busca motorista com nota média.
+     * PASSO 4: Busca passageiros confirmados (car_pes_status=1) com nota média.
+     *
+     * GET /api/caronas/:car_id/participantes
+     */
+    async listarParticipantes(req, res) {
+        try {
+            // PASSO 1: Valida o ID
+            const { car_id } = req.params;
+            if (!car_id || isNaN(car_id)) {
+                return res.status(400).json({ error: 'ID de carona inválido.' });
+            }
+
+            // PASSO 2: Verifica existência e confirma participação
+            const [caronaRows] = await db.query(
+                `SELECT c.car_id, c.car_status,
+                        u.usu_id   AS mot_id,
+                        u.usu_nome AS mot_nome,
+                        u.usu_foto AS mot_foto,
+                        ROUND(COALESCE(AVG(a.ava_nota), 0), 1) AS mot_nota_media,
+                        COUNT(DISTINCT a.ava_id)                AS mot_total_avaliacoes
+                 FROM CARONAS c
+                 INNER JOIN VEICULOS  v ON c.vei_id = v.vei_id
+                 INNER JOIN USUARIOS  u ON v.usu_id = u.usu_id
+                 LEFT  JOIN AVALIACOES a ON a.usu_id_avaliado = u.usu_id
+                 WHERE c.car_id = ?
+                 GROUP BY c.car_id, c.car_status, u.usu_id, u.usu_nome, u.usu_foto`,
+                [car_id]
+            );
+
+            if (caronaRows.length === 0) {
+                return res.status(404).json({ error: 'Carona não encontrada.' });
+            }
+
+            const { isParticipanteCarona } = require('../utils/authHelper');
+            if (!await isParticipanteCarona(car_id, req.user.id)) {
+                return res.status(403).json({ error: 'Apenas participantes podem ver a lista.' });
+            }
+
+            const carona = caronaRows[0];
+
+            // PASSO 3: Busca passageiros confirmados com nota média
+            const [passageiros] = await db.query(
+                `SELECT u.usu_id, u.usu_nome, u.usu_foto,
+                        ROUND(COALESCE(AVG(a.ava_nota), 0), 1) AS nota_media,
+                        COUNT(DISTINCT a.ava_id)                AS total_avaliacoes
+                 FROM CARONA_PESSOAS cp
+                 INNER JOIN USUARIOS  u ON cp.usu_id           = u.usu_id
+                 LEFT  JOIN AVALIACOES a ON a.usu_id_avaliado  = u.usu_id
+                 WHERE cp.car_id = ? AND cp.car_pes_status = 1
+                 GROUP BY u.usu_id, u.usu_nome, u.usu_foto`,
+                [car_id]
+            );
+
+            return res.status(200).json({
+                message:  `Participantes da carona ${car_id}.`,
+                car_id:   parseInt(car_id),
+                motorista: {
+                    usu_id:           carona.mot_id,
+                    usu_nome:         carona.mot_nome,
+                    usu_foto:         carona.mot_foto,
+                    nota_media:       carona.mot_nota_media,
+                    total_avaliacoes: carona.mot_total_avaliacoes,
+                    papel:            'motorista'
+                },
+                passageiros: passageiros.map(p => ({ ...p, papel: 'passageiro' })),
+                total: 1 + passageiros.length
+            });
+
+        } catch (error) {
+            console.error('[ERRO] listarParticipantes:', error);
+            return res.status(500).json({ error: 'Erro ao buscar participantes.' });
+        }
+    }
+
     async obterCheckpoints(req, res) {
         try {
             const { car_id } = req.params;
