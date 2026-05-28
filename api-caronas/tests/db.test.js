@@ -54,7 +54,8 @@ describe('SELECT simples — todas as 13 tabelas', () => {
         'SOLICITACOES_CARONA',
         'CARONA_PESSOAS',
         'MENSAGENS',
-        'SUGESTAO_DENUNCIA',
+        'SUGESTOES',
+        'DENUNCIAS',
     ];
 
     tabelas.forEach((tabela) => {
@@ -159,12 +160,22 @@ describe('SELECT com JOIN — consultas reais da API', () => {
         expect(Array.isArray(rows)).toBe(true);
     });
 
-    it('Sugestões/denúncias com autor e respondente (usado em /api/sugestoes)', async () => {
+    it('Sugestões com autor e respondente (usado em /api/sugestoes)', async () => {
         const [rows] = await pool.query(`
-            SELECT sd.sug_id, u_autor.usu_nome AS enviado_por, sd.sug_tipo, sd.sug_status
-            FROM SUGESTAO_DENUNCIA sd
-            INNER JOIN USUARIOS u_autor ON sd.usu_id          = u_autor.usu_id
-            LEFT  JOIN USUARIOS u_resp  ON sd.sug_id_resposta = u_resp.usu_id
+            SELECT s.sug_id, u_autor.usu_nome AS enviado_por, s.sug_status
+            FROM SUGESTOES s
+            INNER JOIN USUARIOS u_autor ON s.usu_id          = u_autor.usu_id
+            LEFT  JOIN USUARIOS u_resp  ON s.sug_id_resposta = u_resp.usu_id
+        `);
+        expect(Array.isArray(rows)).toBe(true);
+    });
+
+    it('Denúncias com denunciante e alvo (usado em /api/denuncias)', async () => {
+        const [rows] = await pool.query(`
+            SELECT d.den_id, d.den_tipo, u_den.usu_nome AS denunciante, d.den_status
+            FROM DENUNCIAS d
+            INNER JOIN USUARIOS u_den  ON d.usu_id       = u_den.usu_id
+            LEFT  JOIN USUARIOS u_alvo ON d.den_usu_alvo = u_alvo.usu_id
         `);
         expect(Array.isArray(rows)).toBe(true);
     });

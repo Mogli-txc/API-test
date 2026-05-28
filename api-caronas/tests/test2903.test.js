@@ -75,7 +75,8 @@ describe('29/03 — SELECT nas 13 tabelas', () => {
         'SOLICITACOES_CARONA',
         'CARONA_PESSOAS',
         'MENSAGENS',
-        'SUGESTAO_DENUNCIA',
+        'SUGESTOES',
+        'DENUNCIAS',
     ];
 
     tabelas.forEach((tabela) => {

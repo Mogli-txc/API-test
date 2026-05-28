@@ -201,7 +201,7 @@ async function criarCarona(motorista, vagas = 2, descricao = 'Carona de regress�
             cur_usu_id,
             vei_id,
             car_desc:        descricao,
-            car_data:        '2027-09-01',
+            car_data:        new Date().toISOString().slice(0, 10),
             car_hor_saida:   '08:00:00',
             car_vagas_dispo: vagas,
             origem: { pon_nome: 'Origem Regressão', pon_endereco: 'Rua Origem, 100, São Paulo' },
@@ -1083,7 +1083,7 @@ describe('Grupo 2 — Rodada 2: Bugs, Features e Consistência', () => {
             const criRes = await request(app)
                 .post('/api/sugestoes')
                 .set('Authorization', `Bearer ${usuario.token}`)
-                .send({ sug_texto: 'Sugestão para teste de resposta duplicada', sug_tipo: 1 });
+                .send({ sug_texto: 'Sugestão para teste de resposta duplicada' });
             sug_id = criRes.body?.sugestao?.sug_id;
 
             // Primeira resposta — fecha o ticket (sug_status=0)
@@ -1096,7 +1096,7 @@ describe('Grupo 2 — Rodada 2: Bugs, Features e Consistência', () => {
         it('primeira resposta deve ter fechado o ticket (sug_status=0 no banco)', async () => {
             const db = await getDb();
             const [rows] = await db.execute(
-                'SELECT sug_status FROM SUGESTAO_DENUNCIA WHERE sug_id = ?',
+                'SELECT sug_status FROM SUGESTOES WHERE sug_id = ?',
                 [sug_id]
             );
             await db.end();

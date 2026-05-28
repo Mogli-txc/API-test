@@ -1387,6 +1387,87 @@ class DevController {
             return res.status(500).json({ error: "Erro ao gerar relatório de usuários." });
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ARQUIVOS DE ESCOLA  [v23]
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * MÉTODO: uploadContratoEscola
+     * Recebe o PDF do contrato da escola e salva o caminho em esc_contrato_arquivo.
+     * Arquivo processado pelo middleware uploadDocument('contratos') + validarDocumento
+     * antes de chegar aqui (req.file já está disponível e validado).
+     *
+     * POST /api/dev/escolas/:esc_id/contrato/arquivo
+     */
+    async uploadContratoEscola(req, res) {
+        try {
+            const { esc_id } = req.params;
+            if (!esc_id || isNaN(esc_id)) return res.status(400).json({ error: "esc_id inválido." });
+            if (!req.file) return res.status(400).json({ error: "Arquivo PDF não enviado. Use o campo 'contrato'." });
+
+            // PASSO 1: Verifica que a escola existe
+            const [escola] = await db.query(
+                'SELECT esc_id, esc_contrato_arquivo FROM ESCOLAS WHERE esc_id = ?', [esc_id]
+            );
+            if (!escola.length) return res.status(404).json({ error: "Escola não encontrada." });
+
+            // PASSO 2: Salva o caminho relativo (relativo à raiz public/)
+            const caminho = `contratos/${req.file.filename}`;
+            await db.query(
+                'UPDATE ESCOLAS SET esc_contrato_arquivo = ? WHERE esc_id = ?',
+                [caminho, esc_id]
+            );
+
+            return res.status(200).json({
+                message: "Contrato enviado com sucesso.",
+                esc_id: parseInt(esc_id),
+                esc_contrato_arquivo: caminho
+            });
+
+        } catch (error) {
+            console.error("[ERRO] uploadContratoEscola:", error);
+            return res.status(500).json({ error: "Erro ao salvar contrato da escola." });
+        }
+    }
+
+    /**
+     * MÉTODO: uploadOcrBaseEscola
+     * Recebe o PDF de exemplo de matrícula para OCR e salva o caminho em esc_ocr_base.
+     * Arquivo processado pelo middleware uploadDocument('ocr-base') + validarDocumento.
+     *
+     * POST /api/dev/escolas/:esc_id/ocr-base
+     */
+    async uploadOcrBaseEscola(req, res) {
+        try {
+            const { esc_id } = req.params;
+            if (!esc_id || isNaN(esc_id)) return res.status(400).json({ error: "esc_id inválido." });
+            if (!req.file) return res.status(400).json({ error: "Arquivo PDF não enviado. Use o campo 'ocr_base'." });
+
+            // PASSO 1: Verifica que a escola existe
+            const [escola] = await db.query(
+                'SELECT esc_id FROM ESCOLAS WHERE esc_id = ?', [esc_id]
+            );
+            if (!escola.length) return res.status(404).json({ error: "Escola não encontrada." });
+
+            // PASSO 2: Salva o caminho relativo
+            const caminho = `ocr-base/${req.file.filename}`;
+            await db.query(
+                'UPDATE ESCOLAS SET esc_ocr_base = ? WHERE esc_id = ?',
+                [caminho, esc_id]
+            );
+
+            return res.status(200).json({
+                message: "Template OCR enviado com sucesso.",
+                esc_id: parseInt(esc_id),
+                esc_ocr_base: caminho
+            });
+
+        } catch (error) {
+            console.error("[ERRO] uploadOcrBaseEscola:", error);
+            return res.status(500).json({ error: "Erro ao salvar template OCR da escola." });
+        }
+    }
 }
 
 module.exports = new DevController();

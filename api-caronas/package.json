@@ -8,7 +8,16 @@
     "dev": "nodemon src/server.js",
     "test": "jest"
   },
-  "keywords": ["caronas", "api", "nodejs", "express", "mysql", "jwt", "socket.io", "ocr"],
+  "keywords": [
+    "caronas",
+    "api",
+    "nodejs",
+    "express",
+    "mysql",
+    "jwt",
+    "socket.io",
+    "ocr"
+  ],
   "author": "Mogli-txc",
   "license": "ISC",
   "type": "commonjs",
@@ -23,6 +32,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "mysql2": "^3.20.0",
+    "node-cron": "^4.2.1",
     "nodemailer": "^8.0.5",
     "pdf-to-img": "^6.0.0",
     "pdfjs-dist": "^5.6.205",

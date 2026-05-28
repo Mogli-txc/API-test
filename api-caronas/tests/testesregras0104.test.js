@@ -157,7 +157,7 @@ beforeAll(async () => {
                 cur_usu_id,
                 vei_id,
                 car_desc:        'Carona de teste',
-                car_data:        '2026-06-15',
+                car_data:        new Date().toISOString().slice(0, 10),
                 car_hor_saida:   '08:00:00',
                 car_vagas_dispo: 3,
                 origem: { pon_nome: 'Origem Teste', pon_endereco: 'Rua A, 100, São Paulo' },

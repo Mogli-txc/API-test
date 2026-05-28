@@ -25,7 +25,7 @@ const fsp    = require('fs').promises;
 const path   = require('path');
 
 // Pastas permitidas para upload — impede path traversal via pastaDestino inválida
-const PASTAS_PERMITIDAS = new Set(['usuarios', 'veiculos', 'documentos']);
+const PASTAS_PERMITIDAS = new Set(['usuarios', 'veiculos', 'documentos', 'contratos', 'ocr-base']);
 
 /**
  * Magic bytes dos tipos suportados.

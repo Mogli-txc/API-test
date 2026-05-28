@@ -88,9 +88,7 @@ async function cadastrarCarro(token) {
 
 // Cria carona e retorna car_id (requer usuário com vei_id e cur_usu_id)
 async function criarCarona(token, vei_id, cur_usu_id, vagas = 2) {
-    const amanha = new Date();
-    amanha.setDate(amanha.getDate() + 1);
-    const data = amanha.toISOString().slice(0, 10);
+    const data = new Date().toISOString().slice(0, 10);
     const res = await request(app).post('/api/caronas/oferecer')
         .set('Authorization', `Bearer ${token}`)
         .send({

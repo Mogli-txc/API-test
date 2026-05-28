@@ -66,9 +66,7 @@ async function cadastrarVeiculo(token) {
 }
 
 async function criarCarona(token, vei_id) {
-    const amanha = new Date();
-    amanha.setDate(amanha.getDate() + 1);
-    const data = amanha.toISOString().slice(0, 10);
+    const data = new Date().toISOString().slice(0, 10);
     const res = await request(app).post('/api/caronas/oferecer')
         .set('Authorization', `Bearer ${token}`)
         .send({
@@ -98,9 +96,7 @@ describe('Grupo 1 — Avaliações [v14-T01-T03]', () => {
         const vei_id = await cadastrarVeiculo(motorista.token);
 
         // Cria carona e a finaliza diretamente no banco
-        const amanha = new Date();
-        amanha.setDate(amanha.getDate() + 1);
-        const data = amanha.toISOString().slice(0, 10);
+        const data = new Date().toISOString().slice(0, 10);
         const r = await request(app).post('/api/caronas/oferecer')
             .set('Authorization', `Bearer ${motorista.token}`)
             .send({

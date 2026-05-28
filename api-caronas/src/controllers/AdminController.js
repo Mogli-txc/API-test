@@ -218,32 +218,47 @@ class AdminController {
             let rows;
 
             if (per_tipo === 2) {
-                [rows] = await db.query(
-                    `SELECT
-                        COUNT(*)                        AS total,
-                        SUM(sug_status = 1)             AS abertas,
-                        SUM(sug_status = 3)             AS em_analise,
-                        SUM(sug_status = 0)             AS fechadas,
-                        SUM(sug_tipo   = 0)             AS denuncias,
-                        SUM(sug_tipo   = 1)             AS sugestoes
-                     FROM SUGESTAO_DENUNCIA
-                     WHERE sug_deletado_em IS NULL`
+                // PASSO 2 (Dev): conta sugestões e denúncias nas tabelas separadas
+                const [[rSug]] = await db.query(
+                    `SELECT COUNT(*) AS total,
+                            SUM(sug_status = 1) AS abertas,
+                            SUM(sug_status = 3) AS em_analise,
+                            SUM(sug_status = 0) AS fechadas
+                     FROM SUGESTOES WHERE sug_deletado_em IS NULL`
                 );
+                const [[rDen]] = await db.query(
+                    `SELECT COUNT(*) AS total,
+                            SUM(den_status = 1) AS abertas,
+                            SUM(den_status = 3) AS em_analise,
+                            SUM(den_status = 0) AS fechadas
+                     FROM DENUNCIAS WHERE den_deletado_em IS NULL`
+                );
+                rows = [{
+                    total:      (rSug.total || 0) + (rDen.total || 0),
+                    abertas:    (rSug.abertas || 0) + (rDen.abertas || 0),
+                    em_analise: (rSug.em_analise || 0) + (rDen.em_analise || 0),
+                    fechadas:   (rSug.fechadas || 0) + (rDen.fechadas || 0),
+                    sugestoes:  rSug.total || 0,
+                    denuncias:  rDen.total || 0,
+                }];
             } else {
+                // PASSO 2 (Admin): conta denúncias da sua escola via FK chains
                 [rows] = await db.query(
-                    `SELECT
-                        COUNT(DISTINCT s.sug_id)        AS total,
-                        SUM(s.sug_status = 1)           AS abertas,
-                        SUM(s.sug_status = 3)           AS em_analise,
-                        SUM(s.sug_status = 0)           AS fechadas,
-                        SUM(s.sug_tipo   = 0)           AS denuncias,
-                        SUM(s.sug_tipo   = 1)           AS sugestoes
-                     FROM SUGESTAO_DENUNCIA s
-                     INNER JOIN USUARIOS        u  ON s.usu_id  = u.usu_id
-                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
-                     INNER JOIN CURSOS          c  ON cu.cur_id = c.cur_id
-                     WHERE c.esc_id = ? AND s.sug_deletado_em IS NULL`,
-                    [per_escola_id]
+                    `SELECT COUNT(DISTINCT d.den_id)    AS total,
+                            SUM(d.den_status = 1)       AS abertas,
+                            SUM(d.den_status = 3)       AS em_analise,
+                            SUM(d.den_status = 0)       AS fechadas,
+                            0                           AS sugestoes,
+                            COUNT(DISTINCT d.den_id)    AS denuncias
+                     FROM DENUNCIAS d
+                     LEFT JOIN CARONAS car         ON d.car_id          = car.car_id
+                     LEFT JOIN CURSOS_USUARIOS cu_c ON car.cur_usu_id   = cu_c.cur_usu_id
+                     LEFT JOIN CURSOS c_c           ON cu_c.cur_id      = c_c.cur_id
+                     LEFT JOIN CURSOS_USUARIOS cu_u ON d.den_usu_alvo   = cu_u.usu_id
+                     LEFT JOIN CURSOS c_u           ON cu_u.cur_id      = c_u.cur_id
+                     WHERE d.den_deletado_em IS NULL
+                       AND (c_c.esc_id = ? OR c_u.esc_id = ?)`,
+                    [per_escola_id, per_escola_id]
                 );
             }
 
@@ -1486,30 +1501,69 @@ class AdminController {
             const dias   = Math.max(1, parseInt(req.query.dias) || 30);
             const inicio = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-            const escolaJoin  = per_tipo === 1 ? 'INNER JOIN USUARIOS u ON s.usu_id = u.usu_id INNER JOIN CURSOS_USUARIOS cu ON u.usu_id = cu.usu_id INNER JOIN CURSOS c ON cu.cur_id = c.cur_id' : '';
-            const escolaWhere = per_tipo === 1 ? ` AND c.esc_id = ${per_escola_id}` : '';
+            let total, sugestoes, denuncias, abertas, em_analise, arquivadas, fechadas;
 
-            const [rows] = await db.query(
-                `SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN sug_tipo = 1 THEN 1 ELSE 0 END) AS sugestoes,
-                    SUM(CASE WHEN sug_tipo = 0 THEN 1 ELSE 0 END) AS denuncias,
-                    SUM(CASE WHEN sug_status = 1 THEN 1 ELSE 0 END) AS abertas,
-                    SUM(CASE WHEN sug_status = 3 THEN 1 ELSE 0 END) AS em_analise,
-                    SUM(CASE WHEN sug_status = 2 THEN 1 ELSE 0 END) AS arquivadas,
-                    SUM(CASE WHEN sug_status = 0 THEN 1 ELSE 0 END) AS fechadas
-                 FROM SUGESTAO_DENUNCIA s ${escolaJoin}
-                 WHERE s.sug_deletado_em IS NULL AND s.sug_data >= ?${escolaWhere}`,
-                [inicio]
-            );
+            if (per_tipo === 2) {
+                // PASSO 2 (Dev): combina SUGESTOES + DENUNCIAS no período
+                const [[rSug]] = await db.query(
+                    `SELECT COUNT(*) AS total,
+                            SUM(CASE WHEN sug_status=1 THEN 1 ELSE 0 END) AS abertas,
+                            SUM(CASE WHEN sug_status=3 THEN 1 ELSE 0 END) AS em_analise,
+                            SUM(CASE WHEN sug_status=2 THEN 1 ELSE 0 END) AS arquivadas,
+                            SUM(CASE WHEN sug_status=0 THEN 1 ELSE 0 END) AS fechadas
+                     FROM SUGESTOES WHERE sug_deletado_em IS NULL AND sug_data >= ?`,
+                    [inicio]
+                );
+                const [[rDen]] = await db.query(
+                    `SELECT COUNT(*) AS total,
+                            SUM(CASE WHEN den_status=1 THEN 1 ELSE 0 END) AS abertas,
+                            SUM(CASE WHEN den_status=3 THEN 1 ELSE 0 END) AS em_analise,
+                            SUM(CASE WHEN den_status=2 THEN 1 ELSE 0 END) AS arquivadas,
+                            SUM(CASE WHEN den_status=0 THEN 1 ELSE 0 END) AS fechadas
+                     FROM DENUNCIAS WHERE den_deletado_em IS NULL AND den_data >= ?`,
+                    [inicio]
+                );
+                total      = (rSug.total || 0) + (rDen.total || 0);
+                sugestoes  = rSug.total || 0;
+                denuncias  = rDen.total || 0;
+                abertas    = (rSug.abertas || 0) + (rDen.abertas || 0);
+                em_analise = (rSug.em_analise || 0) + (rDen.em_analise || 0);
+                arquivadas = (rSug.arquivadas || 0) + (rDen.arquivadas || 0);
+                fechadas   = (rSug.fechadas || 0) + (rDen.fechadas || 0);
+            } else {
+                // PASSO 2 (Admin): apenas denúncias da escola via FK chains
+                const [[rDen]] = await db.query(
+                    `SELECT COUNT(DISTINCT d.den_id) AS total,
+                            SUM(CASE WHEN d.den_status=1 THEN 1 ELSE 0 END) AS abertas,
+                            SUM(CASE WHEN d.den_status=3 THEN 1 ELSE 0 END) AS em_analise,
+                            SUM(CASE WHEN d.den_status=2 THEN 1 ELSE 0 END) AS arquivadas,
+                            SUM(CASE WHEN d.den_status=0 THEN 1 ELSE 0 END) AS fechadas
+                     FROM DENUNCIAS d
+                     LEFT JOIN CARONAS car          ON d.car_id         = car.car_id
+                     LEFT JOIN CURSOS_USUARIOS cu_c ON car.cur_usu_id   = cu_c.cur_usu_id
+                     LEFT JOIN CURSOS c_c           ON cu_c.cur_id      = c_c.cur_id
+                     LEFT JOIN CURSOS_USUARIOS cu_u ON d.den_usu_alvo   = cu_u.usu_id
+                     LEFT JOIN CURSOS c_u           ON cu_u.cur_id      = c_u.cur_id
+                     WHERE d.den_deletado_em IS NULL AND d.den_data >= ?
+                       AND (c_c.esc_id = ? OR c_u.esc_id = ?)`,
+                    [inicio, per_escola_id, per_escola_id]
+                );
+                total      = rDen.total || 0;
+                sugestoes  = 0;
+                denuncias  = rDen.total || 0;
+                abertas    = rDen.abertas || 0;
+                em_analise = rDen.em_analise || 0;
+                arquivadas = rDen.arquivadas || 0;
+                fechadas   = rDen.fechadas || 0;
+            }
 
             return res.status(200).json({
                 message:  `Estatísticas de sugestões/denúncias — últimos ${dias} dias.`,
                 periodo:  { dias, desde: inicio },
                 esc_id:   per_tipo === 1 ? per_escola_id : null,
-                por_tipo:   { sugestoes: rows[0].sugestoes, denuncias: rows[0].denuncias },
-                por_status: { abertas: rows[0].abertas, em_analise: rows[0].em_analise, arquivadas: rows[0].arquivadas, fechadas: rows[0].fechadas },
-                total:    rows[0].total
+                por_tipo:   { sugestoes, denuncias },
+                por_status: { abertas, em_analise, arquivadas, fechadas },
+                total
             });
 
         } catch (error) {
@@ -1659,12 +1713,21 @@ class AdminController {
                    INNER JOIN CURSOS co ON cu2.cur_id = co.cur_id
                    WHERE co.esc_id = ${esc_id}`
                 : '';
-            const whereSug  = esc_id
-                ? `INNER JOIN USUARIOS us ON s.usu_id = us.usu_id
-                   INNER JOIN CURSOS_USUARIOS cu3 ON us.usu_id = cu3.usu_id
-                   INNER JOIN CURSOS co2 ON cu3.cur_id = co2.cur_id
-                   WHERE co2.esc_id = ${esc_id} AND s.sug_deletado_em IS NULL AND s.sug_status IN (1, 3)`
-                : 'WHERE s.sug_deletado_em IS NULL AND s.sug_status IN (1, 3)';
+            const sugQuery = esc_id
+                ? `SELECT COUNT(DISTINCT d.den_id) AS total
+                   FROM DENUNCIAS d
+                   LEFT JOIN CARONAS car          ON d.car_id         = car.car_id
+                   LEFT JOIN CURSOS_USUARIOS cu_c ON car.cur_usu_id   = cu_c.cur_usu_id
+                   LEFT JOIN CURSOS c_c           ON cu_c.cur_id      = c_c.cur_id
+                   LEFT JOIN CURSOS_USUARIOS cu_u ON d.den_usu_alvo   = cu_u.usu_id
+                   LEFT JOIN CURSOS c_u           ON cu_u.cur_id      = c_u.cur_id
+                   WHERE d.den_deletado_em IS NULL AND d.den_status IN (1, 3)
+                     AND (c_c.esc_id = ${esc_id} OR c_u.esc_id = ${esc_id})`
+                : `SELECT COUNT(*) AS total FROM (
+                       SELECT sug_id FROM SUGESTOES WHERE sug_deletado_em IS NULL AND sug_status IN (1, 3)
+                       UNION ALL
+                       SELECT den_id FROM DENUNCIAS WHERE den_deletado_em IS NULL AND den_status IN (1, 3)
+                   ) combined`;
             const whereDoc  = esc_id
                 ? `INNER JOIN USUARIOS ud ON d.usu_id = ud.usu_id
                    INNER JOIN CURSOS_USUARIOS cu4 ON ud.usu_id = cu4.usu_id
@@ -1697,9 +1760,7 @@ class AdminController {
                             SUM(cr.car_status = 0) AS canceladas
                      FROM CARONAS cr ${whereCarV}`
                 ),
-                db.query(
-                    `SELECT COUNT(DISTINCT s.sug_id) AS total FROM SUGESTAO_DENUNCIA s ${whereSug}`
-                ),
+                db.query(sugQuery),
                 db.query(
                     `SELECT COUNT(DISTINCT d.doc_id) AS total FROM DOCUMENTOS_VERIFICACAO d ${whereDoc}`
                 ),

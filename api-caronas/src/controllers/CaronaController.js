@@ -37,43 +37,69 @@ const LIMITE_MAX_PAGINACAO = 100;
 const RAIO_MAX_KM          = 25;  // raio máximo permitido no filtro de proximidade
 
 /**
- * Valida data e hora da carona combinados no fuso local do servidor.
+ * Valida data e hora da carona no fuso local do servidor.
  * Retorna { ok: true } ou { ok: false, error: '...' }.
  *
- * Formatos aceitos:
- *   car_data:      'YYYY-MM-DD' ou 'YYYY-MM-DD HH:MM:SS' (extrai só a data)
- *   car_hor_saida: 'HH:MM' ou 'HH:MM:SS' (extrai HH:MM)
- *
- * Regras:
- *   - A data extraída deve ser uma data real
- *   - O datetime combinado não pode ser no passado (referência: horário local do servidor)
+ * Regras  [v22]:
+ *   - car_data deve ser o dia corrente (YYYY-MM-DD = hoje) — sem agendamento futuro
+ *   - car_hor_saida deve ser HH:MM ou HH:MM:SS
+ *   - O datetime combinado não pode estar no passado
  */
 function validarDatetimeCarona(car_data, car_hor_saida) {
     if (!car_data) {
         return { ok: false, error: 'car_data é obrigatório.' };
     }
-    // Aceita 'YYYY-MM-DD' ou 'YYYY-MM-DD HH:MM:SS' — extrai apenas a parte da data
     const dataStr = String(car_data).substring(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
         return { ok: false, error: 'car_data deve estar no formato YYYY-MM-DD.' };
     }
 
+    // Exige data de hoje — sem agendamento futuro  [v22]
+    const hoje = new Date().toISOString().substring(0, 10);
+    if (dataStr !== hoje) {
+        return { ok: false, error: 'Caronas só podem ser criadas para o dia atual.' };
+    }
+
     if (!car_hor_saida || !HORA_REGEX.test(String(car_hor_saida))) {
         return { ok: false, error: 'car_hor_saida deve estar no formato HH:MM ou HH:MM:SS.' };
     }
-    // Extrai apenas HH:MM para montar o datetime UTC
     const horaStr = String(car_hor_saida).substring(0, 5);
 
-    // Monta datetime no fuso local do servidor (sem sufixo Z para evitar interpretação UTC)
-    // A API espera data/hora no horário local do servidor (ex: Brasília UTC-3)
     const dtLocal = new Date(`${dataStr}T${horaStr}:00`);
     if (isNaN(dtLocal.getTime())) {
         return { ok: false, error: 'Data/hora inválida.' };
     }
     if (dtLocal <= new Date()) {
-        return { ok: false, error: 'A data e hora da carona não podem ser no passado.' };
+        return { ok: false, error: 'A hora da carona não pode ser no passado.' };
     }
     return { ok: true };
+}
+
+/**
+ * Busca as coordenadas da escola do motorista.
+ * Tenta via CURSOS_USUARIOS → CURSOS → ESCOLAS.
+ * Fallback para cadastros temporários: email domain → ESCOLAS.esc_dominio.
+ * Retorna { esc_lat, esc_lon } ou null se a escola não tiver coordenadas.
+ */
+async function buscarEscolaDoMotorista(usu_id, email) {
+    const [rows] = await db.query(
+        `SELECT e.esc_lat, e.esc_lon
+         FROM CURSOS_USUARIOS cu
+         INNER JOIN CURSOS c  ON cu.cur_id = c.cur_id
+         INNER JOIN ESCOLAS e ON c.esc_id  = e.esc_id
+         WHERE cu.usu_id = ? AND e.esc_lat IS NOT NULL
+         LIMIT 1`,
+        [usu_id]
+    );
+    if (rows.length) return rows[0];
+
+    const domain = (email || '').split('@')[1];
+    if (!domain) return null;
+    const [rows2] = await db.query(
+        'SELECT esc_lat, esc_lon FROM ESCOLAS WHERE esc_dominio = ? AND esc_lat IS NOT NULL LIMIT 1',
+        [domain]
+    );
+    return rows2[0] || null;
 }
 
 class CaronaController {
@@ -604,6 +630,19 @@ class CaronaController {
                 });
             }
 
+            // REGRA ESCOLA: origem OU destino deve estar a ≤ 500 m da escola do motorista  [v22]
+            const escola = await buscarEscolaDoMotorista(usu_id, req.user.email);
+            if (escola) {
+                const RAIO_ESCOLA_KM = 0.5;
+                const distOrigem  = calcularDistanciaKm(origemPreparada.lat,  origemPreparada.lon,  escola.esc_lat, escola.esc_lon);
+                const distDestino = calcularDistanciaKm(destinoPreparado.lat, destinoPreparado.lon, escola.esc_lat, escola.esc_lon);
+                if (distOrigem > RAIO_ESCOLA_KM && distDestino > RAIO_ESCOLA_KM) {
+                    return res.status(422).json({
+                        error: 'A origem ou o destino da carona deve estar a no máximo 500 m da sua escola.'
+                    });
+                }
+            }
+
             // Transação atômica: CARONA + 2 PONTO_ENCONTROS [v17 — ENR-05]
             conn = await db.getConnection();
             await conn.beginTransaction();
@@ -713,8 +752,8 @@ class CaronaController {
                 return res.status(409).json({ error: "Não é possível editar uma carona já finalizada." });
             }
 
-            // Revalida datetime futuro quando car_data ou car_hor_saida são atualizados
-            // Usa o valor atual do banco para o campo que não foi enviado
+            // Revalida datetime quando car_data ou car_hor_saida são atualizados  [v22]
+            // car_data só pode ser hoje (sem agendamento futuro)
             if (car_data || car_hor_saida) {
                 const dataFinal = car_data || String(dono[0].data_atual).substring(0, 10);
                 const horaFinal = car_hor_saida || String(dono[0].hora_atual).substring(0, 5);

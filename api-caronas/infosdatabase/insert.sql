@@ -34,9 +34,11 @@
     -- MENSAGENS:        men_status      (0=Não enviada, 1=Enviada, 2=Não lida, 3=Lida)
     -- SOLICITACOES:     sol_status      (0=Cancelado, 1=Enviado, 2=Aceito, 3=Negado)
     -- CARONA_PESSOAS:   car_pes_status  (0=Cancelado, 1=Aceito, 2=Negado)
-    -- SUGESTAO:         sug_status      (0=Fechado, 1=Aberto, 3=Em análise)
-    --                   sug_tipo        (0=Denúncia, 1=Sugestão)
+    -- SUGESTOES:        sug_status      (0=Fechado, 1=Aberto, 3=Em análise, 2=Arquivado)
     --                   sug_deletado_em (DATETIME NULL — soft delete; NULL=ativo)
+    -- DENUNCIAS:        den_tipo        (0=Denúncia de carona, 1=Denúncia de usuário)
+    --                   den_status      (0=Fechado, 1=Aberto, 3=Em análise, 2=Arquivado)
+    --                   den_deletado_em (DATETIME NULL — soft delete; NULL=ativo)
     -- =====================================================
 
 
@@ -129,11 +131,12 @@
     --   Escola 2 (Saber):  contrato de 1 ano  iniciado em 2026-01-01, expira 2027-01-01
     --   Escola 3 (Oeste):  sem contrato cadastrado (NULL)
     --   Escola 4 (ETEC):   contrato de 5 anos iniciado em 2025-01-01, expira 2030-01-01
-    INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon, esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira) VALUES
-        ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',           'inova.edu.br',         100, -23.5614, -46.6560, '2anos', '2026-01-01', '2028-01-01'),  -- esc_id=1
-        ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP',          'saber.edu.br',         50,  -22.9056, -47.0608, '1ano',  '2026-01-01', '2027-01-01'),  -- esc_id=2
-        ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',          NULL,                   NULL,-21.2091, -50.4294, NULL,    NULL,         NULL),           -- esc_id=3: sem contrato
-        ('ETEC Centro Paula Souza',        'Rua dos Andradas, 140, Santa Efigênia, São Paulo - SP', 'aluno.cps.sp.gov.br', 500, -23.5417, -46.6395, '5anos', '2025-01-01', '2030-01-01');  -- esc_id=4: ETEC CPS
+    -- esc_contrato_arquivo / esc_ocr_base: NULL no seed — arquivos gerenciados por Dev em produção  [v23]
+    INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon, esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira, esc_contrato_arquivo, esc_ocr_base) VALUES
+        ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',           'inova.edu.br',         100, -23.5614, -46.6560, '2anos', '2026-01-01', '2028-01-01', NULL, NULL),  -- esc_id=1
+        ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP',          'saber.edu.br',         50,  -22.9056, -47.0608, '1ano',  '2026-01-01', '2027-01-01', NULL, NULL),  -- esc_id=2
+        ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',          NULL,                   NULL,-21.2091, -50.4294, NULL,    NULL,         NULL,          NULL, NULL),  -- esc_id=3: sem contrato
+        ('ETEC Centro Paula Souza',        'Rua dos Andradas, 140, Santa Efigênia, São Paulo - SP', 'aluno.cps.sp.gov.br', 500, -23.5417, -46.6395, '5anos', '2025-01-01', '2030-01-01', NULL, NULL);  -- esc_id=4: ETEC CPS
 
 
     -- =====================================================
@@ -358,13 +361,14 @@
     --   - car_id=5: Finalizada — testa histórico de caronas realizadas (status=3 não bloqueia REGRA 2)
     --   - car_id=6: Cancelada  — testa histórico de caronas canceladas  (status=0 não bloqueia REGRA 2)
     -- =====================================================
+    -- car_data = CURDATE(): caronas sem agendamento futuro — apenas o dia atual  [v23]
     INSERT INTO CARONAS (vei_id, cur_usu_id, car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status) VALUES
-        (1, 1, 'Ida p/ faculdade - Saio do centro, passo na Consolação', DATE_ADD(NOW(), INTERVAL 1 DAY), '07:30:00', 3, 1),  -- car_id=1: Aberta  (Carlos, usu_id=1)
-        (1, 1, 'Ida p/ faculdade - Saio do centro',                      DATE_ADD(NOW(), INTERVAL 1 DAY), '07:30:00', 0, 2),  -- car_id=2: Em espera (Carlos, usu_id=1)
-        (3, 3, 'Volta p/ Vila Nova - só 1 passageiro na moto',           DATE_ADD(NOW(), INTERVAL 1 DAY), '18:00:00', 1, 1),  -- car_id=3: Aberta  (Pedro, usu_id=3)
-        (4, 5, 'Ida p/ faculdade - Saio de Pinheiros',                   DATE_ADD(NOW(), INTERVAL 1 DAY), '07:45:00', 2, 1),  -- car_id=4: Aberta  (Lucas, usu_id=5)
-        (1, 1, 'Ida p/ faculdade - Carona da semana passada',            DATE_SUB(NOW(), INTERVAL 7 DAY), '07:30:00', 0, 3),  -- car_id=5: Finalizada
-        (1, 1, 'Ida p/ faculdade - Cancelei por imprevisto',             DATE_ADD(NOW(), INTERVAL 2 DAY), '07:30:00', 3, 0);  -- car_id=6: Cancelada
+        (1, 1, 'Ida p/ faculdade - Saio do centro, passo na Consolação', CURDATE(), '07:30:00', 3, 1),  -- car_id=1: Aberta  (Carlos, usu_id=1)
+        (1, 1, 'Ida p/ faculdade - Saio do centro',                      CURDATE(), '07:30:00', 0, 2),  -- car_id=2: Em espera (Carlos, usu_id=1)
+        (3, 3, 'Volta p/ Vila Nova - só 1 passageiro na moto',           CURDATE(), '18:00:00', 1, 1),  -- car_id=3: Aberta  (Pedro, usu_id=3)
+        (4, 5, 'Ida p/ faculdade - Saio de Pinheiros',                   CURDATE(), '07:45:00', 2, 1),  -- car_id=4: Aberta  (Lucas, usu_id=5)
+        (1, 1, 'Ida p/ faculdade - Carona da semana passada',            DATE_SUB(CURDATE(), INTERVAL 7 DAY), '07:30:00', 0, 3),  -- car_id=5: Finalizada
+        (1, 1, 'Ida p/ faculdade - Cancelei por imprevisto',             DATE_SUB(CURDATE(), INTERVAL 1 DAY), '07:30:00', 3, 0);  -- car_id=6: Cancelada (ontem — passada)
 
 
     -- =====================================================
@@ -494,40 +498,53 @@
 
 
     -- =====================================================
-    -- 13. SUGESTAO_DENUNCIA
+    -- 13. SUGESTOES
     -- =====================================================
     -- Para que serve no Back-end:
-    --   - Painel de moderação no sistema web (listar, responder, fechar)
-    --   - Separação entre sugestão de melhoria (sug_tipo=1) e denúncia (sug_tipo=0)
+    --   - Canal exclusivo Dev (per_tipo=2) — admins podem criar, devs gerenciam
     --   - Controle do status de atendimento (aberto → em análise → fechado)
-    --   - Notificação ao usuário quando sua solicitação for respondida
+    --   - Notificação ao usuário quando sua sugestão for respondida
     --
     -- Cenários de teste cobertos:
-    --   - Sugestão respondida e fechada (Admin responde): fluxo completo
-    --   - Denúncia em análise sem resposta: testa moderação pendente
+    --   - Sugestão respondida e fechada (Dev responde): fluxo completo
     --   - Sugestão aberta sem resposta: testa fila de atendimento
-    --   - Denúncia respondida e fechada: testa resolução de denúncia grave
     -- =====================================================
-    INSERT INTO SUGESTAO_DENUNCIA (usu_id, sug_texto, sug_data, sug_status, sug_tipo, sug_id_resposta, sug_resposta) VALUES
-        -- Sugestão da Mariana — respondida e fechada pelo Admin (usu_id=6)
+    INSERT INTO SUGESTOES (usu_id, sug_texto, sug_data, sug_status, sug_id_resposta, sug_resposta) VALUES
+        -- Sugestão da Mariana — respondida e fechada pelo Dev (usu_id=6)
         (2, 'Seria ótimo ter um filtro de caronas por horário de saída mais específico.',
-            NOW(), 0, 1, 6, 'Obrigado pela sugestão! Já está no nosso backlog para a próxima sprint.'),
-
-        -- Denúncia do Lucas — em análise, sem resposta ainda
-        (5, 'O usuário Carlos Silva cancelou a carona em cima da hora sem nenhum aviso.',
-            NOW(), 3, 0, NULL, NULL),
+            NOW(), 0, 6, 'Obrigado pela sugestão! Já está no nosso backlog para a próxima sprint.'),
 
         -- Sugestão do Carlos — aberta, aguardando análise
         (1, 'Poderia ter uma opção de carona recorrente para quem vai ao mesmo lugar todo dia.',
-            NOW(), 1, 1, NULL, NULL),
-
-        -- Denúncia do Pedro — respondida e fechada pelo Admin
-        (3, 'Encontrei um usuário com comprovante de matrícula claramente falsificado.',
-            DATE_SUB(NOW(), INTERVAL 5 DAY), 0, 0, 6, 'Denúncia verificada e confirmada. O usuário foi suspenso. Obrigado pelo aviso.');
+            NOW(), 1, NULL, NULL);
 
 
     -- =====================================================
-    -- 14. DOCUMENTOS_VERIFICACAO  [v6 + v7]
+    -- 14. DENUNCIAS
+    -- =====================================================
+    -- Para que serve no Back-end:
+    --   - Painel de moderação Admin (escopo escola) e Dev (global)
+    --   - den_tipo=0: denúncia de carona (car_id NOT NULL, den_usu_alvo NULL)
+    --   - den_tipo=1: denúncia de usuário (den_usu_alvo NOT NULL, car_id NULL)
+    --   - Controle do status de atendimento (aberto → em análise → fechado)
+    --   - Notificação ao usuário quando sua denúncia for respondida
+    --
+    -- Cenários de teste cobertos:
+    --   - Denúncia de carona em análise: testa moderação de carona suspeita
+    --   - Denúncia de usuário respondida e fechada: testa resolução de denúncia grave
+    -- =====================================================
+    INSERT INTO DENUNCIAS (usu_id, den_tipo, car_id, den_usu_alvo, den_motivo, den_texto, den_data, den_status, den_id_resposta, den_resposta) VALUES
+        -- Lucas denuncia a Carona 1 do Carlos — em análise, sem resposta ainda (den_tipo=0)
+        (5, 0, 1, NULL, 'Comportamento inadequado', 'O motorista não apareceu no ponto de encontro combinado e não respondeu as mensagens.',
+            NOW(), 3, NULL, NULL),
+
+        -- Pedro denuncia o usuário Carlos — respondida e fechada pelo Admin (den_tipo=1)
+        (3, 1, NULL, 1, 'Comprovante falsificado', 'Encontrei um usuário com comprovante de matrícula claramente falsificado.',
+            DATE_SUB(NOW(), INTERVAL 5 DAY), 0, 6, 'Denúncia verificada e confirmada. O usuário foi notificado. Obrigado pelo aviso.');
+
+
+    -- =====================================================
+    -- 15. DOCUMENTOS_VERIFICACAO  [v6 + v7]
     -- =====================================================
     -- Para que serve no Back-end:
     --   - Registro dos comprovantes de matrícula e CNH enviados pelos usuários
@@ -563,7 +580,7 @@
 
 
     -- =====================================================
-    -- 15. PENALIDADES  [v8]
+    -- 16. PENALIDADES  [v8]
     -- =====================================================
     -- Para que serve no Back-end:
     --   - Controle granular de punições por parte do administrador

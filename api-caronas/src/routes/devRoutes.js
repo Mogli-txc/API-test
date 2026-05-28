@@ -10,6 +10,10 @@ const router         = express.Router();
 const DevController  = require('../controllers/DevController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const checkRole      = require('../middlewares/roleMiddleware');
+const { uploadDocument, validarDocumento } = require('../middlewares/uploadHelper');
+
+const uploadContrato = uploadDocument('contratos');
+const uploadOcrBase  = uploadDocument('ocr-base');
 
 // Todos os endpoints dev exigem login + papel Desenvolvedor exclusivamente
 const devGuard = [authMiddleware, checkRole([2])];
@@ -128,6 +132,34 @@ router.get('/relatorios/penalidades', ...devGuard, DevController.relatorioPenali
  * Query: ?esc_id=, ?verificacao=, ?status=, ?page=, ?limit=, ?formato=csv
  */
 router.get('/relatorios/usuarios', ...devGuard, DevController.relatorioUsuarios);
+
+// ── Arquivos de Escola  [v23] ─────────────────────────────────────────────────
+
+/**
+ * POST /api/dev/escolas/:esc_id/contrato/arquivo
+ * Faz upload do PDF do contrato da escola.
+ * Form-data: campo 'contrato' com o arquivo PDF.
+ */
+router.post(
+    '/escolas/:esc_id/contrato/arquivo',
+    ...devGuard,
+    uploadContrato.single('contrato'),
+    validarDocumento,
+    DevController.uploadContratoEscola.bind(DevController)
+);
+
+/**
+ * POST /api/dev/escolas/:esc_id/ocr-base
+ * Faz upload do PDF de exemplo de matrícula para calibragem do OCR.
+ * Form-data: campo 'ocr_base' com o arquivo PDF.
+ */
+router.post(
+    '/escolas/:esc_id/ocr-base',
+    ...devGuard,
+    uploadOcrBase.single('ocr_base'),
+    validarDocumento,
+    DevController.uploadOcrBaseEscola.bind(DevController)
+);
 
 // ── CRUD de Cursos ────────────────────────────────────────────────────────────
 

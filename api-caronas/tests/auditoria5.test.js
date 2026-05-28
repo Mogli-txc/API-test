@@ -72,9 +72,7 @@ async function cadastrarCarro(token) {
 }
 
 async function criarCarona(token, vei_id, cur_usu_id) {
-    const amanha = new Date();
-    amanha.setDate(amanha.getDate() + 1);
-    const data = amanha.toISOString().slice(0, 10);
+    const data = new Date().toISOString().slice(0, 10);
     const res = await request(app).post('/api/caronas/oferecer')
         .set('Authorization', `Bearer ${token}`)
         .send({ cur_usu_id, vei_id, car_desc: 'Carona teste a5', car_data: data, car_hor_saida: '08:00', car_vagas_dispo: 4 });

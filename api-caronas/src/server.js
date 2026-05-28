@@ -37,9 +37,10 @@ const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { Server: SocketIOServer } = require('socket.io');
 
-const { registrarMensagensSocket } = require('./sockets/mensagensSocket');
-const { setIo }                    = require('./sockets/io');
+const { registrarMensagensSocket }    = require('./sockets/mensagensSocket');
+const { setIo }                       = require('./sockets/io');
 const { registrarNotificacoesSocket } = require('./sockets/notificacoesSocket');
+const { iniciarAutoCloseCaronas }     = require('./jobs/autoCloseCaronas');
 const db = require('./config/database'); // Pool MySQL — usado no health check
 
 // Importação das rotas
@@ -51,7 +52,8 @@ const pontoEncontroRoutes = require('./routes/pontoEncontroRoutes');
 const mensagensRoutes    = require('./routes/mensagensRoutes');
 const solicitacaoRoutes  = require('./routes/solicitacaoRoutes');
 const caronaPessoasRoutes = require('./routes/caronaPessoasRoutes'); // Passageiros confirmados na carona
-const sugestaoRoutes     = require('./routes/sugestaoRoutes');       // Sugestões e denúncias
+const sugestaoRoutes     = require('./routes/sugestaoRoutes');       // Sugestões (canal para Dev)
+const denunciaRoutes     = require('./routes/denunciaRoutes');       // Denúncias de caronas e usuários
 const matriculaRoutes    = require('./routes/matriculaRoutes');      // Matrículas em cursos
 const adminRoutes        = require('./routes/adminRoutes');           // Gestão Admin+Dev compartilhada
 const devRoutes          = require('./routes/devRoutes');             // Operações exclusivas de Desenvolvedor
@@ -300,11 +302,18 @@ app.use('/api/solicitacoes', solicitacaoRoutes);
 app.use('/api/passageiros', caronaPessoasRoutes);
 
 /**
- * Rotas de Sugestões e Denúncias: Feedback dos usuários
+ * Rotas de Sugestões: Canal de feedback dos usuários para o Dev
  * Base URL: /api/sugestoes
- * Tabela: SUGESTAO_DENUNCIA
+ * Tabela: SUGESTOES
  */
 app.use('/api/sugestoes', sugestaoRoutes);
+
+/**
+ * Rotas de Denúncias: Denúncias de caronas e usuários
+ * Base URL: /api/denuncias
+ * Tabela: DENUNCIAS — Admin vê escopo escola, Dev vê tudo
+ */
+app.use('/api/denuncias', denunciaRoutes);
 
 /**
  * Rotas de Matrículas: Inscrição de usuários em cursos
@@ -388,6 +397,8 @@ const httpServer = http.createServer(app);
 //   - Em teste, supertest cria seu próprio servidor efêmero a partir do app Express
 //   - httpServer.listen() em modo teste causaria EADDRINUSE entre suites paralelas
 //   - Socket.io manteria o event loop vivo, impedindo o Jest de encerrar limpo
+iniciarAutoCloseCaronas();
+
 if (process.env.NODE_ENV !== 'test') {
     const io = new SocketIOServer(httpServer, {
         cors: {

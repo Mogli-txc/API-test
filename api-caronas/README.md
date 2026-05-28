@@ -22,6 +22,7 @@ API REST para sistema de compartilhamento de caronas entre alunos de instituiç�
 | pdf-to-img          | Renderização de página PDF como PNG para o Tesseract         |
 | socket.io           | WebSocket para mensagens em tempo real                       |
 | nodemailer          | Envio de e-mail (OTP, reset de senha)                        |
+| node-cron           | Agendamento de tarefas (fechamento automático de caronas às 00:00) |
 | jest + supertest    | Testes (19 suites, 505 testes — 2026-05-07 v17)              |
 | fetch (Node nativo) | Requisições HTTP ao Nominatim (geocodificação OpenStreetMap) |
 
@@ -283,18 +284,37 @@ socket.on('nao_lidas', ({ total }) => atualizarBadge(total));
 | PUT    | `/:pon_id`        | JWT  | Atualiza nome/ordem do ponto (apenas o motorista)                      |
 | DELETE | `/:pon_id`        | JWT  | Desativa ponto (`pon_status = 0`) — apenas o motorista                 |
 
-### Sugestões e Denúncias — `/api/sugestoes`
+### Sugestões — `/api/sugestoes`
 
-| Método | Rota                 | Auth      | Descrição                                                              |
-|--------|----------------------|-----------|------------------------------------------------------------------------|
-| POST   | `/`                     | JWT       | Registra sugestão ou denúncia                                          |
-| GET    | `/minhas`               | JWT       | Lista submissões do próprio usuário (`?tipo=0/1`, `?page=`, `?limit=`) |
-| GET    | `/`                     | ADMIN/DEV | Lista todos (Admin: escola; Dev: todos)                                |
-| GET    | `/:sug_id`              | JWT       | Detalhes de um registro                                                |
-| PUT    | `/:sug_id/analisar`     | ADMIN/DEV | Muda status para Em análise (`sug_status = 3`)                         |
-| PUT    | `/:sug_id/responder`    | ADMIN/DEV | Responde e fecha o registro (`sug_status = 0`)                         |
-| POST   | `/:sug_id/arquivar`     | ADMIN/DEV | Arquiva sem resposta formal (`sug_status = 2`)                         |
-| DELETE | `/:sug_id`              | DEV       | Remove permanentemente                                                 |
+Qualquer usuário pode criar. Apenas **Dev** lista e gerencia.
+
+| Método | Rota                     | Auth  | Descrição                                               |
+|--------|--------------------------|-------|---------------------------------------------------------|
+| POST   | `/`                      | JWT   | Registra sugestão (campo: `sug_texto`)                  |
+| GET    | `/minhas`                | JWT   | Lista sugestões do próprio usuário (`?page=`, `?limit=`) |
+| GET    | `/`                      | DEV   | Lista todas as sugestões                                |
+| GET    | `/:sug_id`               | JWT   | Detalhes (dono ou Dev)                                  |
+| PUT    | `/:sug_id/analisar`      | DEV   | Muda status para Em análise (`sug_status = 3`)          |
+| PUT    | `/:sug_id/responder`     | DEV   | Responde e fecha (`sug_status = 0`)                     |
+| POST   | `/:sug_id/arquivar`      | DEV   | Arquiva sem resposta (`sug_status = 2`)                 |
+| DELETE | `/:sug_id`               | DEV   | Remove permanentemente                                  |
+
+Fluxo de status: `1=Aberto` → `3=Em análise` → `2=Arquivado` | `0=Fechado`.
+
+### Denúncias — `/api/denuncias`
+
+Qualquer usuário pode criar. **Admin** gerencia denúncias da sua escola; **Dev** gerencia tudo.
+
+| Método | Rota                     | Auth      | Descrição                                                                        |
+|--------|--------------------------|-----------|----------------------------------------------------------------------------------|
+| POST   | `/`                      | JWT       | Registra denúncia (`den_tipo`: 0=carona, 1=usuário; `den_texto`; FK alvo)        |
+| GET    | `/minhas`                | JWT       | Lista denúncias criadas pelo próprio usuário                                     |
+| GET    | `/`                      | ADMIN/DEV | Lista denúncias (Admin: escola; Dev: todas)                                      |
+| GET    | `/:den_id`               | JWT       | Detalhes (autor, Admin da escola, ou Dev)                                        |
+| PUT    | `/:den_id/analisar`      | ADMIN/DEV | Muda status para Em análise (`den_status = 3`)                                   |
+| PUT    | `/:den_id/responder`     | ADMIN/DEV | Responde e fecha (`den_status = 0`)                                              |
+| POST   | `/:den_id/arquivar`      | ADMIN/DEV | Arquiva sem resposta (`den_status = 2`)                                          |
+| DELETE | `/:den_id`               | DEV       | Remove permanentemente                                                           |
 
 Fluxo de status: `1=Aberto` → `3=Em análise` → `2=Arquivado` | `0=Fechado`.
 
@@ -338,11 +358,11 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). **Admin** tem escopo restrito à sua
 |--------|-------------------------|-----------|-----------------------------------------------------------------------|
 | GET    | `/stats/usuarios`       | Admin/Dev | Totais de usuários por status e verificação                           |
 | GET    | `/stats/caronas`        | Admin/Dev | Totais de caronas por status                                          |
-| GET    | `/stats/sugestoes`      | Admin/Dev | Totais de sugestões/denúncias por tipo e status                       |
+| GET    | `/stats/sugestoes`      | Admin/Dev | Totais de sugestões (Dev) e denúncias da escola (Admin) por status    |
 | GET    | `/stats/documentos`     | Admin/Dev | Totais de documentos por tipo e status OCR                            |
 | GET    | `/relatorios/atividade` | Admin/Dev | Relatório consolidado: caronas, usuários, avaliações no período       |
 | GET    | `/relatorios/caronas`   | Admin/Dev | Relatório de caronas por período (`?inicio=`, `?fim=`, `?formato=csv`) |
-| GET    | `/sugestoes/stats`      | Admin/Dev | Estatísticas detalhadas de sugestões/denúncias (`?dias=30`)           |
+| GET    | `/sugestoes/stats`      | Admin/Dev | Estatísticas detalhadas: sugestões (Dev) / denúncias da escola (Admin) (`?dias=30`) |
 
 #### Gestão de usuários
 
@@ -498,7 +518,8 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | `DOCUMENTOS_VERIFICACAO` | Comprovantes e CNH com resultado de OCR e dados extraídos          |
 | `PENALIDADES`            | Penalidades aplicadas por admins                                   |
 | `AUDIT_LOG`              | Rastreabilidade de ações sensíveis                                 |
-| `SUGESTAO_DENUNCIA`      | Feedback e denúncias dos usuários                                  |
+| `SUGESTOES`              | Sugestões de melhoria (gerenciado por Dev)                         |
+| `DENUNCIAS`              | Denúncias de caronas e usuários (gerenciado por Admin/Dev)         |
 | `NOTIFICACOES`           | Notificações persistidas (automáticas e manuais)                   |
 
 ### Audit Log — Códigos de ação registrados
@@ -532,6 +553,8 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v19    | Papéis Admin/Dev separados em interface web: 7 novos endpoints (`/dashboard`, `/caronas`, `/contrato`, `/notificacoes/escola`, `/dev/escolas`, `/dev/relatorios/penalidades`, `/dev/relatorios/usuarios`) |
 | v20    | Correção de gap de regra de negócio: `oferecer` bloqueia criação de carona se usuário tem solicitação pendente/aceita; `responderSolicitacao` bloqueia aceite se passageiro tem carona ativa como motorista |
 | v21    | `men_criado_em` + `men_atualizado_em` em MENSAGENS (padrão masculino consistente com schema); bloqueio de chat em carona encerrada/cancelada (REST + WebSocket); `listarConversa` retorna campos completos |
+| v22    | `SUGESTAO_DENUNCIA` separada em `SUGESTOES` (Dev-only) + `DENUNCIAS` (Admin escola-scoped + Dev); `/api/denuncias` com RBAC por FK chain; `car_data` restrito a hoje; auto-close de caronas às 00:00 via node-cron |
+| v23    | Restrição geográfica: origem ou destino da carona deve estar a ≤ 500 m da escola do motorista (Haversine); endpoints Dev para upload de contrato e template OCR por escola (`esc_contrato_arquivo`, `esc_ocr_base`) |
 
 ---
 

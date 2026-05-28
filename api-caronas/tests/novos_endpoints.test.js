@@ -121,9 +121,7 @@ async function criarCenariaMotoristaComPonto() {
     await db.end();
 
     // Cria carona via API
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const car_data   = tomorrow.toISOString().slice(0, 10);
+    const car_data = new Date().toISOString().slice(0, 10);
     const caronaRes  = await request(app)
         .post('/api/caronas/oferecer')
         .set('Authorization', `Bearer ${devToken}`)
@@ -194,13 +192,13 @@ describe('Grupo 2 — GET /api/sugestoes/minhas', () => {
         const res1 = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Minha sugestão de teste novos endpoints', sug_tipo: 1 });
+            .send({ sug_texto: 'Minha sugestão de teste novos endpoints' });
         sug_id_sugestao = res1.body?.sugestao?.sug_id;
 
         const res2 = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Minha denúncia de teste novos endpoints', sug_tipo: 0 });
+            .send({ sug_texto: 'Segunda sugestão de teste novos endpoints' });
         sug_id_denuncia = res2.body?.sugestao?.sug_id;
     });
 
@@ -214,27 +212,28 @@ describe('Grupo 2 — GET /api/sugestoes/minhas', () => {
         expect(res.body.sugestoes.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('2.2 — ?tipo=1 deve retornar apenas sugestões', async () => {
+    it('2.2 — resultado contém as sugestões criadas pelo usuário', async () => {
         const res = await request(app)
-            .get('/api/sugestoes/minhas?tipo=1')
+            .get('/api/sugestoes/minhas')
             .set('Authorization', `Bearer ${usuario.token}`);
         expect(res.status).toBe(200);
-        expect(res.body.sugestoes.every(s => s.sug_tipo === 1)).toBe(true);
+        const ids = res.body.sugestoes.map(s => s.sug_id);
+        expect(ids).toContain(sug_id_sugestao);
     });
 
-    it('2.3 — ?tipo=0 deve retornar apenas denúncias', async () => {
+    it('2.3 — sugestões retornadas têm campo sug_status', async () => {
         const res = await request(app)
-            .get('/api/sugestoes/minhas?tipo=0')
+            .get('/api/sugestoes/minhas')
             .set('Authorization', `Bearer ${usuario.token}`);
         expect(res.status).toBe(200);
-        expect(res.body.sugestoes.every(s => s.sug_tipo === 0)).toBe(true);
+        expect(res.body.sugestoes.every(s => s.sug_status !== undefined)).toBe(true);
     });
 
-    it('2.4 — ?tipo=99 inválido deve retornar 400', async () => {
+    it('2.4 — ?page=abc deve ignorar valor inválido e retornar 200', async () => {
         const res = await request(app)
-            .get('/api/sugestoes/minhas?tipo=99')
+            .get('/api/sugestoes/minhas?page=abc')
             .set('Authorization', `Bearer ${usuario.token}`);
-        expect(res.status).toBe(400);
+        expect(res.status).toBe(200);
     });
 
     it('2.5 — sem token deve retornar 401', async () => {
@@ -267,7 +266,7 @@ describe('Grupo 3 — PUT /api/sugestoes/:sug_id/analisar', () => {
         const res = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Sugestão para teste de análise', sug_tipo: 1 });
+            .send({ sug_texto: 'Sugestão para teste de análise' });
         sug_id = res.body?.sugestao?.sug_id;
     });
 
@@ -290,7 +289,7 @@ describe('Grupo 3 — PUT /api/sugestoes/:sug_id/analisar', () => {
         const res2 = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Outra sugestão para teste', sug_tipo: 1 });
+            .send({ sug_texto: 'Outra sugestão para teste' });
         const novoId = res2.body?.sugestao?.sug_id;
 
         const res = await request(app)
@@ -347,8 +346,6 @@ describe('Grupo 4 — DELETE /api/pontos/:pon_id', () => {
 
     it('4.3 — Outro usuário tenta desativar ponto alheio → 403', async () => {
         // Cria um novo ponto para testar
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 2);
         const caronaRes2 = await request(app)
             .post('/api/caronas/oferecer')
             .set('Authorization', `Bearer ${cenario.devToken}`)
@@ -356,7 +353,7 @@ describe('Grupo 4 — DELETE /api/pontos/:pon_id', () => {
                 cur_usu_id: cenario.caronaId,
                 vei_id: 1,
                 car_desc: 'Carona 2 NVE',
-                car_data: tomorrow.toISOString().slice(0, 10),
+                car_data: new Date().toISOString().slice(0, 10),
                 car_hor_saida: '09:00',
                 car_vagas_dispo: 2,
                 origem: { pon_nome: 'Origem 2 NVE', pon_endereco: 'Rua Teste 2, 100, São Paulo' },

@@ -191,7 +191,7 @@ describe('Usuário 1 — Motorista', () => {
                 cur_usu_id:      cur_usu_id1,
                 vei_id:          vei_id1,
                 car_desc:        'Carona simulada — saída do centro',
-                car_data:        '2026-06-15 08:00:00',
+                car_data:        new Date().toISOString().slice(0, 10),
                 car_hor_saida:   '08:00:00',
                 car_vagas_dispo: 2,
                 origem: { pon_nome: 'Origem Simulação', pon_endereco: 'Rua Centro, 100, São Paulo' },

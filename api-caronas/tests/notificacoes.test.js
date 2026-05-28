@@ -327,10 +327,9 @@ describe('Grupo 7 — Notificação automática: nova solicitação', () => {
         if (!vei_id) { await db.end(); return; }
 
         // Cria carona
-        const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
         const caronaRes = await request(app).post('/api/caronas/oferecer')
             .set('Authorization', `Bearer ${motorista.token}`)
-            .send({ cur_usu_id, vei_id, car_data: amanha.toISOString().slice(0, 10), car_hor_saida: '08:00', car_vagas_dispo: 4 });
+            .send({ cur_usu_id, vei_id, car_data: new Date().toISOString().slice(0, 10), car_hor_saida: '08:00', car_vagas_dispo: 4 });
 
         motorista.car_id = caronaRes.body?.carona?.car_id;
         await db.end();
@@ -395,10 +394,9 @@ describe('Grupo 8 — Notificação automática: resposta de solicitação', () 
             .send({ vei_placa: `N8${Date.now().toString().slice(-5)}`, vei_marca_modelo: 'Honda', vei_tipo: 1, vei_cor: 'Branco', vei_vagas: 4 });
         const vei_id = veiRes.body?.veiculo?.vei_id;
 
-        const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
         const caronaRes = await request(app).post('/api/caronas/oferecer')
             .set('Authorization', `Bearer ${motorista.token}`)
-            .send({ cur_usu_id, vei_id, car_data: amanha.toISOString().slice(0, 10), car_hor_saida: '09:00', car_vagas_dispo: 4 });
+            .send({ cur_usu_id, vei_id, car_data: new Date().toISOString().slice(0, 10), car_hor_saida: '09:00', car_vagas_dispo: 4 });
         const car_id = caronaRes.body?.carona?.car_id;
 
         await db.end();

@@ -25,9 +25,11 @@
 --                   men_deletado_em     (NULL=visível; datetime=soft-deletada)
 -- SOLICITACOES:     sol_status          (0=Cancelado, 1=Enviado, 2=Aceito, 3=Negado)
 -- CARONA_PESSOAS:   car_pes_status      (0=Cancelado, 1=Aceito, 2=Negado)
--- SUGESTAO:         sug_status          (0=Fechado, 1=Aberto, 3=Em análise)
---                   sug_tipo            (0=Denúncia, 1=Sugestão)
+-- SUGESTOES:        sug_status          (0=Fechado, 1=Aberto, 3=Em análise, 2=Arquivado)
 --                   sug_deletado_em     (NULL=ativo; datetime=soft-deletada)
+-- DENUNCIAS:        den_tipo            (0=Denúncia de carona, 1=Denúncia de usuário)
+--                   den_status          (0=Fechado, 1=Aberto, 3=Em análise, 2=Arquivado)
+--                   den_deletado_em     (NULL=ativo; datetime=soft-deletada)
 -- USUARIOS (novos): usu_otp_tentativas  (INT DEFAULT 0)
 --                   usu_otp_bloqueado_ate (DATETIME NULL — bloqueio após 3 falhas OTP)
 --                   usu_reset_hash      (VARCHAR(64) NULL — hash HMAC do token forgot-password)
@@ -472,7 +474,8 @@ INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
 INNER JOIN ESCOLAS         e   ON cur.esc_id   = e.esc_id
 ORDER BY c.car_data ASC;
 
--- [C] TESTE: Caronas ABERTAS e futuras (tela de busca do passageiro)
+-- [C] TESTE: Caronas ABERTAS de hoje (tela de busca do passageiro)  [v22]
+-- car_data = CURDATE() — não há agendamento futuro, apenas caronas do dia corrente
 SELECT
     c.car_id,
     u.usu_nome         AS motorista,
@@ -486,10 +489,10 @@ INNER JOIN VEICULOS        v  ON c.vei_id     = v.vei_id
 INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
 INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
 WHERE c.car_status = 1
-  AND c.car_data >= NOW()
-ORDER BY c.car_data ASC;
+  AND DATE(c.car_data) = CURDATE()
+ORDER BY c.car_hor_saida ASC;
 
--- [C] TESTE: Caronas disponíveis filtradas por escola do passageiro
+-- [C] TESTE: Caronas de hoje filtradas por escola do passageiro  [v22]
 SELECT
     c.car_id,
     u.usu_nome  AS motorista,
@@ -503,8 +506,8 @@ INNER JOIN USUARIOS        u   ON cu.usu_id    = u.usu_id
 INNER JOIN CURSOS          cur ON cu.cur_id    = cur.cur_id
 WHERE cur.esc_id = 1
   AND c.car_status = 1
-  AND c.car_data >= NOW()
-ORDER BY c.car_data ASC;
+  AND DATE(c.car_data) = CURDATE()
+ORDER BY c.car_hor_saida ASC;
 
 -- [C] TESTE: Minhas caronas como motorista (tela "Minhas Caronas")
 SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida, c.car_vagas_dispo, c.car_status
@@ -521,7 +524,7 @@ WHERE cu.usu_id = 1
   AND c.car_status IN (0, 3)
 ORDER BY c.car_data DESC;
 
--- [C] TESTE: Caronas com vagas disponíveis nas próximas 24 horas
+-- [C] TESTE: Caronas de hoje com vagas disponíveis (filtro principal da busca)  [v22]
 SELECT
     c.car_id, u.usu_nome AS motorista,
     c.car_desc, c.car_hor_saida, c.car_vagas_dispo
@@ -530,7 +533,7 @@ INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id
 INNER JOIN USUARIOS        u  ON cu.usu_id    = u.usu_id
 WHERE c.car_status = 1
   AND c.car_vagas_dispo > 0
-  AND c.car_data BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 24 HOUR)
+  AND DATE(c.car_data) = CURDATE()
 ORDER BY c.car_hor_saida ASC;
 
 
@@ -834,93 +837,185 @@ ORDER BY m.men_id ASC;
 
 
 -- =====================================================
--- 13. SUGESTAO_DENUNCIA
+-- 13. SUGESTOES
 -- =====================================================
 -- OBS: sug_deletado_em IS NULL filtra registros soft-deletados.
 --      Todas as consultas operacionais devem incluir esse filtro.
+-- Acesso: Dev gerencia, Admin pode criar (canal de feedback para Dev).
 
--- [A] Todas as sugestões e denúncias (incluindo soft-deletadas, para auditoria)
-SELECT * FROM SUGESTAO_DENUNCIA;
+-- [A] Todas as sugestões (incluindo soft-deletadas, para auditoria)
+SELECT * FROM SUGESTOES;
 
--- [A] Apenas registros ativos (excluindo soft-deletadas)
-SELECT * FROM SUGESTAO_DENUNCIA WHERE sug_deletado_em IS NULL;
+-- [A] Apenas sugestões ativas (excluindo soft-deletadas)
+SELECT * FROM SUGESTOES WHERE sug_deletado_em IS NULL;
 
--- [B] Sugestões/denúncias com autor, respondente e tipos legíveis
+-- [B] Sugestões com autor e respondente
 SELECT
-    sd.sug_id,
-    CASE sd.sug_tipo   WHEN 0 THEN 'Denúncia'   WHEN 1 THEN 'Sugestão'    END AS tipo,
+    s.sug_id,
     u_autor.usu_nome   AS enviado_por,
-    sd.sug_texto,
-    sd.sug_data,
-    CASE sd.sug_status WHEN 0 THEN 'Fechado'    WHEN 1 THEN 'Aberto'
-                       WHEN 3 THEN 'Em análise'                           END AS status,
-    sd.sug_resposta,
+    s.sug_texto,
+    s.sug_data,
+    CASE s.sug_status
+        WHEN 0 THEN 'Fechado'
+        WHEN 1 THEN 'Aberto'
+        WHEN 2 THEN 'Arquivado'
+        WHEN 3 THEN 'Em análise'
+    END AS status,
+    s.sug_resposta,
     u_resp.usu_nome    AS respondido_por
-FROM SUGESTAO_DENUNCIA sd
-INNER JOIN USUARIOS u_autor ON sd.usu_id          = u_autor.usu_id
-LEFT  JOIN USUARIOS u_resp  ON sd.sug_id_resposta = u_resp.usu_id
-ORDER BY sd.sug_data DESC;
+FROM SUGESTOES s
+INNER JOIN USUARIOS u_autor ON s.usu_id          = u_autor.usu_id
+LEFT  JOIN USUARIOS u_resp  ON s.sug_id_resposta = u_resp.usu_id
+ORDER BY s.sug_data DESC;
 
--- [C] TESTE: Fila de atendimento do admin (abertos + em análise)
+-- [C] TESTE: Fila de atendimento do Dev (abertas + em análise)
 SELECT
-    sd.sug_id,
-    CASE sd.sug_tipo WHEN 0 THEN 'Denúncia' WHEN 1 THEN 'Sugestão' END AS tipo,
+    s.sug_id,
     u.usu_nome AS enviado_por,
-    sd.sug_texto,
-    sd.sug_data
-FROM SUGESTAO_DENUNCIA sd
-INNER JOIN USUARIOS u ON sd.usu_id = u.usu_id
-WHERE sd.sug_status IN (1, 3)
-  AND sd.sug_deletado_em IS NULL
-ORDER BY sd.sug_data ASC;
+    s.sug_texto,
+    s.sug_data
+FROM SUGESTOES s
+INNER JOIN USUARIOS u ON s.usu_id = u.usu_id
+WHERE s.sug_status IN (1, 3)
+  AND s.sug_deletado_em IS NULL
+ORDER BY s.sug_data ASC;
 
--- [C] TESTE: Fila filtrada por escola — escopo do Administrador (per_tipo=1)
-SELECT DISTINCT sd.sug_id, sd.sug_tipo, sd.sug_texto, sd.sug_data, sd.sug_status
-FROM SUGESTAO_DENUNCIA sd
-INNER JOIN CURSOS_USUARIOS cu ON sd.usu_id = cu.usu_id
-INNER JOIN CURSOS          c  ON cu.cur_id = c.cur_id
-WHERE c.esc_id = 1  -- substituir pelo per_escola_id do admin logado
-  AND sd.sug_status IN (1, 3)
-  AND sd.sug_deletado_em IS NULL
-ORDER BY sd.sug_data ASC;
-
--- [C] TESTE: Apenas DENÚNCIAS pendentes (moderação prioritária)
+-- [C] TESTE: Histórico de sugestões de um usuário (tela "Minhas sugestões" no app)
 SELECT
-    sd.sug_id, u.usu_nome AS denunciante,
-    sd.sug_texto, sd.sug_data,
-    CASE sd.sug_status WHEN 1 THEN 'Aberto' WHEN 3 THEN 'Em análise' END AS status
-FROM SUGESTAO_DENUNCIA sd
-INNER JOIN USUARIOS u ON sd.usu_id = u.usu_id
-WHERE sd.sug_tipo = 0
-  AND sd.sug_status IN (1, 3)
-  AND sd.sug_deletado_em IS NULL
-ORDER BY sd.sug_data ASC;
-
--- [C] TESTE: Histórico de um usuário (tela "Minhas solicitações" no app)
-SELECT
-    sug_id,
-    CASE sug_tipo   WHEN 0 THEN 'Denúncia' WHEN 1 THEN 'Sugestão' END AS tipo,
-    sug_texto,
-    sug_data,
-    CASE sug_status WHEN 0 THEN 'Fechado' WHEN 1 THEN 'Aberto' WHEN 3 THEN 'Em análise' END AS status,
+    sug_id, sug_texto, sug_data,
+    CASE sug_status
+        WHEN 0 THEN 'Fechado'
+        WHEN 1 THEN 'Aberto'
+        WHEN 2 THEN 'Arquivado'
+        WHEN 3 THEN 'Em análise'
+    END AS status,
     sug_resposta
-FROM SUGESTAO_DENUNCIA
+FROM SUGESTOES
 WHERE usu_id = 2
   AND sug_deletado_em IS NULL
 ORDER BY sug_data DESC;
 
--- [C] TESTE: Resumo por status (card de contagem no painel admin)
+-- [C] TESTE: Resumo por status (card de contagem no painel Dev)
 SELECT
     CASE sug_status
         WHEN 0 THEN 'Fechado'
         WHEN 1 THEN 'Aberto'
+        WHEN 2 THEN 'Arquivado'
         WHEN 3 THEN 'Em análise'
     END AS status,
     COUNT(*) AS total
-FROM SUGESTAO_DENUNCIA
+FROM SUGESTOES
 WHERE sug_deletado_em IS NULL
 GROUP BY sug_status
 ORDER BY sug_status;
+
+
+-- =====================================================
+-- 14. DENUNCIAS
+-- =====================================================
+-- OBS: den_deletado_em IS NULL filtra registros soft-deletados.
+--      den_tipo=0 → denúncia de carona (car_id NOT NULL, den_usu_alvo NULL)
+--      den_tipo=1 → denúncia de usuário (den_usu_alvo NOT NULL, car_id NULL)
+-- Acesso: Admin vê denúncias da sua escola; Dev vê todas.
+
+-- [A] Todas as denúncias (incluindo soft-deletadas, para auditoria)
+SELECT * FROM DENUNCIAS;
+
+-- [A] Apenas denúncias ativas (excluindo soft-deletadas)
+SELECT * FROM DENUNCIAS WHERE den_deletado_em IS NULL;
+
+-- [B] Denúncias com denunciante, alvo e tipo legível
+SELECT
+    d.den_id,
+    CASE d.den_tipo WHEN 0 THEN 'Denúncia de Carona' WHEN 1 THEN 'Denúncia de Usuário' END AS tipo,
+    u_den.usu_nome   AS denunciante,
+    d.den_motivo,
+    d.den_texto,
+    d.den_data,
+    CASE d.den_status
+        WHEN 0 THEN 'Fechado'
+        WHEN 1 THEN 'Aberto'
+        WHEN 2 THEN 'Arquivado'
+        WHEN 3 THEN 'Em análise'
+    END AS status,
+    d.car_id         AS carona_alvo,
+    u_alvo.usu_nome  AS usuario_alvo,
+    d.den_resposta,
+    u_resp.usu_nome  AS respondido_por
+FROM DENUNCIAS d
+INNER JOIN USUARIOS u_den  ON d.usu_id          = u_den.usu_id
+LEFT  JOIN USUARIOS u_alvo ON d.den_usu_alvo    = u_alvo.usu_id
+LEFT  JOIN USUARIOS u_resp ON d.den_id_resposta = u_resp.usu_id
+ORDER BY d.den_data DESC;
+
+-- [C] TESTE: Fila de denúncias de carona pendentes (Admin + Dev)
+SELECT
+    d.den_id, u.usu_nome AS denunciante,
+    d.car_id, d.den_motivo, d.den_texto, d.den_data,
+    CASE d.den_status WHEN 1 THEN 'Aberto' WHEN 3 THEN 'Em análise' END AS status
+FROM DENUNCIAS d
+INNER JOIN USUARIOS u ON d.usu_id = u.usu_id
+WHERE d.den_tipo = 0
+  AND d.den_status IN (1, 3)
+  AND d.den_deletado_em IS NULL
+ORDER BY d.den_data ASC;
+
+-- [C] TESTE: Fila de denúncias de usuário pendentes (Admin + Dev)
+SELECT
+    d.den_id, u_den.usu_nome AS denunciante,
+    u_alvo.usu_nome AS usuario_alvo, d.den_motivo, d.den_texto, d.den_data,
+    CASE d.den_status WHEN 1 THEN 'Aberto' WHEN 3 THEN 'Em análise' END AS status
+FROM DENUNCIAS d
+INNER JOIN USUARIOS u_den  ON d.usu_id       = u_den.usu_id
+INNER JOIN USUARIOS u_alvo ON d.den_usu_alvo = u_alvo.usu_id
+WHERE d.den_tipo = 1
+  AND d.den_status IN (1, 3)
+  AND d.den_deletado_em IS NULL
+ORDER BY d.den_data ASC;
+
+-- [C] TESTE: Fila filtrada por escola — escopo do Administrador (per_tipo=1)
+-- Inclui: denúncias de carona onde o motorista é da escola OU denúncias de usuário onde o alvo é da escola
+SELECT DISTINCT d.den_id, d.den_tipo, d.den_motivo, d.den_data, d.den_status
+FROM DENUNCIAS d
+LEFT JOIN CARONAS          c  ON d.car_id      = c.car_id
+LEFT JOIN CURSOS_USUARIOS  cu_car ON c.cur_usu_id = cu_car.cur_usu_id
+LEFT JOIN CURSOS           cr_car ON cu_car.cur_id = cr_car.cur_id
+LEFT JOIN CURSOS_USUARIOS  cu_usu ON d.den_usu_alvo = cu_usu.usu_id
+LEFT JOIN CURSOS           cr_usu ON cu_usu.cur_id  = cr_usu.cur_id
+WHERE (cr_car.esc_id = 1 OR cr_usu.esc_id = 1)  -- substituir pelo per_escola_id do admin logado
+  AND d.den_status IN (1, 3)
+  AND d.den_deletado_em IS NULL
+ORDER BY d.den_data ASC;
+
+-- [C] TESTE: Histórico de denúncias enviadas por um usuário (tela "Minhas denúncias")
+SELECT
+    den_id, den_tipo, den_motivo, den_texto, den_data,
+    CASE den_status
+        WHEN 0 THEN 'Fechado'
+        WHEN 1 THEN 'Aberto'
+        WHEN 2 THEN 'Arquivado'
+        WHEN 3 THEN 'Em análise'
+    END AS status,
+    den_resposta
+FROM DENUNCIAS
+WHERE usu_id = 5
+  AND den_deletado_em IS NULL
+ORDER BY den_data DESC;
+
+-- [C] TESTE: Resumo por tipo e status (card no painel Admin/Dev)
+SELECT
+    CASE den_tipo WHEN 0 THEN 'Carona' WHEN 1 THEN 'Usuário' END AS tipo,
+    CASE den_status
+        WHEN 0 THEN 'Fechado'
+        WHEN 1 THEN 'Aberto'
+        WHEN 2 THEN 'Arquivado'
+        WHEN 3 THEN 'Em análise'
+    END AS status,
+    COUNT(*) AS total
+FROM DENUNCIAS
+WHERE den_deletado_em IS NULL
+GROUP BY den_tipo, den_status
+ORDER BY den_tipo, den_status;
 
 
 -- =====================================================
@@ -968,7 +1063,8 @@ UNION ALL SELECT 'Caronas',             COUNT(*) FROM CARONAS
 UNION ALL SELECT 'Solicitacoes',        COUNT(*) FROM SOLICITACOES_CARONA
 UNION ALL SELECT 'Carona_Pessoas',      COUNT(*) FROM CARONA_PESSOAS
 UNION ALL SELECT 'Mensagens',           COUNT(*) FROM MENSAGENS WHERE men_deletado_em IS NULL
-UNION ALL SELECT 'Sugestoes/Denuncias', COUNT(*) FROM SUGESTAO_DENUNCIA WHERE sug_deletado_em IS NULL
+UNION ALL SELECT 'Sugestoes',           COUNT(*) FROM SUGESTOES WHERE sug_deletado_em IS NULL
+UNION ALL SELECT 'Denuncias',           COUNT(*) FROM DENUNCIAS WHERE den_deletado_em IS NULL
 UNION ALL SELECT 'Audit_Log',           COUNT(*) FROM AUDIT_LOG;
 
 -- [GERAL] Painel dev: distribuição de perfis por tipo de acesso
@@ -1033,14 +1129,14 @@ WHERE men_id = 4
   AND usu_id_remetente = 5  -- Lucas (é o dono)
   AND men_deletado_em IS NULL;
 
--- [A3] Sugestões por dono — Carlos (usu_id=1) só deve ver sug_id=3
-SELECT sug_id, usu_id, sug_tipo, sug_status, sug_texto
-FROM SUGESTAO_DENUNCIA
+-- [A3] Sugestões por dono — Carlos (usu_id=1) só deve ver as suas próprias
+SELECT sug_id, usu_id, sug_status, sug_texto
+FROM SUGESTOES
 WHERE usu_id = 1;
 
 -- [A3] Lucas (usu_id=5) tentando ver sug_id=1 (da Mariana — usu_id=2)
--- Resultado esperado: 0 linhas (API retorna 403 para não-admin)
-SELECT sug_id FROM SUGESTAO_DENUNCIA
+-- Resultado esperado: 0 linhas (API retorna 403 para não-dev)
+SELECT sug_id FROM SUGESTOES
 WHERE sug_id = 1 AND usu_id = 5;  -- Lucas não é o autor
 
 -- [M2] Veículos de Pedro (usu_id=3) — Carlos (usu_id=1) não deve ter acesso via API
@@ -1076,7 +1172,7 @@ SELECT 'Perfil desabilitado (per_habilitado=0)',
 
 
 -- =====================================================
--- 14. AUDIT_LOG — Rastreabilidade de ações
+-- 16. AUDIT_LOG — Rastreabilidade de ações
 -- Gerenciado por src/utils/auditLog.js (silent-failure)
 -- =====================================================
 
@@ -1166,11 +1262,17 @@ FROM USUARIOS
 WHERE usu_reset_hash IS NOT NULL
   AND usu_reset_expira <= NOW();
 
--- [SOFT-DELETE] Sugestões/denúncias removidas logicamente (administração)
-SELECT sug_id, usu_id, sug_tipo, sug_status, sug_deletado_em
-FROM SUGESTAO_DENUNCIA
+-- [SOFT-DELETE] Sugestões removidas logicamente (administração Dev)
+SELECT sug_id, usu_id, sug_status, sug_deletado_em
+FROM SUGESTOES
 WHERE sug_deletado_em IS NOT NULL
 ORDER BY sug_deletado_em DESC;
+
+-- [SOFT-DELETE] Denúncias removidas logicamente (administração Admin/Dev)
+SELECT den_id, usu_id, den_tipo, den_status, den_deletado_em
+FROM DENUNCIAS
+WHERE den_deletado_em IS NOT NULL
+ORDER BY den_deletado_em DESC;
 
 -- [SOFT-DELETE] Solicitações canceladas via soft-delete (sol_status=0)
 SELECT sol_id, usu_id_passageiro, car_id, sol_status

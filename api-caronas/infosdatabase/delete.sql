@@ -39,7 +39,8 @@ DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (1, 2, 3, 4);
 DELETE FROM VEICULOS            WHERE usu_id IN (1, 3);
 
 -- Nível 1: Tabelas dependentes de USUARIOS
-DELETE FROM SUGESTAO_DENUNCIA   WHERE usu_id IN (1, 2, 3, 4);
+DELETE FROM DENUNCIAS           WHERE usu_id IN (1, 2, 3, 4) OR den_usu_alvo IN (1, 2, 3, 4);
+DELETE FROM SUGESTOES           WHERE usu_id IN (1, 2, 3, 4);
 DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4);
 DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4);
 
@@ -70,24 +71,26 @@ DELETE FROM CARONAS             WHERE cur_usu_id IN (1, 2, 3, 4, 5);
 
 -- Nível 2.5: PENALIDADES — deve ser removido antes dos USUARIOS para evitar erro FK RESTRICT
 -- em pen_aplicado_por (Admin usu_id=6 não pode ser deletado enquanto houver penalidades que ele aplicou)
-DELETE FROM PENALIDADES         WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-                                   OR pen_aplicado_por IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+DELETE FROM PENALIDADES         WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+                                   OR pen_aplicado_por IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 
 -- Nível 2: Tabelas intermediárias
-DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 DELETE FROM VEICULOS            WHERE usu_id IN (1, 3, 5, 10);
 
 -- Nível 1: Tabelas dependentes de USUARIOS
-DELETE FROM SUGESTAO_DENUNCIA   WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+DELETE FROM DENUNCIAS           WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+                                   OR den_usu_alvo IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+DELETE FROM SUGESTOES           WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+DELETE FROM PERFIL              WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 
 -- Nível 0: Usuários
-DELETE FROM USUARIOS            WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+DELETE FROM USUARIOS            WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 
 -- Cursos e Escolas (se quiser limpar também)
-DELETE FROM CURSOS              WHERE esc_id IN (1, 2, 3);
-DELETE FROM ESCOLAS             WHERE esc_id IN (1, 2, 3);
+DELETE FROM CURSOS              WHERE esc_id IN (1, 2, 3, 4);
+DELETE FROM ESCOLAS             WHERE esc_id IN (1, 2, 3, 4);
 
 -- Confirmação visual
 SELECT 'BLOCO 2 removido com sucesso.' AS Status;
@@ -115,7 +118,10 @@ SELECT 'BLOCO 2 removido com sucesso.' AS Status;
 -- DELETE FROM VEICULOS WHERE usu_id = 1 AND vei_status = 0;
 
 -- Apagar apenas as sugestões já fechadas
--- DELETE FROM SUGESTAO_DENUNCIA WHERE sug_status = 0;
+-- DELETE FROM SUGESTOES WHERE sug_status = 0;
+
+-- Apagar apenas as denúncias já fechadas
+-- DELETE FROM DENUNCIAS WHERE den_status = 0;
 
 -- Apagar apenas os registros de auditoria de um usuário específico
 -- (AUDIT_LOG não tem FK para USUARIOS — registros NÃO são removidos em cascata)

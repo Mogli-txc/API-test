@@ -93,7 +93,7 @@ describe('Grupo 1 — Sugestões e Denúncias', () => {
         const res = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Sugestão de teste automatizado', sug_tipo: 1 });
+            .send({ sug_texto: 'Sugestão de teste automatizado' });
 
         expect(res.status).toBe(201);
         expect(res.body.sugestao).toHaveProperty('sug_id');
@@ -104,16 +104,16 @@ describe('Grupo 1 — Sugestões e Denúncias', () => {
         const res = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_tipo: 1 }); // falta sug_texto
+            .send({}); // falta sug_texto
 
         expect(res.status).toBe(400);
     });
 
-    it('1.3 — POST /api/sugestoes — sug_tipo inválido deve retornar 400', async () => {
+    it('1.3 — POST /api/sugestoes — sug_texto vazio deve retornar 400', async () => {
         const res = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Texto válido aqui', sug_tipo: 99 });
+            .send({ sug_texto: '' });
 
         expect(res.status).toBe(400);
     });
@@ -159,9 +159,9 @@ describe('Grupo 1 — Sugestões e Denúncias', () => {
         const novaRes = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Outra sugestão para teste de resposta', sug_tipo: 0 });
+            .send({ sug_texto: 'Outra sugestão para teste de resposta' });
 
-        const novoId = novaRes.body.sugestao.sug_id;
+        const novoId = novaRes.body.sugestao?.sug_id;
 
         const res = await request(app)
             .put(`/api/sugestoes/${novoId}/responder`)
@@ -184,7 +184,7 @@ describe('Grupo 1 — Sugestões e Denúncias', () => {
         const novaRes = await request(app)
             .post('/api/sugestoes')
             .set('Authorization', `Bearer ${usuario.token}`)
-            .send({ sug_texto: 'Sugestão para teste de delete negado', sug_tipo: 1 });
+            .send({ sug_texto: 'Sugestão para teste de delete negado' });
 
         const novoId = novaRes.body.sugestao.sug_id;
 

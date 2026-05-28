@@ -267,11 +267,13 @@ components:
         car_data:
           type: string
           format: date
-          description: "Data da carona no formato YYYY-MM-DD (não inclui o horário)"
-          example: "2026-04-20"
+          description: |
+            Data da carona no formato YYYY-MM-DD. **Deve ser a data atual** (hoje) — caronas futuras não são permitidas [v22].
+            A origem ou o destino devem estar a ≤ 500 m da escola do motorista [v23].
+          example: "2026-05-27"
         car_hor_saida:
           type: string
-          description: "Horário de saída no formato HH:MM ou HH:MM:SS. Combinado com car_data deve ser no futuro."
+          description: "Horário de saída no formato HH:MM ou HH:MM:SS."
           example: "07:30"
         car_vagas_dispo:
           type: integer
@@ -575,18 +577,45 @@ components:
           type: integer
           example: 4
 
-    # ─── Sugestão / Denúncia ────────────────────────────────────────────────────
+    # ─── Sugestão ───────────────────────────────────────────────────────────────
     SugestaoCriarRequest:
       type: object
-      required: [sug_tipo, sug_texto]
+      required: [sug_texto]
+      description: "Qualquer usuário autenticado pode criar. Gerenciado apenas por Dev [v22]."
       properties:
-        sug_tipo:
-          type: string
-          enum: [Sugestao, Denuncia]
-          example: Sugestao
         sug_texto:
           type: string
+          minLength: 5
+          maxLength: 255
           example: Seria ótimo ter filtro por horário.
+
+    # ─── Denúncia ────────────────────────────────────────────────────────────────
+    DenunciaCriarRequest:
+      type: object
+      required: [den_tipo, den_texto]
+      description: |
+        Qualquer usuário pode criar. Admin gerencia denúncias da sua escola (via FK da carona/alvo); Dev gerencia todas [v22].
+      properties:
+        den_tipo:
+          type: integer
+          enum: [0, 1]
+          description: "0 = denúncia de carona (car_id obrigatório) | 1 = denúncia de usuário (den_usu_alvo obrigatório)"
+          example: 1
+        den_texto:
+          type: string
+          minLength: 10
+          maxLength: 500
+          example: "Usuário foi rude durante a carona."
+        car_id:
+          type: integer
+          nullable: true
+          description: "Obrigatório quando den_tipo=0"
+          example: null
+        den_usu_alvo:
+          type: integer
+          nullable: true
+          description: "Obrigatório quando den_tipo=1 (ID do usuário denunciado)"
+          example: 5
 
     SugestaoResponderRequest:
       type: object
@@ -3245,36 +3274,28 @@ paths:
 
     get:
       tags: [Sugestões e Denúncias]
-      summary: Listar sugestões e denúncias
+      summary: Listar sugestões
       description: |
-        Admin (per_tipo=1) vê apenas registros da sua escola.
-        Dev (per_tipo=2) vê todos.
+        Apenas **Dev** (per_tipo=2) pode listar sugestões. Admin não tem acesso a este endpoint — para denúncias use `/api/denuncias` [v22].
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Lista de sugestões/denúncias
+          description: Lista de sugestões
         '403':
-          description: Requer papel Admin ou Dev
+          description: Requer papel Dev
 
   /api/sugestoes/minhas:
     get:
       tags: [Sugestões e Denúncias]
-      summary: Listar submissões do próprio usuário
+      summary: Listar sugestões do próprio usuário
       description: |
-        Retorna apenas os registros enviados pelo usuário autenticado.
-        Não requer papel elevado — qualquer usuário autenticado pode consultar suas próprias submissões.
-        Filtro opcional: `?tipo=0` (Denúncias) ou `?tipo=1` (Sugestões).
+        Retorna apenas as sugestões enviadas pelo usuário autenticado.
+        Não requer papel elevado — qualquer usuário autenticado pode consultar suas próprias sugestões.
+        Para consultar suas denúncias use `/api/denuncias/minhas` [v22].
       security:
         - bearerAuth: []
       parameters:
-        - name: tipo
-          in: query
-          required: false
-          schema:
-            type: integer
-            enum: [0, 1]
-          description: "0 = Denúncias | 1 = Sugestões"
         - name: page
           in: query
           schema:
@@ -3310,13 +3331,9 @@ paths:
                           type: string
                         sug_status:
                           type: integer
-                        sug_tipo:
-                          type: integer
                         sug_resposta:
                           type: string
                           nullable: true
-        '400':
-          description: tipo inválido
         '401':
           description: Não autenticado
 
@@ -3361,11 +3378,10 @@ paths:
   /api/sugestoes/{sug_id}/analisar:
     put:
       tags: [Sugestões e Denúncias]
-      summary: Marcar como Em análise
+      summary: Marcar sugestão como Em análise (Dev)
       description: |
-        Muda o status para **3 (Em análise)**, indicando que o Admin/Dev está avaliando o registro.
-        Não é possível marcar como Em análise um registro já fechado (`sug_status=0`).
-        Admin só pode alterar registros da sua escola.
+        Apenas **Dev**. Muda o status para **3 (Em análise)**.
+        Não é possível marcar como Em análise um registro já fechado (`sug_status=0`) [v22].
       security:
         - bearerAuth: []
       parameters:
@@ -3403,8 +3419,8 @@ paths:
   /api/sugestoes/{sug_id}/responder:
     put:
       tags: [Sugestões e Denúncias]
-      summary: Responder e fechar registro
-      description: Admin ou Dev. Admin responde apenas registros da sua escola.
+      summary: Responder e fechar sugestão (Dev)
+      description: Apenas **Dev**. Responde e fecha a sugestão (`sug_status = 0`) [v22].
       security:
         - bearerAuth: []
       parameters:
@@ -3429,11 +3445,10 @@ paths:
   /api/sugestoes/{sug_id}/arquivar:
     post:
       tags: [Sugestões e Denúncias]
-      summary: Arquivar sugestão/denúncia sem resposta formal (Admin/Dev)
+      summary: Arquivar sugestão sem resposta formal (Dev)
       description: |
-        Muda o status para `2 = Arquivada` — permite fechar registros sem precisar respondê-los.
-        Não reverte registros já fechados (`sug_status = 0`).
-        Admin: escopo da escola. Dev: qualquer registro.
+        Apenas **Dev**. Muda o status para `2 = Arquivada`.
+        Não reverte registros já fechados (`sug_status = 0`) [v22].
       security:
         - bearerAuth: []
       parameters:
@@ -3450,6 +3465,138 @@ paths:
         '403': { description: Sem permissão (Admin fora da escola) }
         '404': { description: Sugestão/Denúncia não encontrada }
         '409': { description: Já está fechada ou já está arquivada }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # DENÚNCIAS — /api/denuncias  [v22]
+  # ────────────────────────────────────────────────────────────────────────────
+  /api/denuncias:
+    post:
+      tags: [Denúncias]
+      summary: Registrar denúncia
+      description: |
+        Qualquer usuário autenticado pode criar. `den_tipo=0` exige `car_id`; `den_tipo=1` exige `den_usu_alvo`.
+        Auto-denúncia é bloqueada.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DenunciaCriarRequest'
+      responses:
+        '201':
+          description: Denúncia criada
+        '400':
+          description: Campos inválidos ou FK ausente
+        '401':
+          description: Não autenticado
+        '422':
+          description: Auto-denúncia ou alvo não encontrado
+
+    get:
+      tags: [Denúncias]
+      summary: Listar denúncias
+      description: |
+        Admin (per_tipo=1): vê apenas denúncias ligadas à sua escola (via carona ou usuário alvo).
+        Dev (per_tipo=2): vê todas.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de denúncias
+        '403':
+          description: Requer papel Admin ou Dev
+
+  /api/denuncias/minhas:
+    get:
+      tags: [Denúncias]
+      summary: Listar denúncias criadas pelo próprio usuário
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de denúncias do usuário
+        '401':
+          description: Não autenticado
+
+  /api/denuncias/{den_id}:
+    get:
+      tags: [Denúncias]
+      summary: Obter denúncia por ID
+      description: Autor da denúncia, Admin da escola (escola do alvo/carona), ou Dev.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: den_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Dados da denúncia
+        '403':
+          description: Sem permissão
+        '404':
+          description: Não encontrada
+
+    delete:
+      tags: [Denúncias]
+      summary: Deletar denúncia permanentemente (Dev)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: den_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204':
+          description: Deletada
+        '403':
+          description: Apenas Dev
+
+  /api/denuncias/{den_id}/analisar:
+    put:
+      tags: [Denúncias]
+      summary: Marcar denúncia como Em análise (Admin/Dev)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: den_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Status atualizado }
+        '403': { description: Sem permissão ou fora do escopo da escola }
+        '409': { description: Já está em análise }
+
+  /api/denuncias/{den_id}/responder:
+    put:
+      tags: [Denúncias]
+      summary: Responder e fechar denúncia (Admin/Dev)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: den_id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [den_resposta]
+              properties:
+                den_resposta:
+                  type: string
+      responses:
+        '200': { description: Denúncia respondida e fechada }
+        '403': { description: Sem permissão }
+
+  /api/denuncias/{den_id}/arquivar:
+    post:
+      tags: [Denúncias]
+      summary: Arquivar denúncia sem resposta (Admin/Dev)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: den_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Arquivada }
+        '403': { description: Sem permissão }
+        '409': { description: Já fechada ou arquivada }
 
   # ────────────────────────────────────────────────────────────────────────────
   # MATRÍCULAS — /api/matriculas
@@ -4078,7 +4225,9 @@ tags:
   - name: Passageiros
     description: Gerenciamento direto de passageiros em uma carona
   - name: Sugestões e Denúncias
-    description: Canal de feedback e reporte de problemas
+    description: Canal de feedback para Dev (sugestões de melhoria)
+  - name: Denúncias
+    description: Reporte de caronas ou usuários problemáticos — gerenciado por Admin (escola) ou Dev
   - name: Matrículas
     description: Inscrição de usuários em cursos (vínculo necessário para criar carona)
   - name: Infraestrutura

@@ -117,7 +117,7 @@ async function criarCarona(motorista, vagas = 2, descricao = 'Carona de teste') 
             cur_usu_id,
             vei_id,
             car_desc: descricao,
-            car_data: '2027-09-01 08:00:00',
+            car_data: new Date().toISOString().slice(0, 10),
             car_hor_saida: '08:00:00',
             car_vagas_dispo: vagas,
             origem: { pon_nome: 'Origem Cobertura', pon_endereco: 'Rua A, 100, São Paulo' },
