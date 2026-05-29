@@ -631,17 +631,19 @@ class CaronaController {
             }
 
             // REGRA ESCOLA: origem OU destino deve estar a ≤ 500 m da escola do motorista  [v22]
-            const escola = await buscarEscolaDoMotorista(usu_id, req.user.email);
-            if (escola) {
-                const RAIO_ESCOLA_KM = 0.5;
-                const distOrigem  = calcularDistanciaKm(origemPreparada.lat,  origemPreparada.lon,  escola.esc_lat, escola.esc_lon);
-                const distDestino = calcularDistanciaKm(destinoPreparado.lat, destinoPreparado.lon, escola.esc_lat, escola.esc_lon);
-                if (distOrigem > RAIO_ESCOLA_KM && distDestino > RAIO_ESCOLA_KM) {
-                    return res.status(422).json({
-                        error: 'A origem ou o destino da carona deve estar a no máximo 500 m da sua escola.'
-                    });
-                }
-            }
+            // TODO: reativar após definição dos limites geográficos de cada campus.
+            //       Desabilitado temporariamente para testes abertos na plataforma de homologação.
+            // const escola = await buscarEscolaDoMotorista(usu_id, req.user.email);
+            // if (escola) {
+            //     const RAIO_ESCOLA_KM = 0.5;
+            //     const distOrigem  = calcularDistanciaKm(origemPreparada.lat,  origemPreparada.lon,  escola.esc_lat, escola.esc_lon);
+            //     const distDestino = calcularDistanciaKm(destinoPreparado.lat, destinoPreparado.lon, escola.esc_lat, escola.esc_lon);
+            //     if (distOrigem > RAIO_ESCOLA_KM && distDestino > RAIO_ESCOLA_KM) {
+            //         return res.status(422).json({
+            //             error: 'A origem ou o destino da carona deve estar a no máximo 500 m da sua escola.'
+            //         });
+            //     }
+            // }
 
             // Transação atômica: CARONA + 2 PONTO_ENCONTROS [v17 — ENR-05]
             conn = await db.getConnection();
