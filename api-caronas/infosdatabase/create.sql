@@ -739,6 +739,19 @@
         ADD COLUMN per_notif_tipos JSON NULL DEFAULT NULL
             COMMENT 'Preferências de tipos push por toggle (NULL = todos ativos)';
 
+    -- Estende noti_tipo com tipos de documento e SISTEMA.
+    ALTER TABLE NOTIFICACOES
+        MODIFY COLUMN noti_tipo ENUM(
+            'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
+            'CARONA_CANCELADA','CARONA_FINALIZADA','AVALIACAO_RECEBIDA',
+            'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL',
+            'EXCLUSAO_CANCELADA',
+            'SISTEMA',
+            'DOCUMENTO_APROVADO','DOCUMENTO_REPROVADO',
+            'COMPROVANTE_APROVADO','COMPROVANTE_REPROVADO',
+            'CNH_APROVADA','CNH_REPROVADA'
+        ) NOT NULL COMMENT 'Tipo de notificação — ENUM garante integridade  [v14 — DB-06]';
+
     ALTER TABLE DENUNCIAS
         ADD CONSTRAINT chk_den_tipo
             CHECK (den_tipo IN (0, 1)),

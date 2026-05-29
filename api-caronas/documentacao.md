@@ -51,7 +51,19 @@ info:
     precisa trazer capacete próprio. Aplicável a motos (`vei_tipo = 0`). Aceito em
     `POST /api/caronas/oferecer` e `PUT /api/caronas/{car_id}`. Retornado em todas as
     consultas de carona. Default `0` (não aplicável).
-  version: 1.11.0
+
+    **Jobs agendados (node-cron, timezone America/Sao_Paulo) [v25]:**
+    | Job | Horário | Ação |
+    |---|---|---|
+    | `autoCloseCaronas` | 00:00 | Finaliza caronas de dias anteriores (`car_status=3`). Notifica passageiros (`CARONA_FINALIZADA`) e motoristas (`SISTEMA`). |
+    | `avisarVerificacaoExpirando` | 09:00 | Avisa (`SISTEMA`) usuários a 7 ou 1 dia de `usu_verificacao_expira` para reenviarem o comprovante. |
+
+    Ambos são desabilitados quando `NODE_ENV=test`.
+
+    **Preferências de notificação por tipo [v25]:** a coluna `PERFIL.per_notif_tipos`
+    (JSON, nullable) guarda toggles por categoria de notificação. Veja
+    `PATCH /api/usuarios/me/config`. `null` = todos os tipos ativos.
+  version: 1.12.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -115,6 +127,16 @@ components:
           enum: [0, 1]
           description: "0=conta desabilitada pelo admin, 1=ativa"
           example: 1
+        per_push_notif:
+          type: integer
+          enum: [0, 1]
+          description: "Preferência de push global. 0=desativado, 1=ativado (padrão). [v25]"
+          example: 1
+        per_notif_tipos:
+          type: object
+          nullable: true
+          description: "Toggles de notificação por tipo (null = todos ativos). Veja PATCH /api/usuarios/me/config. [v25]"
+          example: { documentos: 0 }
         usu_exclusao_agendada:
           type: string
           format: date-time
@@ -1096,9 +1118,24 @@ paths:
         **Campos disponíveis:**
         - `per_push_notif`: `0` = notificações push desativadas | `1` = ativadas (padrão)
         - `per_raio_busca`: raio padrão de busca de caronas em km (1–25; padrão: 5)
+        - `per_notif_tipos`: objeto JSON com preferências por tipo de notificação
+          in-app, ou `null` para restaurar o padrão (todos ativos) [v25]
 
         O front-end pode usar `per_raio_busca` como valor inicial do slider de proximidade
         na tela de busca, sem precisar de armazenamento local.
+
+        **Chaves válidas em `per_notif_tipos`** (valores `0`=desativado, `1`=ativado):
+        | Chave                    | Tipos de notificação cobertos                          |
+        |--------------------------|--------------------------------------------------------|
+        | `solicitacoes_recebidas` | `SOLICITACAO_NOVA`                                     |
+        | `resultado_solicitacoes` | `SOLICITACAO_ACEITA`, `SOLICITACAO_RECUSADA`          |
+        | `alteracoes_carona`      | `CARONA_CANCELADA`, `CARONA_FINALIZADA`               |
+        | `restricao_removida`     | `PENALIDADE_REMOVIDA`                                 |
+        | `documentos`             | `DOCUMENTO_*`, `COMPROVANTE_*`, `CNH_*` (aprov./reprov.)|
+        | `avisos_sistema`         | `SISTEMA`                                             |
+
+        Chaves não enviadas mantêm o valor anterior. Uma chave ausente em
+        `per_notif_tipos` (ou `per_notif_tipos = null`) significa tipo ativo.
       security:
         - bearerAuth: []
       requestBody:
@@ -1119,6 +1156,11 @@ paths:
                   maximum: 25
                   description: "Raio padrão de busca em km"
                   example: 10
+                per_notif_tipos:
+                  type: object
+                  nullable: true
+                  description: "Preferências por toggle de tipo (null = todos ativos)"
+                  example: { documentos: 0, avisos_sistema: 1 }
       responses:
         '200':
           description: Configurações atualizadas
@@ -1133,8 +1175,9 @@ paths:
                     properties:
                       per_push_notif: { type: integer, enum: [0, 1] }
                       per_raio_busca: { type: integer }
+                      per_notif_tipos: { type: object, nullable: true }
         '400':
-          description: Nenhum campo informado, ou valor fora do intervalo permitido
+          description: Nenhum campo informado, valor fora do intervalo, ou chave inválida em per_notif_tipos
         '401': { description: Não autenticado }
 
   /api/usuarios/me/conta:
@@ -1496,6 +1539,9 @@ paths:
 
         **Falha:** documento salvo com `doc_status=2` para auditoria — retorna 422.
 
+        **Notificações [v25]:** emite `COMPROVANTE_APROVADO` ao promover ou
+        `COMPROVANTE_REPROVADO` em caso de falha (fire-and-forget).
+
         **Variáveis de ambiente necessárias:** `JWT_SECRET`, `REFRESH_SECRET`, `OTP_SECRET`, `APP_URL`, `SMTP_*` — todas obrigatórias na inicialização.
       security:
         - bearerAuth: []
@@ -1609,6 +1655,9 @@ paths:
         - Sem veículo → mantém nível 1 (CNH armazenada; promoção ocorre ao cadastrar veículo)
 
         **OCR reprovado:** documento salvo com `doc_status=2` para auditoria — retorna 422.
+
+        **Notificações [v25]:** emite `CNH_APROVADA` ao aceitar ou `CNH_REPROVADA`
+        em caso de falha (fire-and-forget).
       security:
         - bearerAuth: []
       requestBody:
@@ -4933,6 +4982,31 @@ paths:
     get:
       summary: Lista notificações do usuário autenticado
       tags: [Notificações]
+      description: |
+        Lista as notificações persistidas do usuário. O `noti_tipo` segue o
+        ENUM da tabela NOTIFICACOES.
+
+        **Tipos de notificação [v25]:**
+        | Tipo                    | Gatilho                                              |
+        |-------------------------|------------------------------------------------------|
+        | `SOLICITACAO_NOVA`      | Passageiro solicita carona → motorista               |
+        | `SOLICITACAO_ACEITA`    | Motorista aceita → passageiro                        |
+        | `SOLICITACAO_RECUSADA`  | Motorista recusa → passageiro                        |
+        | `CARONA_CANCELADA`      | Motorista cancela → passageiros                      |
+        | `CARONA_FINALIZADA`     | Carona finalizada (manual ou autoClose) → passageiros|
+        | `AVALIACAO_RECEBIDA`    | Usuário recebe avaliação                             |
+        | `PENALIDADE_APLICADA`   | Admin aplica penalidade                              |
+        | `PENALIDADE_REMOVIDA`   | Admin remove penalidade                              |
+        | `ADMIN_MANUAL`          | Comunicado manual de Admin/Dev                       |
+        | `EXCLUSAO_CANCELADA`    | Usuário cancela exclusão de conta                    |
+        | `SISTEMA`               | Avisos automáticos: autoClose (motorista), expiração de verificação |
+        | `DOCUMENTO_APROVADO` / `_REPROVADO`     | Documento genérico analisado          |
+        | `COMPROVANTE_APROVADO` / `_REPROVADO`   | Comprovante de matrícula analisado    |
+        | `CNH_APROVADA` / `_REPROVADA`           | CNH analisada                         |
+
+        > **Nota de consumo (mobile):** o app trata alguns tipos como *email-only* e
+        > os oculta do sino/lista (`AVALIACAO_RECEBIDA`, `EXCLUSAO_CANCELADA`,
+        > `PENALIDADE_APLICADA`, `ADMIN_MANUAL`). A API persiste todos normalmente.
       security: [{ bearerAuth: [] }]
       parameters:
         - in: query

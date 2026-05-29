@@ -1654,6 +1654,23 @@ class AdminController {
             // PASSO 2: Atualiza o status do documento
             await db.query('UPDATE DOCUMENTOS_VERIFICACAO SET doc_status = ? WHERE doc_id = ?', [novoDocStatus, doc_id]);
 
+            // Notifica o usuário sobre o resultado da análise do documento
+            const tipoNotif = status === 'aprovado'
+                ? (doc.doc_tipo === 0 ? TIPOS.COMPROVANTE_APROVADO : TIPOS.CNH_APROVADA)
+                : (doc.doc_tipo === 0 ? TIPOS.COMPROVANTE_REPROVADO : TIPOS.CNH_REPROVADA);
+            const tituloNotif = status === 'aprovado'
+                ? (doc.doc_tipo === 0 ? 'Comprovante aprovado' : 'CNH aprovada')
+                : (doc.doc_tipo === 0 ? 'Comprovante reprovado' : 'CNH reprovada');
+            const mensagemNotif = status === 'aprovado'
+                ? (doc.doc_tipo === 0
+                    ? 'Seu comprovante de matrícula foi aprovado pela equipe.'
+                    : 'Sua CNH foi aprovada pela equipe.')
+                : (doc.doc_tipo === 0
+                    ? 'Seu comprovante foi reprovado. Envie um documento mais legível.'
+                    : 'Sua CNH foi reprovada. Envie um documento mais legível.');
+            notificar({ usu_id: doc.usu_id, tipo: tipoNotif, titulo: tituloNotif, mensagem: mensagemNotif })
+                .catch(() => {});
+
             // PASSO 3: Aprovação de comprovante → promove o usuário
             let promocao = null;
             if (status === 'aprovado' && doc.doc_tipo === 0 && [5, 6].includes(doc.usu_verificacao)) {

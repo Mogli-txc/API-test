@@ -1446,7 +1446,7 @@ class UsuarioController {
      *
      * Chaves válidas para per_notif_tipos:
      *   solicitacoes_recebidas | resultado_solicitacoes | alteracoes_carona
-     *   restricao_removida     | documentos_aprovados   | avisos_sistema
+     *   restricao_removida     | documentos              | avisos_sistema
      *
      * PASSO 1: Valida que ao menos um campo foi enviado.
      * PASSO 2: Valida os valores individuais.
@@ -1466,7 +1466,7 @@ class UsuarioController {
 
             const TOGGLE_KEYS_VALID = new Set([
                 'solicitacoes_recebidas', 'resultado_solicitacoes', 'alteracoes_carona',
-                'restricao_removida', 'documentos_aprovados', 'avisos_sistema',
+                'restricao_removida', 'documentos', 'avisos_sistema',
             ]);
 
             const sets   = [];

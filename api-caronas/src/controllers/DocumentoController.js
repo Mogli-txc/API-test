@@ -20,6 +20,7 @@ const db  = require('../config/database');
 const fsp = require('fs').promises;
 const { registrarAudit } = require('../utils/auditLog');
 const { proximaFronteiraSemestral } = require('../utils/queryHelpers');
+const { notificar, TIPOS } = require('../utils/notificar');
 
 class DocumentoController {
 
@@ -90,6 +91,13 @@ class DocumentoController {
                 } finally {
                     conn.release();
                 }
+
+                notificar({
+                    usu_id,
+                    tipo:     TIPOS.COMPROVANTE_REPROVADO,
+                    titulo:   'Comprovante não reconhecido',
+                    mensagem: 'O documento enviado não foi identificado como comprovante válido. Tente uma versão mais legível.',
+                }).catch(() => {});
 
                 return res.status(422).json({
                     error:    "Documento não reconhecido como comprovante de matrícula válido.",
@@ -236,6 +244,13 @@ class DocumentoController {
                 usuId: usu_id, ip: req.ip
             }).catch(err => console.warn('[AUDIT] Falha ao registrar comprovante aprovado:', err.message));
 
+            notificar({
+                usu_id,
+                tipo:     TIPOS.COMPROVANTE_APROVADO,
+                titulo:   'Comprovante verificado',
+                mensagem: 'Sua matrícula foi confirmada. Você já pode usar o app normalmente.',
+            }).catch(() => {});
+
             // PASSO 9: Resposta de sucesso
             return res.status(200).json({
                 message:     "Comprovante recebido e matrícula verificada com sucesso!",
@@ -326,6 +341,13 @@ class DocumentoController {
                     conn.release();
                 }
 
+                notificar({
+                    usu_id,
+                    tipo:     TIPOS.CNH_REPROVADA,
+                    titulo:   'CNH não reconhecida',
+                    mensagem: 'O documento enviado não foi identificado como CNH válida. Tente uma versão mais legível.',
+                }).catch(() => {});
+
                 return res.status(422).json({
                     error:    "Documento não reconhecido como CNH válida.",
                     detalhes: ocr
@@ -379,6 +401,15 @@ class DocumentoController {
                 novo: { promovido: temVeiculo, doc_arquivo: req.file.filename },
                 usuId: usu_id, ip: req.ip
             }).catch(err => console.warn('[AUDIT] Falha ao registrar CNH aprovada:', err.message));
+
+            notificar({
+                usu_id,
+                tipo:     TIPOS.CNH_APROVADA,
+                titulo:   temVeiculo ? 'Verificação completa' : 'CNH recebida',
+                mensagem: temVeiculo
+                    ? 'Sua CNH foi validada. Você já pode oferecer caronas!'
+                    : 'Sua CNH foi armazenada. Cadastre um veículo para completar sua verificação.',
+            }).catch(() => {});
 
             // PASSO 7: Resposta de sucesso — mensagem varia conforme o resultado da promoção
             const message = temVeiculo
