@@ -502,7 +502,8 @@ class UsuarioController {
                         u.usu_descricao, u.usu_foto, u.usu_endereco,
                         u.usu_verificacao, u.usu_verificacao_expira,
                         u.usu_exclusao_agendada,
-                        p.per_tipo, p.per_habilitado, p.per_push_notif, p.per_notif_tipos,
+                        p.per_tipo, p.per_habilitado, p.per_push_notif,
+                        p.per_notif_tipos, p.per_email_tipos,
                         c.cur_nome, e.esc_nome
                  FROM USUARIOS u
                  INNER JOIN PERFIL p ON u.usu_id = p.usu_id
@@ -1442,11 +1443,16 @@ class UsuarioController {
      *   per_push_notif:  0=desativado, 1=ativado (notificações push global)
      *   per_raio_busca:  1–25 km (raio padrão — não exposto no frontend)
      *   per_notif_tipos: objeto JSON com chaves de toggle e valores 0/1
-     *                    (null = todos habilitados)
+     *                    (null = todos habilitados) — controla push/in-app
+     *   per_email_tipos: objeto JSON com chaves de toggle e valores 0/1
+     *                    (null = todos habilitados) — canal de email independente
      *
      * Chaves válidas para per_notif_tipos:
      *   solicitacoes_recebidas | resultado_solicitacoes | alteracoes_carona
      *   restricao_removida     | documentos              | avisos_sistema
+     *
+     * Chaves válidas para per_email_tipos (só tipos com template de email):
+     *   resultado_solicitacoes
      *
      * PASSO 1: Valida que ao menos um campo foi enviado.
      * PASSO 2: Valida os valores individuais.
@@ -1457,16 +1463,22 @@ class UsuarioController {
     atualizarConfig = async (req, res) => {
         try {
             const usu_id = req.user.id;
-            const { per_push_notif, per_raio_busca, per_notif_tipos } = req.body;
+            const { per_push_notif, per_raio_busca, per_notif_tipos, per_email_tipos } = req.body;
 
             // PASSO 1: Ao menos um campo obrigatório
-            if (per_push_notif === undefined && per_raio_busca === undefined && per_notif_tipos === undefined) {
-                return res.status(400).json({ error: 'Informe ao menos um campo: per_push_notif, per_raio_busca ou per_notif_tipos.' });
+            if (per_push_notif === undefined && per_raio_busca === undefined
+                && per_notif_tipos === undefined && per_email_tipos === undefined) {
+                return res.status(400).json({ error: 'Informe ao menos um campo: per_push_notif, per_raio_busca, per_notif_tipos ou per_email_tipos.' });
             }
 
             const TOGGLE_KEYS_VALID = new Set([
                 'solicitacoes_recebidas', 'resultado_solicitacoes', 'alteracoes_carona',
                 'restricao_removida', 'documentos', 'avisos_sistema',
+            ]);
+
+            // Só tipos que possuem template de email podem ter preferência de email.
+            const EMAIL_TOGGLE_KEYS_VALID = new Set([
+                'resultado_solicitacoes',
             ]);
 
             const sets   = [];
@@ -1512,12 +1524,33 @@ class UsuarioController {
                 }
             }
 
+            if (per_email_tipos !== undefined) {
+                if (per_email_tipos === null) {
+                    // null restaura padrão (todos ativos)
+                    sets.push('per_email_tipos = NULL');
+                } else {
+                    if (typeof per_email_tipos !== 'object' || Array.isArray(per_email_tipos)) {
+                        return res.status(400).json({ error: 'per_email_tipos deve ser um objeto ou null.' });
+                    }
+                    for (const [k, v] of Object.entries(per_email_tipos)) {
+                        if (!EMAIL_TOGGLE_KEYS_VALID.has(k)) {
+                            return res.status(400).json({ error: `Chave inválida em per_email_tipos: "${k}".` });
+                        }
+                        if (![0, 1].includes(parseInt(v))) {
+                            return res.status(400).json({ error: `Valor inválido para "${k}": deve ser 0 ou 1.` });
+                        }
+                    }
+                    sets.push('per_email_tipos = ?');
+                    params.push(JSON.stringify(per_email_tipos));
+                }
+            }
+
             // PASSO 3: Atualiza e retorna estado atual
             params.push(usu_id);
             await db.query(`UPDATE PERFIL SET ${sets.join(', ')} WHERE usu_id = ?`, params);
 
             const [[config]] = await db.query(
-                'SELECT per_push_notif, per_raio_busca, per_notif_tipos FROM PERFIL WHERE usu_id = ?',
+                'SELECT per_push_notif, per_raio_busca, per_notif_tipos, per_email_tipos FROM PERFIL WHERE usu_id = ?',
                 [usu_id]
             );
 

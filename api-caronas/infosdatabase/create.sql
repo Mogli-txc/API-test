@@ -739,6 +739,13 @@
         ADD COLUMN per_notif_tipos JSON NULL DEFAULT NULL
             COMMENT 'Preferências de tipos push por toggle (NULL = todos ativos)';
 
+    -- Preferências de tipos enviados por EMAIL (JSON), canal independente do push.
+    -- NULL = todos habilitados (padrão). Hoje só a chave resultado_solicitacoes
+    -- tem canal de email; novas chaves podem ser adicionadas conforme surgirem templates.
+    ALTER TABLE PERFIL
+        ADD COLUMN per_email_tipos JSON NULL DEFAULT NULL
+            COMMENT 'Preferências de tipos por email por toggle (NULL = todos ativos)';
+
     -- Estende noti_tipo com tipos de documento e SISTEMA.
     ALTER TABLE NOTIFICACOES
         MODIFY COLUMN noti_tipo ENUM(

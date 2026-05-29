@@ -61,8 +61,10 @@ info:
     Ambos são desabilitados quando `NODE_ENV=test`.
 
     **Preferências de notificação por tipo [v25]:** a coluna `PERFIL.per_notif_tipos`
-    (JSON, nullable) guarda toggles por categoria de notificação. Veja
-    `PATCH /api/usuarios/me/config`. `null` = todos os tipos ativos.
+    (JSON, nullable) guarda toggles por categoria de notificação (canal push/in-app).
+    A coluna `PERFIL.per_email_tipos` (JSON, nullable) guarda toggles do canal de
+    email, independente do push. Veja `PATCH /api/usuarios/me/config`.
+    `null` = todos os tipos ativos.
   version: 1.12.0
   contact:
     email: gm.monteiro@unesp.br
@@ -135,8 +137,13 @@ components:
         per_notif_tipos:
           type: object
           nullable: true
-          description: "Toggles de notificação por tipo (null = todos ativos). Veja PATCH /api/usuarios/me/config. [v25]"
+          description: "Toggles de notificação por tipo no canal push/in-app (null = todos ativos). Veja PATCH /api/usuarios/me/config. [v25]"
           example: { documentos: 0 }
+        per_email_tipos:
+          type: object
+          nullable: true
+          description: "Toggles do canal de email, independente do push (null = todos ativos). Só tipos com template de email; hoje resultado_solicitacoes. Veja PATCH /api/usuarios/me/config. [v26]"
+          example: { resultado_solicitacoes: 0 }
         usu_exclusao_agendada:
           type: string
           format: date-time
@@ -1118,8 +1125,10 @@ paths:
         **Campos disponíveis:**
         - `per_push_notif`: `0` = notificações push desativadas | `1` = ativadas (padrão)
         - `per_raio_busca`: raio padrão de busca de caronas em km (1–25; padrão: 5)
-        - `per_notif_tipos`: objeto JSON com preferências por tipo de notificação
-          in-app, ou `null` para restaurar o padrão (todos ativos) [v25]
+        - `per_notif_tipos`: objeto JSON com preferências por tipo no canal push/in-app,
+          ou `null` para restaurar o padrão (todos ativos) [v25]
+        - `per_email_tipos`: objeto JSON com preferências por tipo no canal de email,
+          independente do push, ou `null` para restaurar o padrão (todos ativos) [v26]
 
         O front-end pode usar `per_raio_busca` como valor inicial do slider de proximidade
         na tela de busca, sem precisar de armazenamento local.
@@ -1134,8 +1143,17 @@ paths:
         | `documentos`             | `DOCUMENTO_*`, `COMPROVANTE_*`, `CNH_*` (aprov./reprov.)|
         | `avisos_sistema`         | `SISTEMA`                                             |
 
-        Chaves não enviadas mantêm o valor anterior. Uma chave ausente em
-        `per_notif_tipos` (ou `per_notif_tipos = null`) significa tipo ativo.
+        **Chaves válidas em `per_email_tipos`** (só tipos com template de email):
+        | Chave                    | Email enviado                                          |
+        |--------------------------|--------------------------------------------------------|
+        | `resultado_solicitacoes` | Email de solicitação aceita/recusada (`solicitacao_resposta`) |
+
+        Os canais são independentes: `per_notif_tipos` controla push/in-app e
+        `per_email_tipos` controla email. O envio do email de resultado de
+        solicitação respeita `per_email_tipos.resultado_solicitacoes`.
+
+        Chaves não enviadas mantêm o valor anterior. Uma chave ausente (ou o
+        objeto `null`) significa tipo ativo.
       security:
         - bearerAuth: []
       requestBody:
@@ -1159,8 +1177,13 @@ paths:
                 per_notif_tipos:
                   type: object
                   nullable: true
-                  description: "Preferências por toggle de tipo (null = todos ativos)"
+                  description: "Preferências por toggle no canal push/in-app (null = todos ativos)"
                   example: { documentos: 0, avisos_sistema: 1 }
+                per_email_tipos:
+                  type: object
+                  nullable: true
+                  description: "Preferências por toggle no canal de email (null = todos ativos)"
+                  example: { resultado_solicitacoes: 0 }
       responses:
         '200':
           description: Configurações atualizadas
@@ -1176,8 +1199,9 @@ paths:
                       per_push_notif: { type: integer, enum: [0, 1] }
                       per_raio_busca: { type: integer }
                       per_notif_tipos: { type: object, nullable: true }
+                      per_email_tipos: { type: object, nullable: true }
         '400':
-          description: Nenhum campo informado, valor fora do intervalo, ou chave inválida em per_notif_tipos
+          description: Nenhum campo informado, valor fora do intervalo, ou chave inválida em per_notif_tipos/per_email_tipos
         '401': { description: Não autenticado }
 
   /api/usuarios/me/conta:

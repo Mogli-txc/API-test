@@ -134,7 +134,7 @@ Se o contrato de uma escola expirar, **todos os usuários vinculados** (por dom�
 | POST   | `/logout`          | JWT  | Invalida o refresh token server-side                        |
 | GET    | `/me`              | JWT  | Perfil do próprio usuário autenticado                       |
 | GET    | `/me/dashboard`    | JWT  | Dashboard consolidado: caronas ativas, solicitações pendentes, notificações, penalidades, reputação |
-| PATCH  | `/me/config`       | JWT  | Atualiza preferências do usuário (`per_push_notif`: 0/1; `per_raio_busca`: 1–25 km) |
+| PATCH  | `/me/config`       | JWT  | Atualiza preferências do usuário (`per_push_notif`: 0/1; `per_raio_busca`: 1–25 km; `per_notif_tipos`: toggles push/in-app; `per_email_tipos`: toggles de email) |
 | DELETE | `/me/conta`        | JWT  | Agenda exclusão com 30 dias de graça — LGPD                 |
 | POST   | `/me/conta/cancelar-exclusao` | JWT | Cancela o agendamento de exclusão dentro do prazo     |
 | GET    | `/perfil/:id`      | JWT  | Dados do perfil (inclui `usu_verificacao`, `per_tipo`)      |
@@ -561,6 +561,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v23    | Restrição geográfica: origem ou destino da carona deve estar a ≤ 500 m da escola do motorista (Haversine); endpoints Dev para upload de contrato e template OCR por escola (`esc_contrato_arquivo`, `esc_ocr_base`) |
 | v24    | Preferências de usuário em PERFIL (`per_push_notif`, `per_raio_busca`); 5 endpoints: `GET /caronas/buscar/mapa`, `GET /caronas/:id/participantes`, `POST /mensagens/carona/:id/ler-todas`, `GET /notificacoes/resumo`, `PATCH /usuarios/me/config` |
 | v25    | Bugfix de fuso horário em `validarDatetimeCarona`: substitui `new Date().toISOString()` (UTC) por offset fixo BRT (UTC-3) — corrige 400 indevido das 00:00–02:59 UTC para clientes em São Paulo; restrição geográfica de escola (500 m) desabilitada temporariamente para testes em homologação |
+| v26    | Canal de email independente do push: coluna `PERFIL.per_email_tipos` (JSON, nullable); `PATCH /me/config` aceita `per_email_tipos`; email de resultado de solicitação (`solicitacao_resposta`) gateado por `per_email_tipos.resultado_solicitacoes` em vez de `per_notif_tipos` |
 
 ---
 

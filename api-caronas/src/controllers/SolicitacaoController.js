@@ -15,6 +15,21 @@ const { enqueue: enqueueEmail }    = require('../utils/emailQueue');
 const { registrarAudit }           = require('../utils/auditLog');
 const { notificar, TIPOS }         = require('../utils/notificar');
 
+/**
+ * Verifica se o passageiro aceita receber o resultado da solicitação POR EMAIL.
+ * Canal de email é independente do push: lê `per_email_tipos.resultado_solicitacoes`
+ * (o push/in-app é controlado separadamente por per_notif_tipos). per_email_tipos
+ * pode vir como objeto (coluna JSON), string ou null/ausente (= todos ativos).
+ */
+function querEmailResultadoSolicitacao(perEmailTipos) {
+    if (!perEmailTipos) return true;
+    let prefs = perEmailTipos;
+    if (typeof prefs === 'string') {
+        try { prefs = JSON.parse(prefs); } catch { return true; }
+    }
+    return Number(prefs.resultado_solicitacoes ?? 1) !== 0;
+}
+
 class SolicitacaoController {
 
     /**
@@ -591,14 +606,17 @@ class SolicitacaoController {
             // Notifica o passageiro por email (não-crítico, executado após commit)
             // Busca dados do passageiro e da carona para montar a mensagem
             db.query(
-                `SELECT u.usu_email, u.usu_nome, c.car_desc, c.car_data
+                `SELECT u.usu_email, u.usu_nome, c.car_desc, c.car_data, p.per_email_tipos
                  FROM USUARIOS u
                  INNER JOIN CARONAS c ON c.car_id = ?
+                 LEFT JOIN PERFIL p ON p.usu_id = u.usu_id
                  WHERE u.usu_id = ?`,
                 [sol[0].car_id, sol[0].usu_id_passageiro]
             ).then(([rows]) => {
                 if (rows.length > 0) {
-                    const { usu_email, usu_nome, car_desc, car_data } = rows[0];
+                    const { usu_email, usu_nome, car_desc, car_data, per_email_tipos } = rows[0];
+                    // Respeita a preferência de EMAIL do passageiro (independente do push).
+                    if (!querEmailResultadoSolicitacao(per_email_tipos)) return;
                     const dataFormatada = new Date(car_data).toLocaleDateString('pt-BR');
                     enqueueEmail({
                         type:       'solicitacao_resposta',
