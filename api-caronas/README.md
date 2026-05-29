@@ -560,6 +560,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v22    | `SUGESTAO_DENUNCIA` separada em `SUGESTOES` (Dev-only) + `DENUNCIAS` (Admin escola-scoped + Dev); `/api/denuncias` com RBAC por FK chain; `car_data` restrito a hoje; auto-close de caronas às 00:00 via node-cron |
 | v23    | Restrição geográfica: origem ou destino da carona deve estar a ≤ 500 m da escola do motorista (Haversine); endpoints Dev para upload de contrato e template OCR por escola (`esc_contrato_arquivo`, `esc_ocr_base`) |
 | v24    | Preferências de usuário em PERFIL (`per_push_notif`, `per_raio_busca`); 5 endpoints: `GET /caronas/buscar/mapa`, `GET /caronas/:id/participantes`, `POST /mensagens/carona/:id/ler-todas`, `GET /notificacoes/resumo`, `PATCH /usuarios/me/config` |
+| v25    | Bugfix de fuso horário em `validarDatetimeCarona`: substitui `new Date().toISOString()` (UTC) por offset fixo BRT (UTC-3) — corrige 400 indevido das 00:00–02:59 UTC para clientes em São Paulo; restrição geográfica de escola (500 m) desabilitada temporariamente para testes em homologação |
 
 ---
 

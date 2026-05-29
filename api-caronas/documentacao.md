@@ -51,7 +51,7 @@ info:
     precisa trazer capacete próprio. Aplicável a motos (`vei_tipo = 0`). Aceito em
     `POST /api/caronas/oferecer` e `PUT /api/caronas/{car_id}`. Retornado em todas as
     consultas de carona. Default `0` (não aplicável).
-  version: 1.10.0
+  version: 1.11.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -273,9 +273,11 @@ components:
           type: string
           format: date
           description: |
-            Data da carona no formato YYYY-MM-DD. **Deve ser a data atual** (hoje) — caronas futuras não são permitidas [v22].
-            A origem ou o destino devem estar a ≤ 500 m da escola do motorista [v23].
-          example: "2026-05-27"
+            Data da carona no formato YYYY-MM-DD. **Deve ser a data atual em BRT (UTC-3)** — caronas futuras não são permitidas [v22].
+            O servidor compara a data enviada com o horário atual ajustado para BRT (offset fixo −3h),
+            evitando rejeições indevidas das 00:00–02:59 UTC para clientes em São Paulo [v25].
+            A restrição geográfica (origem ou destino a ≤ 500 m da escola) está temporariamente desabilitada em homologação [v23/v25].
+          example: "2026-05-28"
         car_hor_saida:
           type: string
           description: "Horário de saída no formato HH:MM ou HH:MM:SS."

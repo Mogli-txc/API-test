@@ -55,7 +55,11 @@ function validarDatetimeCarona(car_data, car_hor_saida) {
     }
 
     // Exige data de hoje — sem agendamento futuro  [v22]
-    const hoje = new Date().toISOString().substring(0, 10);
+    // Offset fixo BRT (UTC-3): SP aboliu horário de verão em 2019.
+    // toISOString() é sempre UTC — sem ajuste, das 00:00-02:59 UTC o servidor
+    // já avançou de dia enquanto o cliente em SP ainda está no dia anterior. [v25]
+    const agoraBrt = new Date(new Date().getTime() - 3 * 60 * 60 * 1000);
+    const hoje = agoraBrt.toISOString().substring(0, 10);
     if (dataStr !== hoje) {
         return { ok: false, error: 'Caronas só podem ser criadas para o dia atual.' };
     }
@@ -65,11 +69,12 @@ function validarDatetimeCarona(car_data, car_hor_saida) {
     }
     const horaStr = String(car_hor_saida).substring(0, 5);
 
-    const dtLocal = new Date(`${dataStr}T${horaStr}:00`);
-    if (isNaN(dtLocal.getTime())) {
+    const dtEnviado = new Date(`${dataStr}T${horaStr}:00`);
+    if (isNaN(dtEnviado.getTime())) {
         return { ok: false, error: 'Data/hora inválida.' };
     }
-    if (dtLocal <= new Date()) {
+    const agoraNaive = new Date(agoraBrt.toISOString().substring(0, 16) + ':00');
+    if (dtEnviado <= agoraNaive) {
         return { ok: false, error: 'A hora da carona não pode ser no passado.' };
     }
     return { ok: true };
