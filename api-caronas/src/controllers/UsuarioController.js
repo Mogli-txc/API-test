@@ -502,7 +502,7 @@ class UsuarioController {
                         u.usu_descricao, u.usu_foto, u.usu_endereco,
                         u.usu_verificacao, u.usu_verificacao_expira,
                         u.usu_exclusao_agendada,
-                        p.per_tipo, p.per_habilitado,
+                        p.per_tipo, p.per_habilitado, p.per_push_notif, p.per_notif_tipos,
                         c.cur_nome, e.esc_nome
                  FROM USUARIOS u
                  INNER JOIN PERFIL p ON u.usu_id = p.usu_id
@@ -1439,8 +1439,14 @@ class UsuarioController {
     /**
      * MÉTODO: atualizarConfig
      * Atualiza preferências do usuário armazenadas no PERFIL.
-     *   per_push_notif: 0=desativado, 1=ativado (notificações push)
-     *   per_raio_busca: 1–25 km (raio padrão na tela de busca de caronas)
+     *   per_push_notif:  0=desativado, 1=ativado (notificações push global)
+     *   per_raio_busca:  1–25 km (raio padrão — não exposto no frontend)
+     *   per_notif_tipos: objeto JSON com chaves de toggle e valores 0/1
+     *                    (null = todos habilitados)
+     *
+     * Chaves válidas para per_notif_tipos:
+     *   solicitacoes_recebidas | resultado_solicitacoes | alteracoes_carona
+     *   restricao_removida     | documentos_aprovados   | avisos_sistema
      *
      * PASSO 1: Valida que ao menos um campo foi enviado.
      * PASSO 2: Valida os valores individuais.
@@ -1451,12 +1457,17 @@ class UsuarioController {
     atualizarConfig = async (req, res) => {
         try {
             const usu_id = req.user.id;
-            const { per_push_notif, per_raio_busca } = req.body;
+            const { per_push_notif, per_raio_busca, per_notif_tipos } = req.body;
 
             // PASSO 1: Ao menos um campo obrigatório
-            if (per_push_notif === undefined && per_raio_busca === undefined) {
-                return res.status(400).json({ error: 'Informe ao menos um campo: per_push_notif ou per_raio_busca.' });
+            if (per_push_notif === undefined && per_raio_busca === undefined && per_notif_tipos === undefined) {
+                return res.status(400).json({ error: 'Informe ao menos um campo: per_push_notif, per_raio_busca ou per_notif_tipos.' });
             }
+
+            const TOGGLE_KEYS_VALID = new Set([
+                'solicitacoes_recebidas', 'resultado_solicitacoes', 'alteracoes_carona',
+                'restricao_removida', 'documentos_aprovados', 'avisos_sistema',
+            ]);
 
             const sets   = [];
             const params = [];
@@ -1480,12 +1491,33 @@ class UsuarioController {
                 params.push(val);
             }
 
+            if (per_notif_tipos !== undefined) {
+                if (per_notif_tipos === null) {
+                    // null restaura padrão (todos ativos)
+                    sets.push('per_notif_tipos = NULL');
+                } else {
+                    if (typeof per_notif_tipos !== 'object' || Array.isArray(per_notif_tipos)) {
+                        return res.status(400).json({ error: 'per_notif_tipos deve ser um objeto ou null.' });
+                    }
+                    for (const [k, v] of Object.entries(per_notif_tipos)) {
+                        if (!TOGGLE_KEYS_VALID.has(k)) {
+                            return res.status(400).json({ error: `Chave inválida em per_notif_tipos: "${k}".` });
+                        }
+                        if (![0, 1].includes(parseInt(v))) {
+                            return res.status(400).json({ error: `Valor inválido para "${k}": deve ser 0 ou 1.` });
+                        }
+                    }
+                    sets.push('per_notif_tipos = ?');
+                    params.push(JSON.stringify(per_notif_tipos));
+                }
+            }
+
             // PASSO 3: Atualiza e retorna estado atual
             params.push(usu_id);
             await db.query(`UPDATE PERFIL SET ${sets.join(', ')} WHERE usu_id = ?`, params);
 
             const [[config]] = await db.query(
-                'SELECT per_push_notif, per_raio_busca FROM PERFIL WHERE usu_id = ?',
+                'SELECT per_push_notif, per_raio_busca, per_notif_tipos FROM PERFIL WHERE usu_id = ?',
                 [usu_id]
             );
 

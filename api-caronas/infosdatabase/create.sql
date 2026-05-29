@@ -733,6 +733,12 @@
         ADD CONSTRAINT chk_per_raio_busca
             CHECK (per_raio_busca BETWEEN 1 AND 25);
 
+    -- Preferências de tipos de notificação in-app (JSON).
+    -- NULL = todos habilitados (padrão). Objeto com chaves de toggle e valores 0/1.
+    ALTER TABLE PERFIL
+        ADD COLUMN per_notif_tipos JSON NULL DEFAULT NULL
+            COMMENT 'Preferências de tipos push por toggle (NULL = todos ativos)';
+
     ALTER TABLE DENUNCIAS
         ADD CONSTRAINT chk_den_tipo
             CHECK (den_tipo IN (0, 1)),
