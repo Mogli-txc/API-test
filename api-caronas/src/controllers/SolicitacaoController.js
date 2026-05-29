@@ -397,9 +397,26 @@ class SolicitacaoController {
 
             const [solicitacoes] = await db.query(
                 `SELECT s.sol_id, s.car_id, s.sol_vaga_soli, s.sol_status,
-                        c.car_desc AS carona, c.car_data AS data_carona
+                        c.car_desc AS carona, c.car_data AS data_carona, c.car_hor_saida,
+                        u.usu_nome AS motorista_nome, u.usu_foto AS motorista_foto,
+                        origem.pon_nome AS origem_nome,
+                        destino.pon_nome AS destino_nome
                  FROM SOLICITACOES_CARONA s
-                 INNER JOIN CARONAS c ON s.car_id = c.car_id
+                 INNER JOIN CARONAS  c ON s.car_id  = c.car_id
+                 INNER JOIN VEICULOS v ON v.vei_id  = c.vei_id
+                 INNER JOIN USUARIOS u ON u.usu_id  = v.usu_id
+                 LEFT JOIN PONTO_ENCONTROS origem ON origem.pon_id = (
+                     SELECT pe.pon_id FROM PONTO_ENCONTROS pe
+                     WHERE pe.car_id = c.car_id AND pe.pon_tipo = 0 AND pe.pon_status = 1
+                     ORDER BY pe.pon_ordem IS NULL, pe.pon_ordem ASC, pe.pon_id ASC
+                     LIMIT 1
+                 )
+                 LEFT JOIN PONTO_ENCONTROS destino ON destino.pon_id = (
+                     SELECT pe.pon_id FROM PONTO_ENCONTROS pe
+                     WHERE pe.car_id = c.car_id AND pe.pon_tipo = 1 AND pe.pon_status = 1
+                     ORDER BY pe.pon_ordem IS NULL, pe.pon_ordem ASC, pe.pon_id ASC
+                     LIMIT 1
+                 )
                  WHERE s.usu_id_passageiro = ?
                  ORDER BY s.sol_id DESC
                  LIMIT ? OFFSET ?`,
