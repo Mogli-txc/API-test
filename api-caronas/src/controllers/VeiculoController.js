@@ -393,7 +393,7 @@ class VeiculoController {
 
             // Busca apenas veículos ativos (vei_status = 1) do usuário
             const [veiculos] = await db.query(
-                `SELECT vei_id, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em
+                `SELECT vei_id, vei_placa, vei_marca_modelo, vei_tipo, vei_cor, vei_vagas, vei_status, vei_criado_em
                  FROM VEICULOS
                  WHERE usu_id = ? AND vei_status = 1
                  ORDER BY vei_id ASC
