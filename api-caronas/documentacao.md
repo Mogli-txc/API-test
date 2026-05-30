@@ -52,6 +52,12 @@ info:
     `POST /api/caronas/oferecer` e `PUT /api/caronas/{car_id}`. Retornado em todas as
     consultas de carona. Default `0` (não aplicável).
 
+    **Coluna interna `car_alerta_saida_enviado` [v28]:** flag booleano (`TINYINT(1)`,
+    default `0`) em `CARONAS`. É **uso exclusivo do servidor** — definido como `1` pelo job
+    `alertarCaronaProxima` ao enviar o aviso de saída iminente, garantindo exatamente um
+    alerta por carona. **Não é aceito em requests nem retornado em respostas** da API;
+    existe apenas para idempotência do job.
+
     **Jobs agendados (node-cron, timezone America/Sao_Paulo) [v25]:**
     | Job | Horário | Ação |
     |---|---|---|

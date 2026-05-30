@@ -6,25 +6,28 @@
 -- ATENÇÃO: Execute sempre na ordem correta (do filho
 --          para o pai) para evitar erros de FK.
 --
--- Tabelas cobertas (18 — alinhado com create.sql):
+-- Tabelas cobertas (20 — alinhado com create.sql):
 --   AVALIACOES, MENSAGENS, CARONA_PESSOAS,
 --   SOLICITACOES_CARONA, PONTO_ENCONTROS,
 --   CARONAS, PENALIDADES, DOCUMENTOS_VERIFICACAO,
---   NOTIFICACOES, CURSOS_USUARIOS, VEICULOS,
---   SUGESTAO_DENUNCIA, PERFIL, USUARIOS_REGISTROS,
+--   NOTIFICACOES, PUSH_TOKENS, CURSOS_USUARIOS, VEICULOS,
+--   SUGESTOES, DENUNCIAS, PERFIL, USUARIOS_REGISTROS,
 --   USUARIOS, CURSOS, ESCOLAS, AUDIT_LOG
 --
--- DOIS CONJUNTOS DE DELETE DISPONÍVEIS:
+-- TRÊS CONJUNTOS DE DELETE DISPONÍVEIS:
 --
 --   BLOCO 1 — Remove os dados do INSERT original
 --             (4 usuários: Carlos, Mariana, Pedro, Ana)
 --
---   BLOCO 2 — Remove os dados do INSERT de testes
---             (10 usuários: Carlos, Mariana, Pedro, Ana,
---              Lucas, Admin, Novo, Pendente, Suspenso, TempVei)
+--   BLOCO 2 — Remove os dados base de testes
+--             (usu_id 1–13 | car_id 1–6 | esc_id 1–4)
+--
+--   BLOCO 3 — Remove o SEED TUPÃ/SP [v28]
+--             (usu_id 14–35 | car_id 7–21 | esc_id 5–7 | cur_id 6–11)
 --
 -- Para usar: selecione e execute apenas o bloco desejado.
--- Para limpar tudo: execute o BLOCO 2 — cobre tudo.
+-- Para limpar TUDO mantendo a estrutura: execute BLOCO 2 + BLOCO 3.
+-- Para zerar estrutura e dados: use apagar-banco.sql + create.sql.
 -- =====================================================
 
 
@@ -110,6 +113,7 @@ DELETE FROM VEICULOS            WHERE usu_id IN (1, 3, 5, 10);
 --   são listados explicitamente para clareza e limpeza garantida.
 DELETE FROM DOCUMENTOS_VERIFICACAO WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 DELETE FROM NOTIFICACOES        WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+DELETE FROM PUSH_TOKENS         WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);  -- [v27] tokens criados em runtime
 DELETE FROM DENUNCIAS           WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
                                    OR den_usu_alvo IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 DELETE FROM SUGESTOES           WHERE usu_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
@@ -127,6 +131,60 @@ SELECT 'BLOCO 2 removido com sucesso.' AS Status;
 
 
 -- =====================================================
+-- BLOCO 3 — DELETE do SEED TUPÃ/SP [v28]
+-- (usu_id 14–35 | car_id 7–21 | esc_id 5–7 | cur_id 6–11 | vei_id 6–15)
+--
+-- Ordem filho→pai respeitando os FKs RESTRICT verificados em create.sql:
+--   - MENSAGENS/CARONA_PESSOAS/SOLICITACOES_CARONA → RESTRICT em usu_id ⇒ saem antes de USUARIOS
+--   - DENUNCIAS/SUGESTOES → RESTRICT em usu_id (denunciante/autor) ⇒ saem antes de USUARIOS
+--   - PENALIDADES → CASCADE em usu_id (pen_aplicado_por=6 não é de Tupã)
+--   - CARONAS → RESTRICT em vei_id e cur_usu_id ⇒ sai antes de VEICULOS e CURSOS_USUARIOS
+-- =====================================================
+
+-- Nível 4a: AVALIACOES — FK RESTRICT em CARONAS e USUARIOS (nenhuma no seed, por segurança)
+DELETE FROM AVALIACOES          WHERE car_id IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+
+-- Nível 4b: Dependentes diretos de CARONAS (FK RESTRICT em usu — devem sair antes de USUARIOS)
+DELETE FROM MENSAGENS           WHERE car_id IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+DELETE FROM CARONA_PESSOAS      WHERE car_id IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+DELETE FROM SOLICITACOES_CARONA WHERE car_id IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+DELETE FROM PONTO_ENCONTROS     WHERE car_id IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+
+-- Nível 3b: DENUNCIAS — FK RESTRICT em usu_id (denunciante). Sai antes de USUARIOS.
+DELETE FROM DENUNCIAS           WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35)
+                                   OR den_usu_alvo IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35)
+                                   OR car_id IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+
+-- Nível 3: CARONAS — FK RESTRICT em vei_id e cur_usu_id. Sai antes de VEICULOS e CURSOS_USUARIOS.
+DELETE FROM CARONAS             WHERE car_id IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21);
+
+-- Nível 2.5: PENALIDADES (usu de Tupã penalizados — aplicador é Admin usu_id=6, preservado)
+DELETE FROM PENALIDADES         WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+
+-- Nível 2: Intermediárias dependentes de USUARIOS
+DELETE FROM CURSOS_USUARIOS     WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+DELETE FROM VEICULOS            WHERE usu_id IN (14,15,16,17,18,19,20,21,32,34);
+
+-- Nível 1: Dependentes de USUARIOS
+--   DOCUMENTOS_VERIFICACAO/NOTIFICACOES/PUSH_TOKENS → CASCADE; SUGESTOES → RESTRICT em usu_id.
+DELETE FROM DOCUMENTOS_VERIFICACAO WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+DELETE FROM NOTIFICACOES        WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+DELETE FROM PUSH_TOKENS         WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+DELETE FROM SUGESTOES           WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+DELETE FROM PERFIL              WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+DELETE FROM USUARIOS_REGISTROS  WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+
+-- Nível 0: Usuários de Tupã
+DELETE FROM USUARIOS            WHERE usu_id IN (14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35);
+
+-- Raiz: Cursos e Escolas de Tupã
+DELETE FROM CURSOS              WHERE esc_id IN (5, 6, 7);
+DELETE FROM ESCOLAS             WHERE esc_id IN (5, 6, 7);
+
+SELECT 'BLOCO 3 (Seed Tupã) removido com sucesso.' AS Status;
+
+
+-- =====================================================
 -- EXTRA — DELETE individual por tabela
 -- Use para limpar apenas uma tabela específica.
 -- =====================================================
@@ -139,7 +197,8 @@ SELECT 'BLOCO 2 removido com sucesso.' AS Status;
 -- DELETE FROM DOCUMENTOS_VERIFICACAO WHERE usu_id = 1;
 -- DELETE FROM NOTIFICACOES        WHERE usu_id = 1;
 -- DELETE FROM VEICULOS            WHERE usu_id = 1 AND vei_status = 0;
--- DELETE FROM SUGESTAO_DENUNCIA   WHERE sug_status = 0;
+-- DELETE FROM PUSH_TOKENS         WHERE usu_id = 1;
+-- DELETE FROM SUGESTOES           WHERE sug_status = 0;
 
 -- Apagar apenas os passageiros confirmados de uma carona
 -- DELETE FROM CARONA_PESSOAS WHERE car_id = 1 AND car_pes_status = 1;
