@@ -31,6 +31,7 @@ const TIPOS = Object.freeze({
     SOLICITACAO_RECUSADA:   'SOLICITACAO_RECUSADA',
     CARONA_CANCELADA:       'CARONA_CANCELADA',
     CARONA_FINALIZADA:      'CARONA_FINALIZADA',
+    CARONA_PROXIMA_SAIDA:   'CARONA_PROXIMA_SAIDA',
     AVALIACAO_RECEBIDA:     'AVALIACAO_RECEBIDA',
     PENALIDADE_APLICADA:    'PENALIDADE_APLICADA',
     PENALIDADE_REMOVIDA:    'PENALIDADE_REMOVIDA',
@@ -53,6 +54,7 @@ const TIPO_PARA_TOGGLE = Object.freeze({
     SOLICITACAO_RECUSADA:  'resultado_solicitacoes',
     CARONA_CANCELADA:      'alteracoes_carona',
     CARONA_FINALIZADA:     'alteracoes_carona',
+    CARONA_PROXIMA_SAIDA:  'alteracoes_carona',
     PENALIDADE_REMOVIDA:   'restricao_removida',
     DOCUMENTO_APROVADO:    'documentos',
     DOCUMENTO_REPROVADO:   'documentos',
@@ -66,7 +68,7 @@ const TIPO_PARA_TOGGLE = Object.freeze({
 // Tipos acionáveis e sensíveis ao tempo → canal Android de alta prioridade.
 const CANAL_CARONAS = new Set([
     'SOLICITACAO_NOVA', 'SOLICITACAO_ACEITA', 'SOLICITACAO_RECUSADA',
-    'CARONA_CANCELADA', 'CARONA_FINALIZADA',
+    'CARONA_CANCELADA', 'CARONA_FINALIZADA', 'CARONA_PROXIMA_SAIDA',
 ]);
 
 /**

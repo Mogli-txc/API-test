@@ -296,6 +296,7 @@
         car_vagas_dispo INT          NOT NULL               COMMENT 'Vagas disponíveis (1 a 6)',
         car_status      TINYINT      NOT NULL               COMMENT '1=Aberta, 2=Em espera, 0=Cancelada, 3=Finalizada',
         car_capacete    TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '1=Passageiro deve trazer capacete próprio (motos); 0=Capacete incluído ou não aplicável',
+        car_alerta_saida_enviado TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Flag: alerta de saída iminente enviado ao motorista e passageiros — evita duplicatas no job alertarCaronaProxima  [v28]',
 
         -- Soft delete com timestamp  [v3]
         car_deletado_em DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de cancelamento com timestamp (NULL = ativo); car_status=0 mantido para compatibilidade',
@@ -773,7 +774,7 @@
         ADD COLUMN per_email_tipos JSON NULL DEFAULT NULL
             COMMENT 'Preferências de tipos por email por toggle (NULL = todos ativos)';
 
-    -- Estende noti_tipo com tipos de documento e SISTEMA.
+    -- Estende noti_tipo com tipos de documento, SISTEMA e alerta de saída.
     ALTER TABLE NOTIFICACOES
         MODIFY COLUMN noti_tipo ENUM(
             'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
@@ -783,7 +784,8 @@
             'SISTEMA',
             'DOCUMENTO_APROVADO','DOCUMENTO_REPROVADO',
             'COMPROVANTE_APROVADO','COMPROVANTE_REPROVADO',
-            'CNH_APROVADA','CNH_REPROVADA'
+            'CNH_APROVADA','CNH_REPROVADA',
+            'CARONA_PROXIMA_SAIDA'
         ) NOT NULL COMMENT 'Tipo de notificação — ENUM garante integridade  [v14 — DB-06]';
 
     ALTER TABLE DENUNCIAS
@@ -810,3 +812,24 @@
     ALTER TABLE MENSAGENS         CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     ALTER TABLE SUGESTOES      CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     ALTER TABLE DENUNCIAS      CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+    -- =====================================================
+    -- v28 — migration-alerta-saida.sql
+    -- Flag de alerta de saída iminente em CARONAS + novo tipo CARONA_PROXIMA_SAIDA.
+    -- Para bancos já existentes, rode manualmente:
+    --
+    --   ALTER TABLE CARONAS
+    --       ADD COLUMN car_alerta_saida_enviado TINYINT(1) NOT NULL DEFAULT 0;
+    --
+    --   ALTER TABLE NOTIFICACOES
+    --       MODIFY COLUMN noti_tipo ENUM(
+    --           'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
+    --           'CARONA_CANCELADA','CARONA_FINALIZADA','AVALIACAO_RECEBIDA',
+    --           'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL',
+    --           'EXCLUSAO_CANCELADA','SISTEMA',
+    --           'DOCUMENTO_APROVADO','DOCUMENTO_REPROVADO',
+    --           'COMPROVANTE_APROVADO','COMPROVANTE_REPROVADO',
+    --           'CNH_APROVADA','CNH_REPROVADA',
+    --           'CARONA_PROXIMA_SAIDA'
+    --       ) NOT NULL;
+    -- =====================================================

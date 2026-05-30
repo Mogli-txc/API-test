@@ -58,6 +58,7 @@ info:
     | `autoCloseCaronas` | 00:00 | Finaliza caronas de dias anteriores (`car_status=3`). Notifica passageiros (`CARONA_FINALIZADA`) e motoristas (`SISTEMA`). |
     | `avisarVerificacaoExpirando` | 09:00 | Avisa (`SISTEMA`) usuários a 7 ou 1 dia de `usu_verificacao_expira` para reenviarem o comprovante. |
     | `verificarReceiptsPush` | a cada 15 min | Consulta os push receipts pendentes na Expo e remove tokens mortos (`DeviceNotRegistered`) da tabela `PUSH_TOKENS`. [v27] |
+    | `alertarCaronaProxima` | a cada 15 min | Envia `CARONA_PROXIMA_SAIDA` ao motorista e passageiros confirmados de caronas com saída nos próximos 15–45 min. Usa flag `CARONAS.car_alerta_saida_enviado` para garantir exatamente um alerta por carona. [v28] |
 
     Todos são desabilitados quando `NODE_ENV=test`.
 
@@ -1150,7 +1151,7 @@ paths:
         |--------------------------|--------------------------------------------------------|
         | `solicitacoes_recebidas` | `SOLICITACAO_NOVA`                                     |
         | `resultado_solicitacoes` | `SOLICITACAO_ACEITA`, `SOLICITACAO_RECUSADA`          |
-        | `alteracoes_carona`      | `CARONA_CANCELADA`, `CARONA_FINALIZADA`               |
+        | `alteracoes_carona`      | `CARONA_CANCELADA`, `CARONA_FINALIZADA`, `CARONA_PROXIMA_SAIDA` |
         | `restricao_removida`     | `PENALIDADE_REMOVIDA`                                 |
         | `documentos`             | `DOCUMENTO_*`, `COMPROVANTE_*`, `CNH_*` (aprov./reprov.)|
         | `avisos_sistema`         | `SISTEMA`                                             |
@@ -5115,15 +5116,47 @@ paths:
         | `SOLICITACAO_RECUSADA`  | Motorista recusa → passageiro                        |
         | `CARONA_CANCELADA`      | Motorista cancela → passageiros                      |
         | `CARONA_FINALIZADA`     | Carona finalizada (manual ou autoClose) → passageiros|
+        | `CARONA_PROXIMA_SAIDA`  | Job alertarCaronaProxima (~30 min antes) → motorista e passageiros confirmados [v28] |
         | `AVALIACAO_RECEBIDA`    | Usuário recebe avaliação                             |
         | `PENALIDADE_APLICADA`   | Admin aplica penalidade                              |
         | `PENALIDADE_REMOVIDA`   | Admin remove penalidade                              |
         | `ADMIN_MANUAL`          | Comunicado manual de Admin/Dev                       |
         | `EXCLUSAO_CANCELADA`    | Usuário cancela exclusão de conta                    |
-        | `SISTEMA`               | Avisos automáticos: autoClose (motorista), expiração de verificação |
+        | `SISTEMA`               | Avisos automáticos: autoClose (motorista), expiração de verificação (avisarVerificacaoExpirando) |
         | `DOCUMENTO_APROVADO` / `_REPROVADO`     | Documento genérico analisado          |
         | `COMPROVANTE_APROVADO` / `_REPROVADO`   | Comprovante de matrícula analisado    |
         | `CNH_APROVADA` / `_REPROVADA`           | CNH analisada                         |
+
+        **Catálogo de textos padrão [v28]:**
+        | Tipo | Título | Mensagem |
+        |------|--------|---------|
+        | `SOLICITACAO_NOVA` | Nova solicitação de carona | Um passageiro solicitou {N} vaga(s) na sua carona. |
+        | `SOLICITACAO_ACEITA` | Solicitação aceita! | O motorista aceitou sua solicitação de carona. |
+        | `SOLICITACAO_RECUSADA` | Solicitação recusada | O motorista recusou sua solicitação. |
+        | `CARONA_CANCELADA` | Carona cancelada | O motorista cancelou a carona que você participava. |
+        | `CARONA_FINALIZADA` (manual) | Carona finalizada | O motorista finalizou a carona. Que tal deixar uma avaliação? |
+        | `CARONA_FINALIZADA` (autoClose — passageiro) | Carona encerrada | Uma carona que você participava foi encerrada automaticamente. |
+        | `CARONA_FINALIZADA` (autoClose — motorista) via `SISTEMA` | Carona encerrada automaticamente | Sua carona foi encerrada automaticamente. Confira o histórico se precisar de informações. |
+        | `CARONA_PROXIMA_SAIDA` (motorista) | Sua carona parte em breve | Sua carona sai em aproximadamente 30 minutos. Prepare-se! |
+        | `CARONA_PROXIMA_SAIDA` (passageiro) | Carona parte em breve | Sua carona sai em aproximadamente 30 minutos. Prepare-se! |
+        | `COMPROVANTE_APROVADO` (OCR) | Comprovante verificado | Sua matrícula foi confirmada. Você já pode usar o app normalmente. |
+        | `COMPROVANTE_REPROVADO` (OCR) | Comprovante não reconhecido | O documento enviado não foi identificado como comprovante válido. Tente uma versão mais legível. |
+        | `CNH_APROVADA` (OCR, com veículo) | Verificação completa | Sua CNH foi validada. Você já pode oferecer caronas! |
+        | `CNH_APROVADA` (OCR, sem veículo) | CNH recebida | Sua CNH foi armazenada. Cadastre um veículo para completar sua verificação. |
+        | `CNH_REPROVADA` (OCR) | CNH não reconhecida | O documento enviado não foi identificado como CNH válida. Tente uma versão mais legível. |
+        | `COMPROVANTE_APROVADO` (admin) | Comprovante aprovado | Seu comprovante de matrícula foi aprovado pela equipe. |
+        | `COMPROVANTE_REPROVADO` (admin) | Comprovante reprovado | Seu comprovante foi reprovado. Envie um documento mais legível. |
+        | `CNH_APROVADA` (admin) | CNH aprovada | Sua CNH foi aprovada pela equipe. |
+        | `CNH_REPROVADA` (admin) | CNH reprovada | Sua CNH foi reprovada. Envie um documento mais legível. |
+        | `PENALIDADE_APLICADA` (tipo 1–3) | Penalidade aplicada | Uma restrição foi aplicada à sua conta{: motivo ou .} |
+        | `PENALIDADE_APLICADA` (tipo 4) | Conta suspensa | Sua conta foi suspensa pelo administrador. |
+        | `PENALIDADE_REMOVIDA` (tipo 1–3) | Restrição removida | Uma restrição foi removida da sua conta. |
+        | `PENALIDADE_REMOVIDA` (tipo 4) | Restrição removida | Sua conta foi reativada pelo administrador. |
+        | `AVALIACAO_RECEBIDA` | Você recebeu uma avaliação | Você recebeu nota {N} em uma carona. |
+        | `EXCLUSAO_CANCELADA` | Exclusão cancelada | Sua solicitação de exclusão de conta foi cancelada. Sua conta está ativa. |
+        | `SISTEMA` (verificação expirando — 1 dia) | Sua verificação está prestes a vencer | Sua verificação expira amanhã. Envie seu comprovante de matrícula para manter o acesso ao app. |
+        | `SISTEMA` (verificação expirando — N dias) | Sua verificação está prestes a vencer | Sua verificação expira em {N} dias. Envie seu comprovante de matrícula para manter o acesso ao app. |
+        | `ADMIN_MANUAL` | livre (admin define) | livre (admin define) |
 
         > **Nota de consumo (mobile):** o app trata alguns tipos como *email-only* e
         > os oculta do sino/lista (`AVALIACAO_RECEBIDA`, `EXCLUSAO_CANCELADA`,
