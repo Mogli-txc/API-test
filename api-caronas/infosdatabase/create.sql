@@ -697,6 +697,33 @@
             FOREIGN KEY (noti_remetente) REFERENCES USUARIOS (usu_id)
             ON DELETE SET NULL ON UPDATE CASCADE;
 
+    -- =====================================================
+    -- Tabela PUSH_TOKENS — tokens de push de SO (Expo Push)  [v27]
+    -- Relação N:1 com USUARIOS: um usuário pode ter vários devices.
+    -- O token é único globalmente — quando o mesmo device reloga em outra
+    -- conta, o UPSERT reassocia o token ao novo usuário (1 device = 1 conta ativa).
+    -- =====================================================
+    DROP TABLE IF EXISTS PUSH_TOKENS;
+    CREATE TABLE PUSH_TOKENS (
+        pst_id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Identificador do token (PK)',
+        usu_id         INT          NOT NULL               COMMENT 'Dono atual do device (FK → USUARIOS)',
+        pst_token      VARCHAR(255) NOT NULL               COMMENT 'ExponentPushToken[...] (ou token FCM/APNs no futuro)',
+        pst_plataforma ENUM('ios','android','web') NOT NULL COMMENT 'Plataforma do device',
+        pst_app_versao VARCHAR(20)  NULL     DEFAULT NULL  COMMENT 'Versão do app no registro (debug de tokens órfãos)',
+        pst_criado_em  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Primeiro registro do token',
+        pst_usado_em   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Último registro/uso bem-sucedido',
+        PRIMARY KEY (pst_id),
+        UNIQUE KEY UQ_push_token (pst_token),
+        INDEX idx_push_usu (usu_id)
+    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+    COMMENT = 'Tokens de notificação push por device — Expo Push  [v27]';
+
+    -- PUSH_TOKENS → USUARIOS  [v27]
+    ALTER TABLE PUSH_TOKENS
+        ADD CONSTRAINT FK_push_usu
+            FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
+            ON DELETE CASCADE ON UPDATE CASCADE;
+
     SET FOREIGN_KEY_CHECKS = 1;
 
     -- =====================================================

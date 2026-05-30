@@ -42,6 +42,7 @@ const { setIo }                       = require('./sockets/io');
 const { registrarNotificacoesSocket } = require('./sockets/notificacoesSocket');
 const { iniciarAutoCloseCaronas }     = require('./jobs/autoCloseCaronas');
 const { iniciarAvisarVerificacaoExpirando } = require('./jobs/avisarVerificacaoExpirando');
+const { iniciarVerificarReceiptsPush } = require('./jobs/verificarReceiptsPush');
 const db = require('./config/database'); // Pool MySQL — usado no health check
 
 // Importação das rotas
@@ -400,6 +401,7 @@ const httpServer = http.createServer(app);
 //   - Socket.io manteria o event loop vivo, impedindo o Jest de encerrar limpo
 iniciarAutoCloseCaronas();
 iniciarAvisarVerificacaoExpirando();
+iniciarVerificarReceiptsPush();
 
 if (process.env.NODE_ENV !== 'test') {
     const io = new SocketIOServer(httpServer, {

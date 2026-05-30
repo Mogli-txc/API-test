@@ -1564,6 +1564,77 @@ class UsuarioController {
             return res.status(500).json({ error: 'Erro ao atualizar configurações.' });
         }
     }
+
+    /**
+     * MÉTODO: registrarPushToken
+     * Associa um token de push (Expo) ao usuário autenticado.
+     *
+     * UPSERT por token: se o mesmo device (token único) já existir, reassocia ao
+     * usuário atual — cobre o caso de um aparelho que troca de conta. O token
+     * sempre pertence a uma única conta ativa por vez.
+     *
+     * POST /api/usuarios/me/push-token
+     * Body: { token, platform: 'ios'|'android'|'web', appVersion? }
+     */
+    registrarPushToken = async (req, res) => {
+        try {
+            const usu_id = req.user.id;
+            const { token, platform, appVersion } = req.body;
+
+            if (!token || typeof token !== 'string' || token.length > 255) {
+                return res.status(400).json({ error: 'token é obrigatório (string até 255 caracteres).' });
+            }
+            if (!['ios', 'android', 'web'].includes(platform)) {
+                return res.status(400).json({ error: "platform deve ser 'ios', 'android' ou 'web'." });
+            }
+
+            await db.query(
+                `INSERT INTO PUSH_TOKENS (usu_id, pst_token, pst_plataforma, pst_app_versao)
+                 VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                     usu_id         = VALUES(usu_id),
+                     pst_plataforma = VALUES(pst_plataforma),
+                     pst_app_versao = VALUES(pst_app_versao),
+                     pst_usado_em   = CURRENT_TIMESTAMP`,
+                [usu_id, token, platform, appVersion || null]
+            );
+
+            return res.status(204).send();
+        } catch (error) {
+            console.error('[ERRO] registrarPushToken:', error);
+            return res.status(500).json({ error: 'Erro ao registrar token de notificação.' });
+        }
+    }
+
+    /**
+     * MÉTODO: removerPushToken
+     * Desassocia um token do usuário autenticado (chamado no logout).
+     * Só remove se o token pertencer ao próprio usuário — evita que uma conta
+     * apague o token de outra que tenha relogado no mesmo device.
+     *
+     * DELETE /api/usuarios/me/push-token
+     * Body: { token }
+     */
+    removerPushToken = async (req, res) => {
+        try {
+            const usu_id = req.user.id;
+            const { token } = req.body;
+
+            if (!token || typeof token !== 'string') {
+                return res.status(400).json({ error: 'token é obrigatório.' });
+            }
+
+            await db.query(
+                'DELETE FROM PUSH_TOKENS WHERE pst_token = ? AND usu_id = ?',
+                [token, usu_id]
+            );
+
+            return res.status(204).send();
+        } catch (error) {
+            console.error('[ERRO] removerPushToken:', error);
+            return res.status(500).json({ error: 'Erro ao remover token de notificação.' });
+        }
+    }
 }
 
 module.exports = new UsuarioController();

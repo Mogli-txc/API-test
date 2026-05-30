@@ -119,6 +119,12 @@ router.get('/me/dashboard', authMiddleware, UsuarioController.dashboard);
 // PATCH /api/usuarios/me/config — atualiza preferências do usuário (push, raio de busca)
 router.patch('/me/config', authMiddleware, UsuarioController.atualizarConfig);
 
+// POST /api/usuarios/me/push-token — registra token de push (Expo) do device
+router.post('/me/push-token', authMiddleware, UsuarioController.registrarPushToken);
+
+// DELETE /api/usuarios/me/push-token — desassocia token de push no logout
+router.delete('/me/push-token', authMiddleware, UsuarioController.removerPushToken);
+
 // DELETE /api/usuarios/me/conta — agenda exclusão com 30 dias de graça (LGPD)
 router.delete('/me/conta', authMiddleware, UsuarioController.agendarExclusao);
 

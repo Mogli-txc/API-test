@@ -57,15 +57,27 @@ info:
     |---|---|---|
     | `autoCloseCaronas` | 00:00 | Finaliza caronas de dias anteriores (`car_status=3`). Notifica passageiros (`CARONA_FINALIZADA`) e motoristas (`SISTEMA`). |
     | `avisarVerificacaoExpirando` | 09:00 | Avisa (`SISTEMA`) usuários a 7 ou 1 dia de `usu_verificacao_expira` para reenviarem o comprovante. |
+    | `verificarReceiptsPush` | a cada 15 min | Consulta os push receipts pendentes na Expo e remove tokens mortos (`DeviceNotRegistered`) da tabela `PUSH_TOKENS`. [v27] |
 
-    Ambos são desabilitados quando `NODE_ENV=test`.
+    Todos são desabilitados quando `NODE_ENV=test`.
 
     **Preferências de notificação por tipo [v25]:** a coluna `PERFIL.per_notif_tipos`
     (JSON, nullable) guarda toggles por categoria de notificação (canal push/in-app).
     A coluna `PERFIL.per_email_tipos` (JSON, nullable) guarda toggles do canal de
     email, independente do push. Veja `PATCH /api/usuarios/me/config`.
     `null` = todos os tipos ativos.
-  version: 1.12.0
+
+    **Notificações push de SO (Expo Push) [v27]:** além do broadcast em tempo real
+    via Socket.io (app aberto), o utilitário `notificar()` envia notificações push de
+    sistema (FCM/APNs via Expo) para os devices registrados, entregues mesmo com o app
+    em background ou fechado. Os tokens ficam na tabela `PUSH_TOKENS` (1 device = 1
+    conta ativa; UPSERT por token; N tokens por usuário). O envio respeita
+    `PERFIL.per_push_notif` (global) e `PERFIL.per_notif_tipos` (por tipo) **no
+    servidor**, é fire-and-forget e roteia eventos de carona para o canal Android de
+    alta prioridade `caronas`. Registre/desassocie tokens via
+    `POST`/`DELETE /api/usuarios/me/push-token`. A variável `EXPO_ACCESS_TOKEN`
+    (opcional) autentica os envios na Expo.
+  version: 1.13.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -1203,6 +1215,91 @@ paths:
         '400':
           description: Nenhum campo informado, valor fora do intervalo, ou chave inválida em per_notif_tipos/per_email_tipos
         '401': { description: Não autenticado }
+
+  /api/usuarios/me/push-token:
+    post:
+      tags: [Usuários]
+      summary: Registrar token de push de SO (Expo Push) [v27]
+      description: |
+        Associa um Expo push token (`ExponentPushToken[...]`) ao usuário autenticado,
+        usado para entrega de notificações push de SO quando o app está em
+        background ou fechado.
+
+        **UPSERT por token:** o `pst_token` é único globalmente (tabela `PUSH_TOKENS`).
+        Se o mesmo device (token) já existir, é **reassociado** ao usuário atual —
+        cobre o caso de um aparelho que troca de conta. Um token sempre pertence a
+        uma única conta ativa por vez. Um usuário pode ter vários tokens (multi-device).
+
+        **Entrega:** o utilitário `notificar()` envia o push (via `pushService`/Expo)
+        respeitando as preferências do usuário **no servidor**:
+        - `PERFIL.per_push_notif = 0` → push global desligado (nada é enviado).
+        - `PERFIL.per_notif_tipos[<toggle>] = 0` → tipo específico desligado.
+
+        Eventos de carona (`SOLICITACAO_*`, `CARONA_*`) usam o canal Android de alta
+        prioridade `caronas`; os demais usam `default`. O envio é fire-and-forget —
+        nunca atrasa nem quebra a request que o originou.
+
+        Tokens inválidos (`DeviceNotRegistered`) são removidos automaticamente: na
+        resposta imediata do envio e via job de receipts (`*/15 min`).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, platform]
+              properties:
+                token:
+                  type: string
+                  maxLength: 255
+                  description: "Expo push token do device"
+                  example: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+                  example: android
+                appVersion:
+                  type: string
+                  nullable: true
+                  description: "Versão do app no registro (debug de tokens órfãos)"
+                  example: "0.4.0-alpha.4"
+      responses:
+        '204':
+          description: Token registrado/reassociado (sem corpo)
+        '400':
+          description: token ausente/grande demais ou platform inválida
+        '401':
+          description: Não autenticado
+
+    delete:
+      tags: [Usuários]
+      summary: Desassociar token de push (logout) [v27]
+      description: |
+        Remove o vínculo de um token de push com o usuário autenticado. Chamado pelo
+        app no logout para que o device pare de receber push daquela conta (importante
+        em aparelho compartilhado). Só remove se o token pertencer ao próprio usuário.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  example: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+      responses:
+        '204':
+          description: Token removido (ou inexistente — idempotente)
+        '400':
+          description: token ausente
+        '401':
+          description: Não autenticado
 
   /api/usuarios/me/conta:
     delete:
