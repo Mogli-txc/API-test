@@ -22,6 +22,7 @@
  *   GET    /api/admin/escolas                            — lista escolas (Admin: apenas a própria)
  *   GET    /api/admin/escolas/:esc_id                   — dados de uma escola com seus cursos
  *   GET    /api/admin/escolas/:esc_id/contrato/arquivo  — download do PDF do contrato [v27]
+ *   GET    /api/admin/escolas/:esc_id/ocr-base/arquivo  — download do PDF de template OCR [v28]
  *   GET    /api/admin/cursos                            — lista cursos (Admin: apenas escola própria)
  *
  * Tipos de penalidade (pen_tipo):
@@ -1320,6 +1321,59 @@ class AdminController {
         } catch (error) {
             console.error("[ERRO] baixarContratoEscola:", error);
             return res.status(500).json({ error: "Erro ao servir o contrato da escola." });
+        }
+    }
+
+    /**
+     * MÉTODO: baixarOcrBaseEscola
+     * Serve o arquivo PDF de template OCR de uma escola para download.
+     * Dev (per_tipo=2): acessa o template de qualquer escola.
+     * Admin (per_tipo=1): acessa apenas o template da própria escola.
+     * Retorna 404 se a escola não existe ou não possui template arquivado.
+     *
+     * GET /api/admin/escolas/:esc_id/ocr-base/arquivo  [v28]
+     */
+    async baixarOcrBaseEscola(req, res) {
+        try {
+            const { esc_id } = req.params;
+            const { per_tipo, per_escola_id } = req.user;
+
+            if (!esc_id || isNaN(esc_id)) {
+                return res.status(400).json({ error: "ID de escola inválido." });
+            }
+
+            // PASSO 1: Admin só acessa o template da própria escola
+            if (per_tipo === 1 && parseInt(esc_id) !== per_escola_id) {
+                return res.status(403).json({ error: "Sem permissão para acessar o template OCR desta escola." });
+            }
+
+            // PASSO 2: Busca o caminho do arquivo no banco
+            const [[escola]] = await db.query(
+                'SELECT esc_id, esc_nome, esc_ocr_base FROM ESCOLAS WHERE esc_id = ?',
+                [esc_id]
+            );
+
+            if (!escola) return res.status(404).json({ error: "Escola não encontrada." });
+            if (!escola.esc_ocr_base) {
+                return res.status(404).json({ error: "Esta escola não possui template OCR arquivado." });
+            }
+
+            // PASSO 3: Monta o caminho absoluto e serve o PDF como download
+            const caminhoAbsoluto = path.join(process.cwd(), 'public', escola.esc_ocr_base);
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="ocr_base_escola_${esc_id}.pdf"`);
+
+            return res.sendFile(caminhoAbsoluto, (err) => {
+                if (err && !res.headersSent) {
+                    console.error("[ERRO] baixarOcrBaseEscola — arquivo ausente em disco:", err.message);
+                    return res.status(404).json({ error: "Arquivo de template OCR não encontrado no servidor." });
+                }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] baixarOcrBaseEscola:", error);
+            return res.status(500).json({ error: "Erro ao servir o template OCR da escola." });
         }
     }
 

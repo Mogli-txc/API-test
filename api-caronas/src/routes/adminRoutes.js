@@ -146,6 +146,13 @@ router.get('/escolas/:esc_id', ...adminGuard, AdminController.obterEscola);
 router.get('/escolas/:esc_id/contrato/arquivo', ...adminGuard, AdminController.baixarContratoEscola);
 
 /**
+ * GET /api/admin/escolas/:esc_id/ocr-base/arquivo
+ * Serve o PDF de template OCR de uma escola para download.
+ * Dev: acessa qualquer escola. Admin (per_tipo=1): apenas a própria escola.  [v28]
+ */
+router.get('/escolas/:esc_id/ocr-base/arquivo', ...adminGuard, AdminController.baixarOcrBaseEscola);
+
+/**
  * GET /api/admin/cursos
  * Lista cursos. Admin filtra pela própria escola; Dev vê todos (?esc_id= opcional).
  */

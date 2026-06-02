@@ -65,7 +65,7 @@ info:
     A coluna `PERFIL.per_email_tipos` (JSON, nullable) guarda toggles do canal de
     email, independente do push. Veja `PATCH /api/usuarios/me/config`.
     `null` = todos os tipos ativos.
-  version: 1.13.0
+  version: 1.14.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -4561,6 +4561,45 @@ paths:
         '404':
           description: Escola não encontrada ou contrato não arquivado
 
+  /api/admin/escolas/{esc_id}/ocr-base/arquivo:
+    get:
+      summary: Download do PDF de template OCR da escola [v28]
+      tags: [Admin]
+      description: |
+        Serve o arquivo PDF de template OCR arquivado para a escola especificada.
+
+        **Dev (per_tipo=2):** acessa o template de qualquer escola.
+        **Admin (per_tipo=1):** acessa apenas o template da própria escola.
+
+        O arquivo é entregue com `Content-Disposition: attachment` — o navegador
+        inicia o download diretamente. Retorna **404** se a escola não possui
+        template arquivado (campo `esc_ocr_base` nulo) ou se o arquivo
+        não existir em disco.
+
+        > O upload do PDF é feito pelo Dev via `POST /api/dev/escolas/{esc_id}/ocr-base`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+          description: ID da escola cujo template OCR será baixado
+      responses:
+        '200':
+          description: Arquivo PDF do template OCR enviado para download
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: esc_id inválido
+        '403':
+          description: Admin tentando acessar template de escola alheia
+        '404':
+          description: Escola não encontrada ou template não arquivado
+
   /api/admin/cursos:
     get:
       summary: Lista cursos do sistema
@@ -5997,6 +6036,60 @@ paths:
                   message: { type: string, example: Contrato enviado com sucesso. }
                   esc_id: { type: integer }
                   esc_contrato_arquivo: { type: string, example: "contratos/1748901234-987654321.pdf" }
+        '400':
+          description: Arquivo ausente, tipo inválido, muito grande ou campo incorreto
+        '403': { description: Apenas Desenvolvedor }
+        '404': { description: Escola não encontrada }
+
+  /api/dev/escolas/{esc_id}/ocr-base:
+    post:
+      summary: Upload do PDF de template OCR de escola (Dev only) [v23]
+      tags: [Dev]
+      description: |
+        Recebe o arquivo PDF de exemplo de comprovante de matrícula usado como
+        referência para calibragem do OCR da escola. O arquivo é armazenado em
+        `/public/ocr-base/` e o caminho relativo é gravado em
+        `ESCOLAS.esc_ocr_base`.
+
+        **Validações:**
+        - Content-Type da parte deve ser `application/pdf`
+        - Magic bytes verificados (`%PDF-`) — rejeita arquivos falsificados
+        - Tamanho máximo: 10 MB
+
+        **Campo do formulário:** `ocr_base` (multipart/form-data).
+
+        Erros de upload (arquivo grande, campo errado, tipo inválido) retornam
+        **400** com mensagem legível — nunca 500 [v27].
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: esc_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [ocr_base]
+              properties:
+                ocr_base:
+                  type: string
+                  format: binary
+                  description: PDF de template OCR — máximo 10 MB
+      responses:
+        '200':
+          description: Template enviado e caminho gravado no banco
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Template OCR enviado com sucesso. }
+                  esc_id: { type: integer }
+                  esc_ocr_base: { type: string, example: "ocr-base/1748901234-987654321.pdf" }
         '400':
           description: Arquivo ausente, tipo inválido, muito grande ou campo incorreto
         '403': { description: Apenas Desenvolvedor }
