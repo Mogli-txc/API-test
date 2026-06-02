@@ -405,10 +405,11 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). **Admin** tem escopo restrito à sua
 
 | Método | Rota               | Acesso    | Descrição                                                       |
 |--------|--------------------|-----------|-----------------------------------------------------------------|
-| GET    | `/escolas`         | Admin/Dev | Lista escolas (Admin: apenas a própria; `?q=`)                  |
-| GET    | `/escolas/:esc_id` | Admin/Dev | Dados da escola com cursos vinculados                           |
-| GET    | `/cursos`          | Admin/Dev | Lista cursos (Admin: escola; Dev: todos; `?esc_id=`)            |
-| GET    | `/contrato`        | Admin     | Detalhes do contrato da própria escola (status, dias restantes) |
+| GET    | `/escolas`                           | Admin/Dev | Lista escolas (Admin: apenas a própria; `?q=`)                  |
+| GET    | `/escolas/:esc_id`                   | Admin/Dev | Dados da escola com cursos vinculados                           |
+| GET    | `/escolas/:esc_id/contrato/arquivo`  | Admin/Dev | Download do PDF do contrato (Admin: apenas a própria escola) [v27] |
+| GET    | `/cursos`                            | Admin/Dev | Lista cursos (Admin: escola; Dev: todos; `?esc_id=`)            |
+| GET    | `/contrato`                          | Admin     | Detalhes do contrato da própria escola (status, dias restantes) |
 
 #### Notificações
 
@@ -459,9 +460,10 @@ Exclusivo para Desenvolvedor (`per_tipo = 2`). Admins recebem 403. O Dev também
 | POST   | `/escolas`                  | Dev    | Cria escola                                            |
 | PUT    | `/escolas/:esc_id`          | Dev    | Atualiza dados da escola                               |
 | DELETE | `/escolas/:esc_id`          | Dev    | Remove escola (bloqueado se houver cursos vinculados)  |
-| POST   | `/escolas/:esc_id/contrato` | Dev    | Define/renova contrato (`1ano`, `2anos`, `5anos`)      |
-| DELETE | `/escolas/:esc_id/contrato` | Dev    | Cancela contrato (zera campos de contrato)             |
-| POST   | `/escolas/:esc_id/cursos`   | Dev    | Cria curso vinculado a uma escola                      |
+| POST   | `/escolas/:esc_id/contrato`          | Dev    | Define/renova contrato (`1ano`, `2anos`, `5anos`)          |
+| DELETE | `/escolas/:esc_id/contrato`          | Dev    | Cancela contrato (zera campos de contrato)                 |
+| POST   | `/escolas/:esc_id/contrato/arquivo`  | Dev    | Upload do PDF do contrato (`multipart/form-data`, campo `contrato`) |
+| POST   | `/escolas/:esc_id/cursos`            | Dev    | Cria curso vinculado a uma escola                          |
 | PUT    | `/cursos/:cur_id`           | Dev    | Atualiza dados do curso                                |
 | DELETE | `/cursos/:cur_id`           | Dev    | Remove curso (bloqueado se houver matrículas)          |
 
@@ -562,6 +564,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v24    | Preferências de usuário em PERFIL (`per_push_notif`, `per_raio_busca`); 5 endpoints: `GET /caronas/buscar/mapa`, `GET /caronas/:id/participantes`, `POST /mensagens/carona/:id/ler-todas`, `GET /notificacoes/resumo`, `PATCH /usuarios/me/config` |
 | v25    | Bugfix de fuso horário em `validarDatetimeCarona`: substitui `new Date().toISOString()` (UTC) por offset fixo BRT (UTC-3) — corrige 400 indevido das 00:00–02:59 UTC para clientes em São Paulo; restrição geográfica de escola (500 m) desabilitada temporariamente para testes em homologação |
 | v26    | Canal de email independente do push: coluna `PERFIL.per_email_tipos` (JSON, nullable); `PATCH /me/config` aceita `per_email_tipos`; email de resultado de solicitação (`solicitacao_resposta`) gateado por `per_email_tipos.resultado_solicitacoes` em vez de `per_notif_tipos` |
+| v27    | Bugfix de upload de contrato: `MulterError` não possuía `.status`, causando 500 em erros de upload (arquivo grande, campo errado, tipo inválido) — handler específico adicionado em `server.js` retorna 400 com mensagem legível; novo endpoint `GET /api/admin/escolas/:esc_id/contrato/arquivo` para download do PDF do contrato (Dev: qualquer escola; Admin: apenas a própria) |
 
 ---
 

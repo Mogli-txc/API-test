@@ -19,9 +19,10 @@
  *   GET    /api/admin/matriculas                    — lista matrículas com dados de usuário e curso
  *   GET    /api/admin/avaliacoes                    — lista avaliações com nomes dos participantes
  *   GET    /api/admin/veiculos                      — lista veículos com dados do proprietário
- *   GET    /api/admin/escolas                       — lista escolas (Admin: apenas a própria)
- *   GET    /api/admin/escolas/:esc_id               — dados de uma escola com seus cursos
- *   GET    /api/admin/cursos                        — lista cursos (Admin: apenas escola própria)
+ *   GET    /api/admin/escolas                            — lista escolas (Admin: apenas a própria)
+ *   GET    /api/admin/escolas/:esc_id                   — dados de uma escola com seus cursos
+ *   GET    /api/admin/escolas/:esc_id/contrato/arquivo  — download do PDF do contrato [v27]
+ *   GET    /api/admin/cursos                            — lista cursos (Admin: apenas escola própria)
  *
  * Tipos de penalidade (pen_tipo):
  *   1 = Não pode oferecer caronas    (temporário: 1semana, 2semanas, 1mes, 3meses, 6meses)
@@ -30,6 +31,7 @@
  *   4 = Conta suspensa — todos os recursos bloqueados, login negado (permanente)
  */
 
+const path = require('path');
 const db = require('../config/database');
 const { stripHtml }                      = require('../utils/sanitize');
 const { registrarAudit }                 = require('../utils/auditLog');
@@ -1265,6 +1267,59 @@ class AdminController {
         } catch (error) {
             console.error("[ERRO] obterEscola:", error);
             return res.status(500).json({ error: "Erro ao obter escola." });
+        }
+    }
+
+    /**
+     * MÉTODO: baixarContratoEscola
+     * Serve o arquivo PDF do contrato de uma escola para download.
+     * Dev (per_tipo=2): acessa o contrato de qualquer escola.
+     * Admin (per_tipo=1): acessa apenas o contrato da própria escola.
+     * Retorna 404 se a escola não existe ou não possui contrato arquivado.
+     *
+     * GET /api/admin/escolas/:esc_id/contrato/arquivo  [v27]
+     */
+    async baixarContratoEscola(req, res) {
+        try {
+            const { esc_id } = req.params;
+            const { per_tipo, per_escola_id } = req.user;
+
+            if (!esc_id || isNaN(esc_id)) {
+                return res.status(400).json({ error: "ID de escola inválido." });
+            }
+
+            // PASSO 1: Admin só acessa o contrato da própria escola
+            if (per_tipo === 1 && parseInt(esc_id) !== per_escola_id) {
+                return res.status(403).json({ error: "Sem permissão para acessar o contrato desta escola." });
+            }
+
+            // PASSO 2: Busca o caminho do arquivo no banco
+            const [[escola]] = await db.query(
+                'SELECT esc_id, esc_nome, esc_contrato_arquivo FROM ESCOLAS WHERE esc_id = ?',
+                [esc_id]
+            );
+
+            if (!escola) return res.status(404).json({ error: "Escola não encontrada." });
+            if (!escola.esc_contrato_arquivo) {
+                return res.status(404).json({ error: "Esta escola não possui contrato arquivado." });
+            }
+
+            // PASSO 3: Monta o caminho absoluto e serve o PDF como download
+            const caminhoAbsoluto = path.join(process.cwd(), 'public', escola.esc_contrato_arquivo);
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="contrato_escola_${esc_id}.pdf"`);
+
+            return res.sendFile(caminhoAbsoluto, (err) => {
+                if (err && !res.headersSent) {
+                    console.error("[ERRO] baixarContratoEscola — arquivo ausente em disco:", err.message);
+                    return res.status(404).json({ error: "Arquivo de contrato não encontrado no servidor." });
+                }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] baixarContratoEscola:", error);
+            return res.status(500).json({ error: "Erro ao servir o contrato da escola." });
         }
     }
 

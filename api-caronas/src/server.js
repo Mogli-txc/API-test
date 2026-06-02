@@ -364,6 +364,31 @@ app.use((req, res) => {
 });
 
 /**
+ * Handler específico para erros do Multer [v27]
+ * MulterError não possui .status — sem este handler, erros de upload (arquivo
+ * grande, campo errado, tipo inválido) retornam 500 em vez de 400.
+ * Deve vir ANTES do handler genérico para interceptar antes do fallback.
+ */
+app.use((err, req, res, next) => {
+    if (err && err.name === 'MulterError') {
+        // Mapeia cada código de erro do Multer para uma mensagem amigável
+        const mensagens = {
+            LIMIT_FILE_SIZE:       'Arquivo muito grande. Tamanho máximo permitido: 10 MB.',
+            LIMIT_FILE_COUNT:      'Número máximo de arquivos excedido.',
+            LIMIT_UNEXPECTED_FILE: 'Campo de arquivo inesperado. Verifique o nome do campo no formulário.',
+            LIMIT_FIELD_COUNT:     'Número máximo de campos do formulário excedido.',
+            LIMIT_FIELD_KEY:       'Nome do campo do formulário muito longo.',
+            LIMIT_FIELD_VALUE:     'Valor do campo do formulário muito longo.',
+            LIMIT_PART_COUNT:      'Número máximo de partes do formulário excedido.',
+        };
+        return res.status(400).json({
+            error: mensagens[err.code] || `Erro de upload: ${err.message}`
+        });
+    }
+    next(err);
+});
+
+/**
  * Middleware de Erro Global (Melhorado)
  * Captura erros não tratados em qualquer rota/middleware
  */

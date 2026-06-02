@@ -139,6 +139,13 @@ router.get('/escolas', ...adminGuard, AdminController.listarEscolas);
 router.get('/escolas/:esc_id', ...adminGuard, AdminController.obterEscola);
 
 /**
+ * GET /api/admin/escolas/:esc_id/contrato/arquivo
+ * Serve o PDF do contrato de uma escola para download.
+ * Dev: acessa qualquer escola. Admin (per_tipo=1): apenas a própria escola.  [v27]
+ */
+router.get('/escolas/:esc_id/contrato/arquivo', ...adminGuard, AdminController.baixarContratoEscola);
+
+/**
  * GET /api/admin/cursos
  * Lista cursos. Admin filtra pela própria escola; Dev vê todos (?esc_id= opcional).
  */
