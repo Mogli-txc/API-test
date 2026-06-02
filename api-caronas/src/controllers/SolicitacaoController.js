@@ -22,12 +22,12 @@ const { notificar, TIPOS }         = require('../utils/notificar');
  * pode vir como objeto (coluna JSON), string ou null/ausente (= todos ativos).
  */
 function querEmailResultadoSolicitacao(perEmailTipos) {
-    if (!perEmailTipos) return true;
+    if (!perEmailTipos) return false;
     let prefs = perEmailTipos;
     if (typeof prefs === 'string') {
-        try { prefs = JSON.parse(prefs); } catch { return true; }
+        try { prefs = JSON.parse(prefs); } catch { return false; }
     }
-    return Number(prefs.resultado_solicitacoes ?? 1) !== 0;
+    return Number(prefs.resultado_solicitacoes ?? 0) !== 0;
 }
 
 class SolicitacaoController {

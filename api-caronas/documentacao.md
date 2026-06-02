@@ -61,7 +61,7 @@ info:
     **Jobs agendados (node-cron, timezone America/Sao_Paulo) [v25]:**
     | Job | Horário | Ação |
     |---|---|---|
-    | `autoCloseCaronas` | 00:00 | Finaliza caronas de dias anteriores (`car_status=3`). Notifica passageiros (`CARONA_FINALIZADA`) e motoristas (`SISTEMA`). |
+    | `autoCloseCaronas` | 00:00 | Finaliza caronas de dias anteriores (`car_status=3`). Notifica passageiros e motoristas com `CARONA_FINALIZADA` (mesmo tipo, para que o listener `RELEVANT_TYPES` do app dispare `loadActiveRide` e o card desapareça automaticamente). Exporta `executarAutoClose()` para disparo manual via `POST /api/dev/jobs/auto-close-caronas`. |
     | `avisarVerificacaoExpirando` | 09:00 | Avisa (`SISTEMA`) usuários a 7 ou 1 dia de `usu_verificacao_expira` para reenviarem o comprovante. |
     | `verificarReceiptsPush` | a cada 15 min | Consulta os push receipts pendentes na Expo e remove tokens mortos (`DeviceNotRegistered`) da tabela `PUSH_TOKENS`. [v27] |
     | `alertarCaronaProxima` | a cada 15 min | Envia `CARONA_PROXIMA_SAIDA` ao motorista e passageiros confirmados de caronas com saída nos próximos 15–45 min. Usa flag `CARONAS.car_alerta_saida_enviado` para garantir exatamente um alerta por carona. [v28] |
@@ -1171,8 +1171,11 @@ paths:
         `per_email_tipos` controla email. O envio do email de resultado de
         solicitação respeita `per_email_tipos.resultado_solicitacoes`.
 
-        Chaves não enviadas mantêm o valor anterior. Uma chave ausente (ou o
-        objeto `null`) significa tipo ativo.
+        Chaves não enviadas mantêm o valor anterior. Para `per_notif_tipos`, uma
+        chave ausente (ou objeto `null`) significa tipo **ativo** (opt-out).
+        Para `per_email_tipos`, uma chave ausente ou objeto `null` significa tipo
+        **desabilitado** (opt-in) — `querEmailResultadoSolicitacao(null)` retorna
+        `false`, tornando o email de resultado de solicitação desligado por padrão.
       security:
         - bearerAuth: []
       requestBody:
@@ -3053,6 +3056,21 @@ paths:
                       properties:
                         car_id: { type: integer }
                         car_data: { type: string, format: date }
+                        motorista_id: { type: integer, nullable: true }
+                        motorista_nome: { type: string, nullable: true }
+                        motorista_foto: { type: string, nullable: true }
+                        outro_id:
+                          type: integer
+                          nullable: true
+                          description: "ID do outro participante da conversa (não o usuário atual). Passageiro quando o usuário é motorista; motorista quando o usuário é passageiro."
+                        outro_nome:
+                          type: string
+                          nullable: true
+                          description: "Nome do outro participante. Substitui a lógica condicional do frontend."
+                        outro_foto:
+                          type: string
+                          nullable: true
+                          description: "Foto do outro participante (URL bruta, normalizar com resolvePublicUrl)."
                         ultima_mensagem: { type: string, nullable: true }
                         em: { type: string, format: date-time, nullable: true }
                         nao_lidas: { type: integer }
@@ -6380,6 +6398,43 @@ paths:
                         pen_expira_em: { type: string, format: date-time, nullable: true }
             text/csv:
               schema: { type: string }
+
+  /api/dev/jobs/auto-close-caronas:
+    post:
+      tags: [Dev]
+      summary: Disparo manual do job autoCloseCaronas (Dev only)
+      description: |
+        Executa imediatamente a lógica do job `autoCloseCaronas` sem aguardar a
+        schedule de 00:00 BRT. Útil em desenvolvimento quando o servidor ficou
+        offline durante a madrugada e caronas do dia anterior ficaram com
+        `car_status=1` no banco (o cron não rodou).
+
+        A lógica executada é idêntica à do job agendado:
+        1. Coleta passageiros aceitos das caronas a fechar.
+        2. Coleta motoristas.
+        3. `UPDATE CARONAS SET car_status = 3 WHERE DATE(car_data) < CURDATE()`.
+        4. Envia notificações `CARONA_FINALIZADA` aos passageiros e `SISTEMA` aos motoristas.
+
+        **Restrito a `per_tipo = 2` (Desenvolvedor).** Não disponível em `NODE_ENV=test`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Job executado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Job executado. 2 carona(s) finalizada(s)."
+                  fechadas:
+                    type: integer
+                    example: 2
+        '401': { description: Não autenticado }
+        '403': { description: Apenas Desenvolvedor }
+        '500': { description: Erro ao executar o job }
 
   /api/dev/relatorios/usuarios:
     get:

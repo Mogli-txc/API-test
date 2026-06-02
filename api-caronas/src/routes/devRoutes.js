@@ -181,4 +181,27 @@ router.put('/cursos/:cur_id', ...devGuard, DevController.atualizarCurso);
  */
 router.delete('/cursos/:cur_id', ...devGuard, DevController.deletarCurso);
 
+// ── Disparo manual de jobs (dev only) ────────────────────────────────────────
+
+const { executarAutoClose } = require('../jobs/autoCloseCaronas');
+
+/**
+ * POST /api/dev/jobs/auto-close-caronas
+ * Executa imediatamente o job autoCloseCaronas sem esperar 00:00.
+ * Útil quando o servidor ficou off durante a madrugada e caronas do dia
+ * anterior ficaram com car_status=1 no banco.
+ */
+router.post('/jobs/auto-close-caronas', ...devGuard, async (req, res) => {
+    try {
+        const resultado = await executarAutoClose();
+        return res.status(200).json({
+            message: `Job executado. ${resultado.fechadas} carona(s) finalizada(s).`,
+            fechadas: resultado.fechadas,
+        });
+    } catch (err) {
+        console.error('[DEV] auto-close-caronas manual:', err);
+        return res.status(500).json({ error: 'Erro ao executar o job.' });
+    }
+});
+
 module.exports = router;
