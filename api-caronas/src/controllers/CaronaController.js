@@ -1128,7 +1128,7 @@ class CaronaController {
                 return res.status(409).json({ error: "Não é possível cancelar uma carona já finalizada." });
             }
 
-            // PASSO PRÉ: Captura passageiros confirmados antes de cancelar (para notificação)
+            // PASSO PRÉ: Captura passageiros confirmados E pendentes antes de cancelar
             const [passageirosParaNotificar] = await db.query(
                 `SELECT sc.usu_id_passageiro AS usu_id FROM SOLICITACOES_CARONA sc
                  WHERE sc.car_id = ? AND sc.sol_status = 2
@@ -1136,6 +1136,11 @@ class CaronaController {
                  SELECT cp.usu_id FROM CARONA_PESSOAS cp
                  WHERE cp.car_id = ? AND cp.car_pes_status = 1`,
                 [car_id, car_id]
+            );
+            const [pendentesCancelamento] = await db.query(
+                `SELECT usu_id_passageiro AS usu_id FROM SOLICITACOES_CARONA
+                 WHERE car_id = ? AND sol_status = 1`,
+                [car_id]
             );
 
             // Soft delete em transação: cancela a carona e libera os passageiros vinculados
@@ -1160,6 +1165,15 @@ class CaronaController {
                 tipo:     TIPOS.CARONA_CANCELADA,
                 titulo:   'Carona cancelada',
                 mensagem: 'O motorista cancelou a carona que você participava.',
+                dados:    { car_id: parseInt(car_id) }
+            }).catch(() => {}));
+
+            // B5: Notifica passageiros com solicitação pendente — também ficaram sem carona
+            pendentesCancelamento.forEach(p => notificar({
+                usu_id:   p.usu_id,
+                tipo:     TIPOS.CARONA_CANCELADA,
+                titulo:   'Carona cancelada',
+                mensagem: 'A carona que você solicitou foi cancelada pelo motorista.',
                 dados:    { car_id: parseInt(car_id) }
             }).catch(() => {}));
 

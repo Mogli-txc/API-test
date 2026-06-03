@@ -14,6 +14,7 @@ const { checkPenalidade }                   = require('../utils/penaltyHelper');
 const { enqueue: enqueueEmail }    = require('../utils/emailQueue');
 const { registrarAudit }           = require('../utils/auditLog');
 const { notificar, TIPOS }         = require('../utils/notificar');
+const { getIo }                    = require('../sockets/io');
 
 /**
  * Verifica se o passageiro aceita receber o resultado da solicitação POR EMAIL.
@@ -527,7 +528,15 @@ class SolicitacaoController {
                 await conn.rollback();
                 conn.release();
                 conn = null;
-                return res.status(409).json({ error: "Solicitação não encontrada ou já foi respondida." });
+                // Verifica o status atual para dar mensagem clara ao motorista
+                const [[solAtual]] = await db.query(
+                    'SELECT sol_status FROM SOLICITACOES_CARONA WHERE sol_id = ?',
+                    [sol_id]
+                );
+                const msg = solAtual?.sol_status === 0
+                    ? 'Este passageiro já foi aceito em outra carona. A solicitação foi removida automaticamente.'
+                    : 'Solicitação não encontrada ou já foi respondida.';
+                return res.status(409).json({ error: msg });
             }
 
             if (statusCodigo === 2) {
@@ -583,6 +592,39 @@ class SolicitacaoController {
             }
 
             await conn.commit();
+
+            // B2: Se aceito, cancela silenciosamente as outras solicitações pendentes
+            // do mesmo passageiro em outras caronas e avisa os motoristas via socket
+            // (sem criar notificação — só atualiza a UI deles em tempo real).
+            if (statusCodigo === 2) {
+                db.query(
+                    `SELECT sc.sol_id, sc.car_id, v.usu_id AS motorista_id
+                     FROM SOLICITACOES_CARONA sc
+                     INNER JOIN CARONAS c ON sc.car_id = c.car_id
+                     INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                     WHERE sc.usu_id_passageiro = ?
+                       AND sc.sol_status = 1
+                       AND sc.car_id != ?
+                       AND c.car_status IN (1, 2)`,
+                    [sol[0].usu_id_passageiro, sol[0].car_id]
+                ).then(([outrasPendentes]) => {
+                    if (outrasPendentes.length === 0) return;
+                    const outrasIds = outrasPendentes.map(s => s.sol_id);
+                    db.query(
+                        'UPDATE SOLICITACOES_CARONA SET sol_status = 0 WHERE sol_id IN (?)',
+                        [outrasIds]
+                    ).catch(() => {});
+                    const io = getIo();
+                    if (io) {
+                        outrasPendentes.forEach(s => {
+                            io.of('/notificacoes').to(`user_${s.motorista_id}`).emit('nova_notificacao', {
+                                noti_tipo: 'SOLICITACAO_CANCELADA',
+                                dados: { car_id: s.car_id, sol_id: s.sol_id },
+                            });
+                        });
+                    }
+                }).catch(() => {});
+            }
 
             // PASSO 3: Notifica o passageiro sobre a resposta (fire-and-forget)
             const aceito = statusCodigo === 2;

@@ -38,13 +38,20 @@ function iniciarAlertarCaronaProxima() {
 
             const carIds = caronas.map(c => c.car_id);
 
-            // PASSO 2: Busca passageiros confirmados dessas caronas
+            // PASSO 2: Busca passageiros confirmados dessas caronas.
+            // UNION cobre os dois fluxos: CARONA_PESSOAS (adição direta pelo motorista)
+            // e SOLICITACOES_CARONA (pedido aceito pelo motorista, sol_status=2).
             const [passageiros] = await db.query(
                 `SELECT cp.car_id, cp.usu_id
                  FROM CARONA_PESSOAS cp
                  WHERE cp.car_id IN (?)
-                   AND cp.car_pes_status = 1`,
-                [carIds]
+                   AND cp.car_pes_status = 1
+                 UNION
+                 SELECT sc.car_id, sc.usu_id_passageiro AS usu_id
+                 FROM SOLICITACOES_CARONA sc
+                 WHERE sc.car_id IN (?)
+                   AND sc.sol_status = 2`,
+                [carIds, carIds]
             );
 
             // PASSO 3: Marca como alertada antes de notificar para evitar duplicatas em caso de falha parcial
