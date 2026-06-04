@@ -296,6 +296,7 @@
         car_vagas_dispo INT          NOT NULL               COMMENT 'Vagas disponíveis (1 a 6)',
         car_status      TINYINT      NOT NULL               COMMENT '1=Aberta, 2=Em espera, 0=Cancelada, 3=Finalizada',
         car_capacete    TINYINT(1)   NOT NULL DEFAULT 0     COMMENT '1=Passageiro deve trazer capacete próprio (motos); 0=Capacete incluído ou não aplicável',
+        car_alerta_saida_enviado TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Flag: alerta de saída iminente enviado ao motorista e passageiros — evita duplicatas no job alertarCaronaProxima  [v28]',
 
         -- Soft delete com timestamp  [v3]
         car_deletado_em DATETIME     NULL DEFAULT NULL      COMMENT 'Soft delete — data de cancelamento com timestamp (NULL = ativo); car_status=0 mantido para compatibilidade',
@@ -697,6 +698,33 @@
             FOREIGN KEY (noti_remetente) REFERENCES USUARIOS (usu_id)
             ON DELETE SET NULL ON UPDATE CASCADE;
 
+    -- =====================================================
+    -- Tabela PUSH_TOKENS — tokens de push de SO (Expo Push)  [v27]
+    -- Relação N:1 com USUARIOS: um usuário pode ter vários devices.
+    -- O token é único globalmente — quando o mesmo device reloga em outra
+    -- conta, o UPSERT reassocia o token ao novo usuário (1 device = 1 conta ativa).
+    -- =====================================================
+    DROP TABLE IF EXISTS PUSH_TOKENS;
+    CREATE TABLE PUSH_TOKENS (
+        pst_id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Identificador do token (PK)',
+        usu_id         INT          NOT NULL               COMMENT 'Dono atual do device (FK → USUARIOS)',
+        pst_token      VARCHAR(255) NOT NULL               COMMENT 'ExponentPushToken[...] (ou token FCM/APNs no futuro)',
+        pst_plataforma ENUM('ios','android','web') NOT NULL COMMENT 'Plataforma do device',
+        pst_app_versao VARCHAR(20)  NULL     DEFAULT NULL  COMMENT 'Versão do app no registro (debug de tokens órfãos)',
+        pst_criado_em  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Primeiro registro do token',
+        pst_usado_em   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Último registro/uso bem-sucedido',
+        PRIMARY KEY (pst_id),
+        UNIQUE KEY UQ_push_token (pst_token),
+        INDEX idx_push_usu (usu_id)
+    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+    COMMENT = 'Tokens de notificação push por device — Expo Push  [v27]';
+
+    -- PUSH_TOKENS → USUARIOS  [v27]
+    ALTER TABLE PUSH_TOKENS
+        ADD CONSTRAINT FK_push_usu
+            FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
+            ON DELETE CASCADE ON UPDATE CASCADE;
+
     SET FOREIGN_KEY_CHECKS = 1;
 
     -- =====================================================
@@ -746,7 +774,7 @@
         ADD COLUMN per_email_tipos JSON NULL DEFAULT NULL
             COMMENT 'Preferências de tipos por email por toggle (NULL = todos ativos)';
 
-    -- Estende noti_tipo com tipos de documento e SISTEMA.
+    -- Estende noti_tipo com tipos de documento, SISTEMA e alerta de saída.
     ALTER TABLE NOTIFICACOES
         MODIFY COLUMN noti_tipo ENUM(
             'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
@@ -756,7 +784,8 @@
             'SISTEMA',
             'DOCUMENTO_APROVADO','DOCUMENTO_REPROVADO',
             'COMPROVANTE_APROVADO','COMPROVANTE_REPROVADO',
-            'CNH_APROVADA','CNH_REPROVADA'
+            'CNH_APROVADA','CNH_REPROVADA',
+            'CARONA_PROXIMA_SAIDA'
         ) NOT NULL COMMENT 'Tipo de notificação — ENUM garante integridade  [v14 — DB-06]';
 
     ALTER TABLE DENUNCIAS
@@ -783,3 +812,24 @@
     ALTER TABLE MENSAGENS         CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     ALTER TABLE SUGESTOES      CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     ALTER TABLE DENUNCIAS      CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+    -- =====================================================
+    -- v28 — migration-alerta-saida.sql
+    -- Flag de alerta de saída iminente em CARONAS + novo tipo CARONA_PROXIMA_SAIDA.
+    -- Para bancos já existentes, rode manualmente:
+    --
+    --   ALTER TABLE CARONAS
+    --       ADD COLUMN car_alerta_saida_enviado TINYINT(1) NOT NULL DEFAULT 0;
+    --
+    --   ALTER TABLE NOTIFICACOES
+    --       MODIFY COLUMN noti_tipo ENUM(
+    --           'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
+    --           'CARONA_CANCELADA','CARONA_FINALIZADA','AVALIACAO_RECEBIDA',
+    --           'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL',
+    --           'EXCLUSAO_CANCELADA','SISTEMA',
+    --           'DOCUMENTO_APROVADO','DOCUMENTO_REPROVADO',
+    --           'COMPROVANTE_APROVADO','COMPROVANTE_REPROVADO',
+    --           'CNH_APROVADA','CNH_REPROVADA',
+    --           'CARONA_PROXIMA_SAIDA'
+    --       ) NOT NULL;
+    -- =====================================================

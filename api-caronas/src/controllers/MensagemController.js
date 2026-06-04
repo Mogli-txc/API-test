@@ -354,9 +354,12 @@ class MensagemController {
                     m.car_id,
                     c.car_data,
                     c.car_hor_saida,
-                    u.usu_id   AS motorista_id,
-                    u.usu_nome AS motorista_nome,
-                    u.usu_foto AS motorista_foto,
+                    u_motor.usu_id   AS motorista_id,
+                    u_motor.usu_nome AS motorista_nome,
+                    u_motor.usu_foto AS motorista_foto,
+                    u_outro.usu_id   AS outro_id,
+                    u_outro.usu_nome AS outro_nome,
+                    u_outro.usu_foto AS outro_foto,
                     (SELECT men_texto FROM MENSAGENS
                      WHERE car_id = m.car_id AND men_deletado_em IS NULL
                        AND (usu_id_remetente = ? OR usu_id_destinatario = ?)
@@ -371,13 +374,23 @@ class MensagemController {
                  FROM MENSAGENS m
                  INNER JOIN CARONAS  c ON m.car_id = c.car_id
                  INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
-                 INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
+                 INNER JOIN USUARIOS u_motor ON v.usu_id = u_motor.usu_id
+                 LEFT JOIN USUARIOS u_outro ON u_outro.usu_id = (
+                     SELECT IF(m2.usu_id_remetente = ?, m2.usu_id_destinatario, m2.usu_id_remetente)
+                     FROM MENSAGENS m2
+                     WHERE m2.car_id = m.car_id
+                       AND (m2.usu_id_remetente = ? OR m2.usu_id_destinatario = ?)
+                       AND m2.usu_id_remetente != m2.usu_id_destinatario
+                     LIMIT 1
+                 )
                  WHERE m.men_deletado_em IS NULL
                    AND (m.usu_id_remetente = ? OR m.usu_id_destinatario = ?)
-                 GROUP BY m.car_id, c.car_data, c.car_hor_saida, u.usu_id, u.usu_nome, u.usu_foto
+                 GROUP BY m.car_id, c.car_data, c.car_hor_saida,
+                          u_motor.usu_id, u_motor.usu_nome, u_motor.usu_foto,
+                          u_outro.usu_id, u_outro.usu_nome, u_outro.usu_foto
                  ORDER BY MAX(m.men_id) DESC
                  LIMIT ? OFFSET ?`,
-                [usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, limit, offset]
+                [usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, usu_id, limit, offset]
             );
 
             const [[{ totalGeral }]] = await db.query(

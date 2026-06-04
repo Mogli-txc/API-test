@@ -10,6 +10,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 -- Nível 5: Sem dependentes diretos (ou FK_CHECKS=0 garante a remoção segura)
 DROP TABLE IF EXISTS AUDIT_LOG;              -- sem FK ativa para outras tabelas
+DROP TABLE IF EXISTS PUSH_TOKENS;            -- [v27] referencia USUARIOS (CASCADE)
 DROP TABLE IF EXISTS PENALIDADES;            -- [v8]  referencia USUARIOS (RESTRICT em pen_aplicado_por)
 DROP TABLE IF EXISTS DOCUMENTOS_VERIFICACAO; -- [v6+v7] referencia USUARIOS (CASCADE)
 DROP TABLE IF EXISTS AVALIACOES;             -- [v5]  referencia CARONAS e USUARIOS (RESTRICT)

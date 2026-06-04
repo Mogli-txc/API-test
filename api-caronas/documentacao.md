@@ -52,20 +52,39 @@ info:
     `POST /api/caronas/oferecer` e `PUT /api/caronas/{car_id}`. Retornado em todas as
     consultas de carona. Default `0` (não aplicável).
 
+    **Coluna interna `car_alerta_saida_enviado` [v28]:** flag booleano (`TINYINT(1)`,
+    default `0`) em `CARONAS`. É **uso exclusivo do servidor** — definido como `1` pelo job
+    `alertarCaronaProxima` ao enviar o aviso de saída iminente, garantindo exatamente um
+    alerta por carona. **Não é aceito em requests nem retornado em respostas** da API;
+    existe apenas para idempotência do job.
+
     **Jobs agendados (node-cron, timezone America/Sao_Paulo) [v25]:**
     | Job | Horário | Ação |
     |---|---|---|
-    | `autoCloseCaronas` | 00:00 | Finaliza caronas de dias anteriores (`car_status=3`). Notifica passageiros (`CARONA_FINALIZADA`) e motoristas (`SISTEMA`). |
+    | `autoCloseCaronas` | 00:00 | Finaliza caronas de dias anteriores (`car_status=3`). Notifica passageiros e motoristas com `CARONA_FINALIZADA` (mesmo tipo, para que o listener `RELEVANT_TYPES` do app dispare `loadActiveRide` e o card desapareça automaticamente). Exporta `executarAutoClose()` para disparo manual via `POST /api/dev/jobs/auto-close-caronas`. |
     | `avisarVerificacaoExpirando` | 09:00 | Avisa (`SISTEMA`) usuários a 7 ou 1 dia de `usu_verificacao_expira` para reenviarem o comprovante. |
+    | `verificarReceiptsPush` | a cada 15 min | Consulta os push receipts pendentes na Expo e remove tokens mortos (`DeviceNotRegistered`) da tabela `PUSH_TOKENS`. [v27] |
+    | `alertarCaronaProxima` | a cada 15 min | Envia `CARONA_PROXIMA_SAIDA` ao motorista e passageiros confirmados de caronas com saída nos próximos 15–45 min. Usa flag `CARONAS.car_alerta_saida_enviado` para garantir exatamente um alerta por carona. [v28] |
 
-    Ambos são desabilitados quando `NODE_ENV=test`.
+    Todos são desabilitados quando `NODE_ENV=test`.
 
     **Preferências de notificação por tipo [v25]:** a coluna `PERFIL.per_notif_tipos`
     (JSON, nullable) guarda toggles por categoria de notificação (canal push/in-app).
     A coluna `PERFIL.per_email_tipos` (JSON, nullable) guarda toggles do canal de
     email, independente do push. Veja `PATCH /api/usuarios/me/config`.
     `null` = todos os tipos ativos.
-  version: 1.14.0
+
+    **Notificações push de SO (Expo Push) [v27]:** além do broadcast em tempo real
+    via Socket.io (app aberto), o utilitário `notificar()` envia notificações push de
+    sistema (FCM/APNs via Expo) para os devices registrados, entregues mesmo com o app
+    em background ou fechado. Os tokens ficam na tabela `PUSH_TOKENS` (1 device = 1
+    conta ativa; UPSERT por token; N tokens por usuário). O envio respeita
+    `PERFIL.per_push_notif` (global) e `PERFIL.per_notif_tipos` (por tipo) **no
+    servidor**, é fire-and-forget e roteia eventos de carona para o canal Android de
+    alta prioridade `caronas`. Registre/desassocie tokens via
+    `POST`/`DELETE /api/usuarios/me/push-token`. A variável `EXPO_ACCESS_TOKEN`
+    (opcional) autentica os envios na Expo.
+  version: 1.15.0
   contact:
     email: gm.monteiro@unesp.br
 
@@ -1138,7 +1157,7 @@ paths:
         |--------------------------|--------------------------------------------------------|
         | `solicitacoes_recebidas` | `SOLICITACAO_NOVA`                                     |
         | `resultado_solicitacoes` | `SOLICITACAO_ACEITA`, `SOLICITACAO_RECUSADA`          |
-        | `alteracoes_carona`      | `CARONA_CANCELADA`, `CARONA_FINALIZADA`               |
+        | `alteracoes_carona`      | `CARONA_CANCELADA`, `CARONA_FINALIZADA`, `CARONA_PROXIMA_SAIDA` |
         | `restricao_removida`     | `PENALIDADE_REMOVIDA`                                 |
         | `documentos`             | `DOCUMENTO_*`, `COMPROVANTE_*`, `CNH_*` (aprov./reprov.)|
         | `avisos_sistema`         | `SISTEMA`                                             |
@@ -1152,8 +1171,11 @@ paths:
         `per_email_tipos` controla email. O envio do email de resultado de
         solicitação respeita `per_email_tipos.resultado_solicitacoes`.
 
-        Chaves não enviadas mantêm o valor anterior. Uma chave ausente (ou o
-        objeto `null`) significa tipo ativo.
+        Chaves não enviadas mantêm o valor anterior. Para `per_notif_tipos`, uma
+        chave ausente (ou objeto `null`) significa tipo **ativo** (opt-out).
+        Para `per_email_tipos`, uma chave ausente ou objeto `null` significa tipo
+        **desabilitado** (opt-in) — `querEmailResultadoSolicitacao(null)` retorna
+        `false`, tornando o email de resultado de solicitação desligado por padrão.
       security:
         - bearerAuth: []
       requestBody:
@@ -1203,6 +1225,91 @@ paths:
         '400':
           description: Nenhum campo informado, valor fora do intervalo, ou chave inválida em per_notif_tipos/per_email_tipos
         '401': { description: Não autenticado }
+
+  /api/usuarios/me/push-token:
+    post:
+      tags: [Usuários]
+      summary: Registrar token de push de SO (Expo Push) [v27]
+      description: |
+        Associa um Expo push token (`ExponentPushToken[...]`) ao usuário autenticado,
+        usado para entrega de notificações push de SO quando o app está em
+        background ou fechado.
+
+        **UPSERT por token:** o `pst_token` é único globalmente (tabela `PUSH_TOKENS`).
+        Se o mesmo device (token) já existir, é **reassociado** ao usuário atual —
+        cobre o caso de um aparelho que troca de conta. Um token sempre pertence a
+        uma única conta ativa por vez. Um usuário pode ter vários tokens (multi-device).
+
+        **Entrega:** o utilitário `notificar()` envia o push (via `pushService`/Expo)
+        respeitando as preferências do usuário **no servidor**:
+        - `PERFIL.per_push_notif = 0` → push global desligado (nada é enviado).
+        - `PERFIL.per_notif_tipos[<toggle>] = 0` → tipo específico desligado.
+
+        Eventos de carona (`SOLICITACAO_*`, `CARONA_*`) usam o canal Android de alta
+        prioridade `caronas`; os demais usam `default`. O envio é fire-and-forget —
+        nunca atrasa nem quebra a request que o originou.
+
+        Tokens inválidos (`DeviceNotRegistered`) são removidos automaticamente: na
+        resposta imediata do envio e via job de receipts (`*/15 min`).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, platform]
+              properties:
+                token:
+                  type: string
+                  maxLength: 255
+                  description: "Expo push token do device"
+                  example: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+                  example: android
+                appVersion:
+                  type: string
+                  nullable: true
+                  description: "Versão do app no registro (debug de tokens órfãos)"
+                  example: "0.4.0-alpha.4"
+      responses:
+        '204':
+          description: Token registrado/reassociado (sem corpo)
+        '400':
+          description: token ausente/grande demais ou platform inválida
+        '401':
+          description: Não autenticado
+
+    delete:
+      tags: [Usuários]
+      summary: Desassociar token de push (logout) [v27]
+      description: |
+        Remove o vínculo de um token de push com o usuário autenticado. Chamado pelo
+        app no logout para que o device pare de receber push daquela conta (importante
+        em aparelho compartilhado). Só remove se o token pertencer ao próprio usuário.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  example: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+      responses:
+        '204':
+          description: Token removido (ou inexistente — idempotente)
+        '400':
+          description: token ausente
+        '401':
+          description: Não autenticado
 
   /api/usuarios/me/conta:
     delete:
@@ -2949,6 +3056,21 @@ paths:
                       properties:
                         car_id: { type: integer }
                         car_data: { type: string, format: date }
+                        motorista_id: { type: integer, nullable: true }
+                        motorista_nome: { type: string, nullable: true }
+                        motorista_foto: { type: string, nullable: true }
+                        outro_id:
+                          type: integer
+                          nullable: true
+                          description: "ID do outro participante da conversa (não o usuário atual). Passageiro quando o usuário é motorista; motorista quando o usuário é passageiro."
+                        outro_nome:
+                          type: string
+                          nullable: true
+                          description: "Nome do outro participante. Substitui a lógica condicional do frontend."
+                        outro_foto:
+                          type: string
+                          nullable: true
+                          description: "Foto do outro participante (URL bruta, normalizar com resolvePublicUrl)."
                         ultima_mensagem: { type: string, nullable: true }
                         em: { type: string, format: date-time, nullable: true }
                         nao_lidas: { type: integer }
@@ -5096,15 +5218,47 @@ paths:
         | `SOLICITACAO_RECUSADA`  | Motorista recusa → passageiro                        |
         | `CARONA_CANCELADA`      | Motorista cancela → passageiros                      |
         | `CARONA_FINALIZADA`     | Carona finalizada (manual ou autoClose) → passageiros|
+        | `CARONA_PROXIMA_SAIDA`  | Job alertarCaronaProxima (~30 min antes) → motorista e passageiros confirmados [v28] |
         | `AVALIACAO_RECEBIDA`    | Usuário recebe avaliação                             |
         | `PENALIDADE_APLICADA`   | Admin aplica penalidade                              |
         | `PENALIDADE_REMOVIDA`   | Admin remove penalidade                              |
         | `ADMIN_MANUAL`          | Comunicado manual de Admin/Dev                       |
         | `EXCLUSAO_CANCELADA`    | Usuário cancela exclusão de conta                    |
-        | `SISTEMA`               | Avisos automáticos: autoClose (motorista), expiração de verificação |
+        | `SISTEMA`               | Avisos automáticos: autoClose (motorista), expiração de verificação (avisarVerificacaoExpirando) |
         | `DOCUMENTO_APROVADO` / `_REPROVADO`     | Documento genérico analisado          |
         | `COMPROVANTE_APROVADO` / `_REPROVADO`   | Comprovante de matrícula analisado    |
         | `CNH_APROVADA` / `_REPROVADA`           | CNH analisada                         |
+
+        **Catálogo de textos padrão [v28]:**
+        | Tipo | Título | Mensagem |
+        |------|--------|---------|
+        | `SOLICITACAO_NOVA` | Nova solicitação de carona | Um passageiro solicitou {N} vaga(s) na sua carona. |
+        | `SOLICITACAO_ACEITA` | Solicitação aceita! | O motorista aceitou sua solicitação de carona. |
+        | `SOLICITACAO_RECUSADA` | Solicitação recusada | O motorista recusou sua solicitação. |
+        | `CARONA_CANCELADA` | Carona cancelada | O motorista cancelou a carona que você participava. |
+        | `CARONA_FINALIZADA` (manual) | Carona finalizada | O motorista finalizou a carona. Que tal deixar uma avaliação? |
+        | `CARONA_FINALIZADA` (autoClose — passageiro) | Carona encerrada | Uma carona que você participava foi encerrada automaticamente. |
+        | `CARONA_FINALIZADA` (autoClose — motorista) via `SISTEMA` | Carona encerrada automaticamente | Sua carona foi encerrada automaticamente. Confira o histórico se precisar de informações. |
+        | `CARONA_PROXIMA_SAIDA` (motorista) | Sua carona parte em breve | Sua carona sai em aproximadamente 30 minutos. Prepare-se! |
+        | `CARONA_PROXIMA_SAIDA` (passageiro) | Carona parte em breve | Sua carona sai em aproximadamente 30 minutos. Prepare-se! |
+        | `COMPROVANTE_APROVADO` (OCR) | Comprovante verificado | Sua matrícula foi confirmada. Você já pode usar o app normalmente. |
+        | `COMPROVANTE_REPROVADO` (OCR) | Comprovante não reconhecido | O documento enviado não foi identificado como comprovante válido. Tente uma versão mais legível. |
+        | `CNH_APROVADA` (OCR, com veículo) | Verificação completa | Sua CNH foi validada. Você já pode oferecer caronas! |
+        | `CNH_APROVADA` (OCR, sem veículo) | CNH recebida | Sua CNH foi armazenada. Cadastre um veículo para completar sua verificação. |
+        | `CNH_REPROVADA` (OCR) | CNH não reconhecida | O documento enviado não foi identificado como CNH válida. Tente uma versão mais legível. |
+        | `COMPROVANTE_APROVADO` (admin) | Comprovante aprovado | Seu comprovante de matrícula foi aprovado pela equipe. |
+        | `COMPROVANTE_REPROVADO` (admin) | Comprovante reprovado | Seu comprovante foi reprovado. Envie um documento mais legível. |
+        | `CNH_APROVADA` (admin) | CNH aprovada | Sua CNH foi aprovada pela equipe. |
+        | `CNH_REPROVADA` (admin) | CNH reprovada | Sua CNH foi reprovada. Envie um documento mais legível. |
+        | `PENALIDADE_APLICADA` (tipo 1–3) | Penalidade aplicada | Uma restrição foi aplicada à sua conta{: motivo ou .} |
+        | `PENALIDADE_APLICADA` (tipo 4) | Conta suspensa | Sua conta foi suspensa pelo administrador. |
+        | `PENALIDADE_REMOVIDA` (tipo 1–3) | Restrição removida | Uma restrição foi removida da sua conta. |
+        | `PENALIDADE_REMOVIDA` (tipo 4) | Restrição removida | Sua conta foi reativada pelo administrador. |
+        | `AVALIACAO_RECEBIDA` | Você recebeu uma avaliação | Você recebeu nota {N} em uma carona. |
+        | `EXCLUSAO_CANCELADA` | Exclusão cancelada | Sua solicitação de exclusão de conta foi cancelada. Sua conta está ativa. |
+        | `SISTEMA` (verificação expirando — 1 dia) | Sua verificação está prestes a vencer | Sua verificação expira amanhã. Envie seu comprovante de matrícula para manter o acesso ao app. |
+        | `SISTEMA` (verificação expirando — N dias) | Sua verificação está prestes a vencer | Sua verificação expira em {N} dias. Envie seu comprovante de matrícula para manter o acesso ao app. |
+        | `ADMIN_MANUAL` | livre (admin define) | livre (admin define) |
 
         > **Nota de consumo (mobile):** o app trata alguns tipos como *email-only* e
         > os oculta do sino/lista (`AVALIACAO_RECEBIDA`, `EXCLUSAO_CANCELADA`,
@@ -6429,6 +6583,43 @@ paths:
                         pen_expira_em: { type: string, format: date-time, nullable: true }
             text/csv:
               schema: { type: string }
+
+  /api/dev/jobs/auto-close-caronas:
+    post:
+      tags: [Dev]
+      summary: Disparo manual do job autoCloseCaronas (Dev only)
+      description: |
+        Executa imediatamente a lógica do job `autoCloseCaronas` sem aguardar a
+        schedule de 00:00 BRT. Útil em desenvolvimento quando o servidor ficou
+        offline durante a madrugada e caronas do dia anterior ficaram com
+        `car_status=1` no banco (o cron não rodou).
+
+        A lógica executada é idêntica à do job agendado:
+        1. Coleta passageiros aceitos das caronas a fechar.
+        2. Coleta motoristas.
+        3. `UPDATE CARONAS SET car_status = 3 WHERE DATE(car_data) < CURDATE()`.
+        4. Envia notificações `CARONA_FINALIZADA` aos passageiros e `SISTEMA` aos motoristas.
+
+        **Restrito a `per_tipo = 2` (Desenvolvedor).** Não disponível em `NODE_ENV=test`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Job executado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Job executado. 2 carona(s) finalizada(s)."
+                  fechadas:
+                    type: integer
+                    example: 2
+        '401': { description: Não autenticado }
+        '403': { description: Apenas Desenvolvedor }
+        '500': { description: Erro ao executar o job }
 
   /api/dev/relatorios/usuarios:
     get:

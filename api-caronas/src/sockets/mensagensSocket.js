@@ -28,6 +28,7 @@
 const jwt    = require('jsonwebtoken');
 const db     = require('../config/database');
 const { stripHtml } = require('../utils/sanitize');
+const { enviarPush } = require('../utils/pushService');
 
 /**
  * Chama o ack (se for função) e também emite o evento legado,
@@ -61,6 +62,8 @@ function registrarMensagensSocket(io) {
 
     // ── Conexão estabelecida ────────────────────────────────────────────────
     io.on('connection', (socket) => {
+        // Sala pessoal: permite entregar eventos ao usuário sem ele estar no chat
+        socket.join(`user_${socket.user.id}`);
 
         /**
          * Evento: entrar_carona
@@ -211,6 +214,47 @@ function registrarMensagensSocket(io) {
                 // PASSO 7: Broadcast para todos na sala + ack para o remetente
                 io.to(sala).emit('mensagem_recebida', mensagem);
                 if (typeof ack === 'function') ack({ ok: true, mensagem });
+
+                // Entrega ao destinatário se não estiver na sala (badge in-app).
+                // .except(sala) evita que o destinatário receba o evento duas vezes
+                // caso ele tenha o chat aberto (já recebeu via io.to(sala) acima).
+                io.to(`user_${usu_id_destinatario}`).except(sala).emit('mensagem_recebida', mensagem);
+
+                // PASSO 8: Push de SO para o destinatário se não estiver no chat (fire-and-forget)
+                io.in(sala).fetchSockets()
+                    .then(async (sockets) => {
+                        const nasSala = sockets.some(s => s.user?.id === parseInt(usu_id_destinatario));
+                        if (nasSala) return; // destinatário com chat aberto — socket já entregou
+
+                        const [[perfil]] = await db.query(
+                            'SELECT per_push_notif FROM PERFIL WHERE usu_id = ?',
+                            [usu_id_destinatario]
+                        );
+                        if (!perfil || Number(perfil.per_push_notif) === 0) return;
+
+                        const [[remetente]] = await db.query(
+                            'SELECT usu_nome FROM USUARIOS WHERE usu_id = ?',
+                            [usu_id_remetente]
+                        );
+                        const nomeRemetente = remetente?.usu_nome ?? 'Usuário';
+                        const preview = men_texto_trim.length > 80
+                            ? men_texto_trim.slice(0, 77) + '...'
+                            : men_texto_trim;
+
+                        await enviarPush({
+                            usu_id: parseInt(usu_id_destinatario),
+                            titulo: nomeRemetente,
+                            mensagem: preview,
+                            dados: {
+                                tipo: 'MENSAGEM_NOVA',
+                                car_id: parseInt(car_id),
+                                remetente_id: usu_id_remetente,
+                                remetente_nome: nomeRemetente,
+                            },
+                            channelId: 'default',
+                        });
+                    })
+                    .catch((err) => console.error('[PUSH] mensagem:', err.message));
 
             } catch (err) {
                 console.error('[SOCKET] nova_mensagem:', err);

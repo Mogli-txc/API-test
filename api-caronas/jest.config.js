@@ -1,8 +1,15 @@
+// expo-server-sdk é ESM puro e quebra o Jest (transform vazio). Substituído por
+// stub em todos os projetos — o envio de push já é no-op em NODE_ENV=test.
+const MOCK_EXPO = {
+  '^expo-server-sdk$': '<rootDir>/tests/__mocks__/expo-server-sdk.js',
+};
+
 const COMMON = {
   testEnvironment:      'node',
   transform:            {},
   moduleFileExtensions: ['js'],
   setupFilesAfterEnv:   ['<rootDir>/tests/workerTeardown.js'],
+  moduleNameMapper:     { ...MOCK_EXPO },
 };
 
 module.exports = {
@@ -24,6 +31,7 @@ module.exports = {
       testMatch:            ['<rootDir>/tests/**/*.test.js'],
       testPathIgnorePatterns: ['<rootDir>/tests/geocoding.test.js'],
       moduleNameMapper: {
+        ...MOCK_EXPO,
         'geocodingService$': '<rootDir>/tests/__mocks__/geocodingService.js'
       },
     },
