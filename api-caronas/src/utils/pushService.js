@@ -61,7 +61,7 @@ async function removerTokens(tokens) {
  * @param {string} opts.titulo     Título da notificação
  * @param {string} opts.mensagem   Corpo
  * @param {object} [opts.dados]    Payload em data (inclui `tipo` p/ deep-link)
- * @param {string} [opts.channelId] Canal Android ('default' | 'caronas')
+ * @param {string} [opts.channelId] Canal Android ('default' | 'caronas' | 'mensagens')
  */
 async function enviarPush({ usu_id, titulo, mensagem, dados = null, channelId = 'default' }) {
     if (IS_TEST) return;

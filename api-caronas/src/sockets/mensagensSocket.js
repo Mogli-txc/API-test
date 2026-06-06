@@ -251,7 +251,7 @@ function registrarMensagensSocket(io) {
                                 remetente_id: usu_id_remetente,
                                 remetente_nome: nomeRemetente,
                             },
-                            channelId: 'default',
+                            channelId: 'mensagens',
                         });
                     })
                     .catch((err) => console.error('[PUSH] mensagem:', err.message));
