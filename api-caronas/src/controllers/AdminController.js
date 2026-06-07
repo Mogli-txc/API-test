@@ -474,8 +474,17 @@ class AdminController {
                 if (filtroEsc) {
                     const params = [filtroEsc, ...filtroParams];
                     [usuarios] = await db.query(
-                        `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status, u.usu_verificacao
+                        `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status,
+                                u.usu_verificacao, u.usu_foto, p.per_tipo,
+                                (SELECT c2.cur_nome FROM CURSOS_USUARIOS cu2
+                                 INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
+                                 WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS cur_nome,
+                                (SELECT e2.esc_nome FROM CURSOS_USUARIOS cu2
+                                 INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
+                                 INNER JOIN ESCOLAS e2 ON c2.esc_id = e2.esc_id
+                                 WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS esc_nome
                          FROM USUARIOS u
+                         INNER JOIN PERFIL p           ON u.usu_id  = p.usu_id
                          INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
                          INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
                          WHERE c.esc_id = ? AND ${whereBase}
@@ -493,8 +502,17 @@ class AdminController {
                     );
                 } else {
                     [usuarios] = await db.query(
-                        `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status, u.usu_verificacao
+                        `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status,
+                                u.usu_verificacao, u.usu_foto, p.per_tipo,
+                                (SELECT c2.cur_nome FROM CURSOS_USUARIOS cu2
+                                 INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
+                                 WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS cur_nome,
+                                (SELECT e2.esc_nome FROM CURSOS_USUARIOS cu2
+                                 INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
+                                 INNER JOIN ESCOLAS e2 ON c2.esc_id = e2.esc_id
+                                 WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS esc_nome
                          FROM USUARIOS u
+                         INNER JOIN PERFIL p ON u.usu_id = p.usu_id
                          WHERE ${whereBase}
                          ORDER BY u.usu_id ASC
                          LIMIT ? ${cursor !== null ? '' : 'OFFSET ?'}`,
@@ -509,8 +527,17 @@ class AdminController {
                 // PASSO 5: Administrador — apenas usuários da sua escola
                 const params = [per_escola_id, ...filtroParams];
                 [usuarios] = await db.query(
-                    `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status, u.usu_verificacao
+                    `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status,
+                            u.usu_verificacao, u.usu_foto, p.per_tipo,
+                            (SELECT c2.cur_nome FROM CURSOS_USUARIOS cu2
+                             INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
+                             WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS cur_nome,
+                            (SELECT e2.esc_nome FROM CURSOS_USUARIOS cu2
+                             INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
+                             INNER JOIN ESCOLAS e2 ON c2.esc_id = e2.esc_id
+                             WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS esc_nome
                      FROM USUARIOS u
+                     INNER JOIN PERFIL p           ON u.usu_id  = p.usu_id
                      INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
                      INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
                      WHERE c.esc_id = ? AND ${whereBase}
