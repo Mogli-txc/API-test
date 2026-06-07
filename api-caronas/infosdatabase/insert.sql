@@ -137,8 +137,12 @@
     INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon, esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira, esc_contrato_arquivo, esc_ocr_base, esc_ocr_keywords) VALUES
         ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',           'inova.edu.br',         100, -23.5614, -46.6560, '2anos', '2026-01-01', '2028-01-01', NULL, NULL, '["faculdade","tecnologica","inova","fti","analise","desenvolvimento","sistemas","engenharia","producao"]'),  -- esc_id=1
         ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP',          'saber.edu.br',         50,  -22.9056, -47.0608, '1ano',  '2026-01-01', '2027-01-01', NULL, NULL, '["universidade","estadual","saber","ues","direito","administracao"]'),                                       -- esc_id=2
-        ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',          NULL,                   NULL,-21.2091, -50.4294, NULL,    NULL,         NULL,          NULL, NULL, '["instituto","federal","oeste","ifo"]'),                                                                      -- esc_id=3: sem contrato, sem cursos
-        ('ETEC Centro Paula Souza',        'Rua dos Andradas, 140, Santa Efigênia, São Paulo - SP', 'aluno.cps.sp.gov.br', 500, -23.5417, -46.6395, '5anos', '2025-01-01', '2030-01-01', NULL, NULL, '["etec","centro","paula","souza","ecps","tecnico","desenvolvimento","sistemas"]');                     -- esc_id=4: ETEC CPS
+        ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',          NULL,                   NULL,-21.2091, -50.4294, NULL,    NULL,         NULL,          NULL, NULL, '["instituto","federal","oeste","ifo"]');                                                                      -- esc_id=3: sem contrato, sem cursos
+    -- esc_id=4 comentado para teste de cadastro via sistema:
+    -- ('ETEC Centro Paula Souza', 'Rua dos Andradas, 140, Santa Efigênia, São Paulo - SP', 'aluno.cps.sp.gov.br', 500, -23.5417, -46.6395, '5anos', '2025-01-01', '2030-01-01', NULL, NULL, '["etec","centro","paula","souza","ecps","tecnico","desenvolvimento","sistemas"]'); -- esc_id=4: ETEC CPS
+
+    -- Garante que o próximo esc_id seja 5, preservando os IDs do bloco TUPÃ abaixo.
+    ALTER TABLE ESCOLAS AUTO_INCREMENT = 5;
 
 
     -- =====================================================
@@ -158,8 +162,12 @@
         (3, 'Análise e Desenvolvimento de Sistemas', 1),    -- cur_id = 1 (Escola Inova)
         (5, 'Engenharia de Produção',                1),    -- cur_id = 2 (Escola Inova)
         (2, 'Direito',                               2),    -- cur_id = 3 (Univ. Saber)
-        (1, 'Administração',                         2),    -- cur_id = 4 (Univ. Saber, 1° semestre)
-        (3, 'Técnico em Desenvolvimento de Sistemas', 4);    -- cur_id = 5 (ETEC CPS, 3° módulo)
+        (1, 'Administração',                         2);    -- cur_id = 4 (Univ. Saber, 1° semestre)
+    -- cur_id=5 comentado para teste de cadastro via sistema:
+    -- (3, 'Técnico em Desenvolvimento de Sistemas', 4);    -- cur_id = 5 (ETEC CPS, 3° módulo)
+
+    -- Garante que o próximo cur_id seja 6, preservando os IDs do bloco TUPÃ abaixo.
+    ALTER TABLE CURSOS AUTO_INCREMENT = 6;
 
 
     -- =====================================================

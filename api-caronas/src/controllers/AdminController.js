@@ -457,7 +457,7 @@ class AdminController {
                 filtroParams.push(cursor);
             }
 
-            const whereBase = filtros.join(' AND ');
+            const whereBase = filtros.length > 0 ? filtros.join(' AND ') : '1=1';
 
             let usuarios;
             let totalGeral;
