@@ -106,7 +106,26 @@ class AdminController {
             let rows;
 
             if (per_tipo === 2) {
-                // PASSO 1: Desenvolvedor — visão global
+                // PASSO 1: Desenvolvedor — visão global ou filtrada por ?esc_id=
+                const escId = req.query.esc_id ? parseInt(req.query.esc_id) : null;
+                if (escId) {
+                    [rows] = await db.query(
+                        `SELECT COUNT(DISTINCT u.usu_id)       AS total,
+                                SUM(u.usu_status = 1)           AS ativos,
+                                SUM(u.usu_status = 0)           AS inativos,
+                                SUM(u.usu_verificacao = 0)      AS aguardando_otp,
+                                SUM(u.usu_verificacao = 5)      AS acesso_temporario,
+                                SUM(u.usu_verificacao = 6)      AS acesso_temporario_com_veiculo,
+                                SUM(u.usu_verificacao = 1)      AS matricula_verificada,
+                                SUM(u.usu_verificacao = 2)      AS completos,
+                                SUM(u.usu_verificacao = 9)      AS suspensos
+                         FROM USUARIOS u
+                         INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                         INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                         WHERE c.esc_id = ?`,
+                        [escId]
+                    );
+                } else {
                 [rows] = await db.query(
                     `SELECT
                         COUNT(*)                                      AS total,
@@ -120,6 +139,7 @@ class AdminController {
                         SUM(usu_verificacao = 9)                      AS suspensos
                      FROM USUARIOS`
                 );
+                }
             } else {
                 // PASSO 2: Administrador — apenas usuários da sua escola
                 [rows] = await db.query(
@@ -160,37 +180,59 @@ class AdminController {
     async statsCaronas(req, res) {
         try {
             const { per_tipo, per_escola_id } = req.user;
+            // ?inicio=YYYY-MM-DD  ?fim=YYYY-MM-DD  ?esc_id=N (Dev only)
+            const { inicio, fim, esc_id: qEscId } = req.query;
 
             if (per_tipo === 1 && !per_escola_id) {
                 return res.status(403).json({ error: "Perfil de Administrador sem escola associada. Contate o Desenvolvedor." });
             }
 
             let rows;
+            const filtros = [];
+            const params  = [];
 
             if (per_tipo === 2) {
+                const escId    = qEscId ? parseInt(qEscId) : null;
+                const needsJoin = !!escId;
+
+                if (needsJoin) { filtros.push('cr.esc_id = ?');   params.push(escId); }
+                if (inicio)    { filtros.push('c.car_data >= ?'); params.push(inicio); }
+                if (fim)       { filtros.push('c.car_data <= ?'); params.push(fim); }
+
+                const joinClause  = needsJoin
+                    ? `INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
+                       INNER JOIN CURSOS_USUARIOS cu ON v.usu_id = cu.usu_id
+                       INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id`
+                    : '';
+                const whereClause = filtros.length > 0 ? `WHERE ${filtros.join(' AND ')}` : '';
+
                 [rows] = await db.query(
-                    `SELECT
-                        COUNT(*)                        AS total,
-                        SUM(car_status = 1)             AS abertas,
-                        SUM(car_status = 2)             AS em_espera,
-                        SUM(car_status = 3)             AS finalizadas,
-                        SUM(car_status = 0)             AS canceladas
-                     FROM CARONAS`
+                    `SELECT COUNT(*)              AS total,
+                            SUM(c.car_status = 1) AS abertas,
+                            SUM(c.car_status = 2) AS em_espera,
+                            SUM(c.car_status = 3) AS finalizadas,
+                            SUM(c.car_status = 0) AS canceladas
+                     FROM CARONAS c ${joinClause} ${whereClause}`,
+                    params
                 );
             } else {
+                filtros.push('cr.esc_id = ?');
+                params.push(per_escola_id);
+                if (inicio) { filtros.push('c.car_data >= ?'); params.push(inicio); }
+                if (fim)    { filtros.push('c.car_data <= ?'); params.push(fim); }
+
                 [rows] = await db.query(
-                    `SELECT
-                        COUNT(*)                        AS total,
-                        SUM(c.car_status = 1)           AS abertas,
-                        SUM(c.car_status = 2)           AS em_espera,
-                        SUM(c.car_status = 3)           AS finalizadas,
-                        SUM(c.car_status = 0)           AS canceladas
+                    `SELECT COUNT(*)              AS total,
+                            SUM(c.car_status = 1) AS abertas,
+                            SUM(c.car_status = 2) AS em_espera,
+                            SUM(c.car_status = 3) AS finalizadas,
+                            SUM(c.car_status = 0) AS canceladas
                      FROM CARONAS c
-                     INNER JOIN VEICULOS        v  ON c.vei_id   = v.vei_id
-                     INNER JOIN CURSOS_USUARIOS cu ON v.usu_id   = cu.usu_id
-                     INNER JOIN CURSOS          cr ON cu.cur_id  = cr.cur_id
-                     WHERE cr.esc_id = ?`,
-                    [per_escola_id]
+                     INNER JOIN VEICULOS        v  ON c.vei_id  = v.vei_id
+                     INNER JOIN CURSOS_USUARIOS cu ON v.usu_id  = cu.usu_id
+                     INNER JOIN CURSOS          cr ON cu.cur_id = cr.cur_id
+                     WHERE ${filtros.join(' AND ')}`,
+                    params
                 );
             }
 
@@ -221,21 +263,54 @@ class AdminController {
             let rows;
 
             if (per_tipo === 2) {
-                // PASSO 2 (Dev): conta sugestões e denúncias nas tabelas separadas
-                const [[rSug]] = await db.query(
-                    `SELECT COUNT(*) AS total,
-                            SUM(sug_status = 1) AS abertas,
-                            SUM(sug_status = 3) AS em_analise,
-                            SUM(sug_status = 0) AS fechadas
-                     FROM SUGESTOES WHERE sug_deletado_em IS NULL`
-                );
-                const [[rDen]] = await db.query(
-                    `SELECT COUNT(*) AS total,
-                            SUM(den_status = 1) AS abertas,
-                            SUM(den_status = 3) AS em_analise,
-                            SUM(den_status = 0) AS fechadas
-                     FROM DENUNCIAS WHERE den_deletado_em IS NULL`
-                );
+                // PASSO 2 (Dev): conta sugestões e denúncias, com filtro opcional por escola
+                const escId = req.query.esc_id ? parseInt(req.query.esc_id) : null;
+                let rSug, rDen;
+
+                if (escId) {
+                    [[rSug]] = await db.query(
+                        `SELECT COUNT(DISTINCT s.sug_id) AS total,
+                                SUM(s.sug_status = 1)    AS abertas,
+                                SUM(s.sug_status = 3)    AS em_analise,
+                                SUM(s.sug_status = 0)    AS fechadas
+                         FROM SUGESTOES s
+                         INNER JOIN USUARIOS u         ON s.usu_id  = u.usu_id
+                         INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                         INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                         WHERE s.sug_deletado_em IS NULL AND c.esc_id = ?`,
+                        [escId]
+                    );
+                    [[rDen]] = await db.query(
+                        `SELECT COUNT(DISTINCT d.den_id) AS total,
+                                SUM(d.den_status = 1)    AS abertas,
+                                SUM(d.den_status = 3)    AS em_analise,
+                                SUM(d.den_status = 0)    AS fechadas
+                         FROM DENUNCIAS d
+                         LEFT JOIN CARONAS car          ON d.car_id       = car.car_id
+                         LEFT JOIN CURSOS_USUARIOS cu_c ON car.cur_usu_id = cu_c.cur_usu_id
+                         LEFT JOIN CURSOS c_c           ON cu_c.cur_id    = c_c.cur_id
+                         LEFT JOIN CURSOS_USUARIOS cu_u ON d.den_usu_alvo = cu_u.usu_id
+                         LEFT JOIN CURSOS c_u           ON cu_u.cur_id    = c_u.cur_id
+                         WHERE d.den_deletado_em IS NULL
+                           AND (c_c.esc_id = ? OR c_u.esc_id = ?)`,
+                        [escId, escId]
+                    );
+                } else {
+                    [[rSug]] = await db.query(
+                        `SELECT COUNT(*) AS total,
+                                SUM(sug_status = 1) AS abertas,
+                                SUM(sug_status = 3) AS em_analise,
+                                SUM(sug_status = 0) AS fechadas
+                         FROM SUGESTOES WHERE sug_deletado_em IS NULL`
+                    );
+                    [[rDen]] = await db.query(
+                        `SELECT COUNT(*) AS total,
+                                SUM(den_status = 1) AS abertas,
+                                SUM(den_status = 3) AS em_analise,
+                                SUM(den_status = 0) AS fechadas
+                         FROM DENUNCIAS WHERE den_deletado_em IS NULL`
+                    );
+                }
                 rows = [{
                     total:      (rSug.total || 0) + (rDen.total || 0),
                     abertas:    (rSug.abertas || 0) + (rDen.abertas || 0),
@@ -1534,34 +1609,46 @@ class AdminController {
             const formato = (req.query.formato || '').toLowerCase();
 
             // PASSO 1: Monta condições SQL
-            const escolaJoin   = esc_id ? 'INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id' : '';
+            // Caminho correto para filtrar por escola:
+            //   CARONAS.vei_id → VEICULOS.usu_id (motorista) → CURSOS_USUARIOS.usu_id → CURSOS.esc_id
+            const escolaJoin  = esc_id
+                ? 'INNER JOIN VEICULOS vj ON c.vei_id = vj.vei_id INNER JOIN CURSOS_USUARIOS cu ON vj.usu_id = cu.usu_id INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id'
+                : '';
             const escolaWhere  = esc_id ? ' AND cr.esc_id = ?' : '';
             const baseParams   = esc_id ? [inicio, fim, esc_id] : [inicio, fim];
 
             // PASSO 2: Totais por status + vagas
+            // Subquery correlacionada substituída por LEFT JOIN pré-agregado para
+            // compatibilidade com sql_mode=only_full_group_by do MySQL.
             const [totais] = await db.query(
                 `SELECT
                     COUNT(*) AS total_caronas,
-                    SUM(CASE WHEN c.car_status = 1 THEN 1 ELSE 0 END) AS abertas,
-                    SUM(CASE WHEN c.car_status = 2 THEN 1 ELSE 0 END) AS em_espera,
-                    SUM(CASE WHEN c.car_status = 3 THEN 1 ELSE 0 END) AS finalizadas,
-                    SUM(CASE WHEN c.car_status = 0 THEN 1 ELSE 0 END) AS canceladas,
-                    SUM(c.car_vagas_dispo) AS vagas_disponiveis_total,
-                    COALESCE((SELECT SUM(sc.sol_vaga_soli)
-                              FROM SOLICITACOES_CARONA sc
-                              WHERE sc.car_id = c.car_id AND sc.sol_status = 2), 0) AS vagas_ocupadas_total
-                 FROM CARONAS c ${escolaJoin}
+                    COALESCE(SUM(CASE WHEN c.car_status = 1 THEN 1 ELSE 0 END), 0) AS abertas,
+                    COALESCE(SUM(CASE WHEN c.car_status = 2 THEN 1 ELSE 0 END), 0) AS em_espera,
+                    COALESCE(SUM(CASE WHEN c.car_status = 3 THEN 1 ELSE 0 END), 0) AS finalizadas,
+                    COALESCE(SUM(CASE WHEN c.car_status = 0 THEN 1 ELSE 0 END), 0) AS canceladas,
+                    COALESCE(SUM(c.car_vagas_dispo), 0)   AS vagas_disponiveis_total,
+                    COALESCE(SUM(sc_agg.vagas_ocupadas), 0) AS vagas_ocupadas_total
+                 FROM CARONAS c
+                 ${escolaJoin}
+                 LEFT JOIN (
+                     SELECT car_id, SUM(sol_vaga_soli) AS vagas_ocupadas
+                     FROM SOLICITACOES_CARONA
+                     WHERE sol_status = 2
+                     GROUP BY car_id
+                 ) sc_agg ON sc_agg.car_id = c.car_id
                  WHERE c.car_data BETWEEN ? AND ?${escolaWhere}`,
                 baseParams
             );
 
             // Top 5 motoristas
+            // Alias 'v' já existe (VEICULOS) → usamos v.usu_id para chegar a CURSOS_USUARIOS
             const [motoristas] = await db.query(
                 `SELECT u.usu_nome AS motorista, COUNT(c.car_id) AS caronas_oferecidas
                  FROM CARONAS c
                  INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  INNER JOIN USUARIOS u ON v.usu_id = u.usu_id
-                 ${esc_id ? 'INNER JOIN CURSOS_USUARIOS cu ON c.cur_usu_id = cu.cur_usu_id INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id' : ''}
+                 ${esc_id ? 'INNER JOIN CURSOS_USUARIOS cu ON v.usu_id = cu.usu_id INNER JOIN CURSOS cr ON cu.cur_id = cr.cur_id' : ''}
                  WHERE c.car_data BETWEEN ? AND ?${escolaWhere}
                  GROUP BY u.usu_id, u.usu_nome
                  ORDER BY caronas_oferecidas DESC
@@ -2041,8 +2128,9 @@ class AdminController {
             if (!per_escola_id) return res.status(403).json(ERRO_ADMIN_SEM_ESCOLA);
 
             const [[escola]] = await db.query(
-                `SELECT esc_id, esc_nome, esc_dominio, esc_max_usuarios,
+                `SELECT esc_id, esc_nome, esc_endereco, esc_dominio, esc_max_usuarios,
                         esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira,
+                        esc_contrato_arquivo,
                         DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes,
                         CASE
                             WHEN esc_contrato_expira IS NULL THEN 'sem_contrato'
