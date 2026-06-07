@@ -236,6 +236,7 @@ class CaronaController {
                         v.vei_marca_modelo           AS veiculo,
                         CAST(v.vei_tipo AS UNSIGNED) AS vei_tipo,
                         v.vei_placa, v.vei_cor,
+                        u.usu_id                     AS usu_id_motorista,
                         u.usu_nome                   AS motorista,
                         u.usu_foto                   AS motorista_foto,
                         cur.cur_nome                 AS curso_motorista,
