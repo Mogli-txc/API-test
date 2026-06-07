@@ -568,6 +568,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v26    | Canal de email independente do push: coluna `PERFIL.per_email_tipos` (JSON, nullable); `PATCH /me/config` aceita `per_email_tipos`; email de resultado de solicitação (`solicitacao_resposta`) gateado por `per_email_tipos.resultado_solicitacoes` em vez de `per_notif_tipos` |
 | v27    | Bugfix de upload de contrato: `MulterError` não possuía `.status`, causando 500 em erros de upload (arquivo grande, campo errado, tipo inválido) — handler específico adicionado em `server.js` retorna 400 com mensagem legível; novo endpoint `GET /api/admin/escolas/:esc_id/contrato/arquivo` para download do PDF do contrato (Dev: qualquer escola; Admin: apenas a própria) |
 | v28    | Novo endpoint `GET /api/admin/escolas/:esc_id/ocr-base/arquivo` para download do PDF de template OCR por escola — mesmo padrão RBAC do contrato (Dev: qualquer escola; Admin: apenas a própria) |
+| v29    | OCR automático por escola: nova coluna `ESCOLAS.esc_ocr_keywords` (JSON) armazena índice normalizado de keywords (nome da escola, sigla detectada e cursos ativos). `DevController._atualizarKeywordsEscola()` reconstrói o índice fire-and-forget após qualquer CRUD de escola ou curso. `ocrValidator` injeta as keywords da escola no grupo `instituicao` antes da avaliação de critérios, tornando a detecção de instituição precisa por escola sem configuração manual. |
 
 ---
 

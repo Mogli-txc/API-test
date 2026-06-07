@@ -84,7 +84,18 @@ info:
     alta prioridade `caronas`. Registre/desassocie tokens via
     `POST`/`DELETE /api/usuarios/me/push-token`. A variável `EXPO_ACCESS_TOKEN`
     (opcional) autentica os envios na Expo.
-  version: 1.15.0
+
+    **OCR automático por escola [v29]:** a coluna `ESCOLAS.esc_ocr_keywords` (JSON, nullable)
+    armazena um índice normalizado de palavras-chave gerado automaticamente pelo
+    `DevController` ao criar ou atualizar uma escola ou curso (fire-and-forget).
+    O índice contém: palavras do `esc_nome`, sigla detectada a partir das iniciais das
+    palavras significativas e termos dos `cur_nome` ativos — todos normalizados (sem acentos,
+    minúsculas, sem stopwords). No momento da validação de comprovante, o `ocrValidator`
+    consulta a coluna da escola do usuário (`per_escola_id`) e injeta as keywords no grupo
+    `instituicao` dos critérios antes da avaliação, tornando a detecção de instituição
+    precisa para cada escola sem necessidade de configuração manual.
+    `NULL` = escola sem keywords geradas (usa apenas os critérios genéricos).
+  version: 1.16.0
   contact:
     email: gm.monteiro@unesp.br
 

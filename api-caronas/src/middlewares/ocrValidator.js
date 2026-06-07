@@ -24,6 +24,7 @@
 
 const { extrairTextoPdf, pdfParaImagemBuffer } = require('../utils/pdfHelper');
 const { ocrImagem }                            = require('../utils/ocrHelper');
+const db                                       = require('../config/database');
 
 // Limiar mínimo de caracteres para considerar que o PDF possui texto nativo legível.
 // PDFs de sistemas governamentais (NSA, SIGAA) às vezes retornam pouco texto mesmo sendo
@@ -101,13 +102,12 @@ function normalizar(texto) {
 
 /**
  * Avalia se o texto atinge os critérios mínimos para o tipo de documento.
- * @param {string} texto    — texto extraído (nativo ou OCR)
- * @param {string} tipo     — 'comprovante' | 'cnh'
+ * @param {string} texto      — texto extraído (nativo ou OCR)
+ * @param {Array}  criterios  — array de grupos de critérios (possivelmente enriquecido com keywords da escola)
  * @returns {{ atingidos: number, total: number, aprovado: boolean, gruposOk: string[] }}
  */
-function avaliarCriterios(texto, tipo) {
+function avaliarCriterios(texto, criterios) {
     const textoNorm = normalizar(texto);
-    const criterios = CRITERIOS[tipo] || [];
 
     const gruposAtingidos = criterios.filter(c =>
         c.palavras.some(p => textoNorm.includes(normalizar(p)))
@@ -200,7 +200,32 @@ module.exports = (tipo) => async (req, res, next) => {
         // PASSO 3: Avalia critérios de palavras-chave
         const confMinima = CONFIANCA_MINIMA[tipo];
         if (confMinima === undefined) throw new Error(`Tipo de documento desconhecido: "${tipo}". Adicione ao mapa CONFIANCA_MINIMA.`);
-        const avaliacao  = avaliarCriterios(texto, tipo);
+
+        // Monta critérios efetivos — cópia rasa dos grupos para não mutar CRITERIOS  [v29]
+        const criteriosEfetivos = (CRITERIOS[tipo] || []).map(g => ({ ...g, palavras: [...g.palavras] }));
+
+        // Injeta keywords da escola no grupo "instituicao" do comprovante  [v29]
+        if (tipo === 'comprovante' && req.user?.per_escola_id) {
+            try {
+                const [[esc]] = await db.query(
+                    'SELECT esc_ocr_keywords FROM ESCOLAS WHERE esc_id = ?',
+                    [req.user.per_escola_id]
+                );
+                if (esc?.esc_ocr_keywords) {
+                    const kws = typeof esc.esc_ocr_keywords === 'string'
+                        ? JSON.parse(esc.esc_ocr_keywords)
+                        : esc.esc_ocr_keywords;
+                    const grupoInst = criteriosEfetivos.find(g => g.grupo === 'instituicao');
+                    if (grupoInst && Array.isArray(kws)) {
+                        kws.forEach(kw => { if (!grupoInst.palavras.includes(kw)) grupoInst.palavras.push(kw); });
+                    }
+                }
+            } catch (kErr) {
+                console.warn('[OCR-KEYWORDS] Falha ao carregar keywords da escola:', kErr.message);
+            }
+        }
+
+        const avaliacao  = avaliarCriterios(texto, criteriosEfetivos);
         const aprovado   = confianca >= confMinima && avaliacao.aprovado;
 
         // PASSO 4: Extrai dados estruturados (apenas para comprovante aprovado)

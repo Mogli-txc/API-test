@@ -641,6 +641,9 @@ class DevController {
                 acao: 'ESCOLA_CRIAR', usuId: req.user.id, ip: req.ip
             });
 
+            // Atualiza índice de keywords OCR da escola (fire-and-forget)  [v29]
+            this._atualizarKeywordsEscola(esc_id).catch(() => {});
+
             return res.status(201).json({
                 message: "Escola criada com sucesso!",
                 escola: {
@@ -726,6 +729,9 @@ class DevController {
                 tabela: 'ESCOLAS', registroId: parseInt(esc_id),
                 acao: 'ESCOLA_ATUALIZAR', usuId: req.user.id, ip: req.ip
             });
+
+            // Atualiza índice de keywords OCR da escola (fire-and-forget)  [v29]
+            this._atualizarKeywordsEscola(parseInt(esc_id)).catch(() => {});
 
             return res.status(200).json({ message: "Escola atualizada com sucesso." });
 
@@ -981,6 +987,9 @@ class DevController {
                 acao: 'CURSO_CRIAR', usuId: req.user.id, ip: req.ip
             });
 
+            // Atualiza índice de keywords OCR da escola (fire-and-forget)  [v29]
+            this._atualizarKeywordsEscola(parseInt(esc_id)).catch(() => {});
+
             return res.status(201).json({
                 message: "Curso criado com sucesso!",
                 curso: {
@@ -1046,6 +1055,11 @@ class DevController {
                 acao: 'CURSO_ATUALIZAR', usuId: req.user.id, ip: req.ip
             });
 
+            // Atualiza índice de keywords OCR da escola (fire-and-forget)  [v29]
+            db.query('SELECT esc_id FROM CURSOS WHERE cur_id = ?', [cur_id])
+                .then(([[c]]) => c && this._atualizarKeywordsEscola(c.esc_id))
+                .catch(() => {});
+
             return res.status(200).json({ message: "Curso atualizado com sucesso." });
 
         } catch (error) {
@@ -1080,6 +1094,9 @@ class DevController {
                 });
             }
 
+            // Salva esc_id antes do delete para atualizar keywords depois  [v29]
+            const [[cursoParaDeletar]] = await db.query('SELECT esc_id FROM CURSOS WHERE cur_id = ?', [cur_id]);
+
             const [result] = await db.query('DELETE FROM CURSOS WHERE cur_id = ?', [cur_id]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: "Curso não encontrado." });
@@ -1089,6 +1106,9 @@ class DevController {
                 tabela: 'CURSOS', registroId: parseInt(cur_id),
                 acao: 'CURSO_DELETAR', usuId: req.user.id, ip: req.ip
             });
+
+            // Atualiza índice de keywords OCR da escola (fire-and-forget)  [v29]
+            if (cursoParaDeletar) this._atualizarKeywordsEscola(cursoParaDeletar.esc_id).catch(() => {});
 
             return res.status(204).send();
 
@@ -1438,6 +1458,55 @@ class DevController {
      *
      * POST /api/dev/escolas/:esc_id/ocr-base
      */
+    // ═══════════════════════════════════════════════════════════════════════
+    // HELPERS PRIVADOS  [v29]
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Reconstrói e persiste o índice de keywords OCR da escola em esc_ocr_keywords.
+     * Chamado fire-and-forget após qualquer CRUD de escola ou curso.  [v29]
+     */
+    async _atualizarKeywordsEscola(esc_id) {
+        try {
+            const [[escola]] = await db.query(
+                'SELECT esc_nome FROM ESCOLAS WHERE esc_id = ?', [esc_id]
+            );
+            if (!escola) return;
+
+            const [cursos] = await db.query(
+                'SELECT cur_nome FROM CURSOS WHERE esc_id = ?', [esc_id]
+            );
+
+            const STOPWORDS = new Set(['de','da','do','das','dos','e','em','a','o','as','os','no','na','nos','nas','um','uma','por']);
+            const normalizar = (str) =>
+                str.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9\s]/g, '');
+
+            const keywords = new Set();
+
+            // PASSO 1: Palavras do nome da escola (≥ 3 chars, sem stopwords)
+            const palavrasNome = normalizar(escola.esc_nome).split(/\s+/).filter(p => p.length >= 3 && !STOPWORDS.has(p));
+            palavrasNome.forEach(p => keywords.add(p));
+
+            // PASSO 2: Sigla — iniciais das palavras significativas do nome (≥ 2 chars, sem stopwords)
+            const significativas = normalizar(escola.esc_nome).split(/\s+/).filter(p => p.length >= 2 && !STOPWORDS.has(p));
+            if (significativas.length >= 2) keywords.add(significativas.map(p => p[0]).join(''));
+
+            // PASSO 3: Palavras dos cursos (≥ 4 chars, sem stopwords)
+            cursos.forEach(({ cur_nome }) => {
+                normalizar(cur_nome).split(/\s+/)
+                    .filter(p => p.length >= 4 && !STOPWORDS.has(p))
+                    .forEach(p => keywords.add(p));
+            });
+
+            await db.query(
+                'UPDATE ESCOLAS SET esc_ocr_keywords = ? WHERE esc_id = ?',
+                [JSON.stringify([...keywords]), esc_id]
+            );
+        } catch (err) {
+            console.warn('[OCR-KEYWORDS] Falha ao atualizar keywords da escola', esc_id, ':', err.message);
+        }
+    }
+
     async uploadOcrBaseEscola(req, res) {
         try {
             const { esc_id } = req.params;

@@ -27,6 +27,9 @@
     --   v21  — migration-mensagens-timestamp.sql: men_criado_em + men_atualizado_em em MENSAGENS;
     --           bloqueio de chat em caronas encerradas/canceladas (MensagemController + mensagensSocket)
     --   v22  — migration-lgpd.sql: usu_exclusao_agendada DATETIME NULL em USUARIOS (exclusão agendada com 30 dias de graça)
+    --   v29  — migration-ocr-keywords.sql: esc_ocr_keywords JSON NULL em ESCOLAS (índice de keywords normalizado
+    --           gerado automaticamente ao criar/atualizar escola ou curso — alimenta o ocrValidator com critérios
+    --           dinâmicos por escola combinados com os critérios genéricos existentes)
     --   v23  — migration-escola-files-denuncia.sql:
     --           esc_contrato_arquivo + esc_ocr_base em ESCOLAS (contrato digital e template OCR por escola);
     --           SUGESTAO_DENUNCIA separada em SUGESTOES (somente sugestões, acesso Dev) e
@@ -79,6 +82,14 @@
         -- NULL = sem arquivo cadastrado.
         esc_contrato_arquivo VARCHAR(500)  NULL DEFAULT NULL COMMENT 'Caminho do PDF do contrato (armazenado em /public/contratos/). NULL = sem arquivo digital  [v23]',
         esc_ocr_base         VARCHAR(500)  NULL DEFAULT NULL COMMENT 'Caminho do template-base para OCR de matrícula desta escola (/public/ocr-base/). NULL = usa OCR genérico  [v23]',
+
+        -- Índice de keywords para OCR automático por escola  [v29]
+        -- Gerado e atualizado automaticamente pelo DevController ao criar/atualizar escola ou curso.
+        -- Contém: palavras do esc_nome, sigla detectada e termos dos cur_nome ativos (normalizados, sem acentos).
+        -- Injetado no grupo "instituicao" do ocrValidator durante a validação de comprovante, tornando a
+        -- detecção de instituição precisa para cada escola sem necessidade de configuração manual.
+        -- NULL = escola sem keywords geradas (usa apenas critérios genéricos do ocrValidator).
+        esc_ocr_keywords     JSON         NULL DEFAULT NULL COMMENT 'Keywords normalizadas para OCR: nome da escola, sigla e cursos ativos. Gerado automaticamente pelo DevController  [v29]',
 
         PRIMARY KEY (esc_id)
     ) ENGINE = InnoDB;
@@ -832,4 +843,17 @@
     --           'CNH_APROVADA','CNH_REPROVADA',
     --           'CARONA_PROXIMA_SAIDA'
     --       ) NOT NULL;
+    -- =====================================================
+
+    -- =====================================================
+    -- v29 — migration-ocr-keywords.sql
+    -- Índice de keywords por escola para OCR automático.
+    -- Para bancos já existentes, rode manualmente:
+    --
+    --   ALTER TABLE ESCOLAS
+    --       ADD COLUMN esc_ocr_keywords JSON NULL DEFAULT NULL
+    --       COMMENT 'Keywords normalizadas para OCR: nome da escola, sigla e cursos ativos  [v29]';
+    --
+    -- Após rodar o ALTER, repovoar as keywords das escolas existentes via
+    -- DevController._atualizarKeywordsEscola(esc_id) ou manualmente via UPDATE.
     -- =====================================================

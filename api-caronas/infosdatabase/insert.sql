@@ -132,11 +132,13 @@
     --   Escola 3 (Oeste):  sem contrato cadastrado (NULL)
     --   Escola 4 (ETEC):   contrato de 5 anos iniciado em 2025-01-01, expira 2030-01-01
     -- esc_contrato_arquivo / esc_ocr_base: NULL no seed — arquivos gerenciados por Dev em produção  [v23]
-    INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon, esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira, esc_contrato_arquivo, esc_ocr_base) VALUES
-        ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',           'inova.edu.br',         100, -23.5614, -46.6560, '2anos', '2026-01-01', '2028-01-01', NULL, NULL),  -- esc_id=1
-        ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP',          'saber.edu.br',         50,  -22.9056, -47.0608, '1ano',  '2026-01-01', '2027-01-01', NULL, NULL),  -- esc_id=2
-        ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',          NULL,                   NULL,-21.2091, -50.4294, NULL,    NULL,         NULL,          NULL, NULL),  -- esc_id=3: sem contrato
-        ('ETEC Centro Paula Souza',        'Rua dos Andradas, 140, Santa Efigênia, São Paulo - SP', 'aluno.cps.sp.gov.br', 500, -23.5417, -46.6395, '5anos', '2025-01-01', '2030-01-01', NULL, NULL);  -- esc_id=4: ETEC CPS
+    -- esc_ocr_keywords: pré-computado no seed com base em esc_nome + cursos de cada escola  [v29]
+    --   Em produção é gerado automaticamente pelo DevController ao criar/atualizar escola ou curso.
+    INSERT INTO ESCOLAS (esc_nome, esc_endereco, esc_dominio, esc_max_usuarios, esc_lat, esc_lon, esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira, esc_contrato_arquivo, esc_ocr_base, esc_ocr_keywords) VALUES
+        ('Faculdade Tecnológica Inova',    'Av. Paulista, 1000, São Paulo - SP',           'inova.edu.br',         100, -23.5614, -46.6560, '2anos', '2026-01-01', '2028-01-01', NULL, NULL, '["faculdade","tecnologica","inova","fti","analise","desenvolvimento","sistemas","engenharia","producao"]'),  -- esc_id=1
+        ('Universidade Estadual do Saber', 'Rua dos Estudos, 500, Campinas - SP',          'saber.edu.br',         50,  -22.9056, -47.0608, '1ano',  '2026-01-01', '2027-01-01', NULL, NULL, '["universidade","estadual","saber","ues","direito","administracao"]'),                                       -- esc_id=2
+        ('Instituto Federal do Oeste',     'Rua da Ciência, 300, Araçatuba - SP',          NULL,                   NULL,-21.2091, -50.4294, NULL,    NULL,         NULL,          NULL, NULL, '["instituto","federal","oeste","ifo"]'),                                                                      -- esc_id=3: sem contrato, sem cursos
+        ('ETEC Centro Paula Souza',        'Rua dos Andradas, 140, Santa Efigênia, São Paulo - SP', 'aluno.cps.sp.gov.br', 500, -23.5417, -46.6395, '5anos', '2025-01-01', '2030-01-01', NULL, NULL, '["etec","centro","paula","souza","ecps","tecnico","desenvolvimento","sistemas"]');                     -- esc_id=4: ETEC CPS
 
 
     -- =====================================================
