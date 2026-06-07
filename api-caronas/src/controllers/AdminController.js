@@ -39,6 +39,7 @@ const { registrarAudit }                 = require('../utils/auditLog');
 const { DURACAO_SQL }                    = require('../utils/penaltyHelper');
 const { notificar, TIPOS }               = require('../utils/notificar');
 const { parsePagination, parseCursorPagination, proximaFronteiraSemestral } = require('../utils/queryHelpers');
+const { gerarUrl }                                                           = require('../utils/gerarUrl');
 
 // Mensagem padrão para Admin sem escola — evita string duplicada em 4 métodos
 const ERRO_ADMIN_SEM_ESCOLA = {
@@ -437,7 +438,7 @@ class AdminController {
             const filtros      = [];
             const filtroParams = [];
 
-            // Filtro por status: padrão ativos (1); ?status=0 lista inativos para auditoria  [v17 — CODE-B05]
+            // Filtro por status: sem parâmetro = todos; ?status=0 inativos; ?status=1 ativos
             if (req.query.status !== undefined) {
                 const st = parseInt(req.query.status);
                 if (![0, 1].includes(st)) {
@@ -445,8 +446,6 @@ class AdminController {
                 }
                 filtros.push('u.usu_status = ?');
                 filtroParams.push(st);
-            } else {
-                filtros.push('u.usu_status = 1');
             }
 
             if (q) {
@@ -562,6 +561,13 @@ class AdminController {
                 next_cursor = usuarios[usuarios.length - 1].usu_id;
             }
 
+            // Converte usu_foto (nome de arquivo bruto do banco) para URL pública completa.
+            // Sem foto → retorna URL do avatar padrão (perfil.png).
+            usuarios = usuarios.map(u => ({
+                ...u,
+                usu_foto: gerarUrl(u.usu_foto, 'usuarios', 'perfil.png'),
+            }));
+
             return res.status(200).json({
                 message:    "Usuários listados.",
                 totalGeral,
@@ -629,9 +635,12 @@ class AdminController {
                 return res.status(404).json({ error: "Usuário não encontrado." });
             }
 
+            const usuario = rows[0];
+            usuario.usu_foto = gerarUrl(usuario.usu_foto, 'usuarios', 'perfil.png');
+
             return res.status(200).json({
                 message: `Dados do usuário ${usu_id}.`,
-                usuario: rows[0]
+                usuario,
             });
 
         } catch (error) {

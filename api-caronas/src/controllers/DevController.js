@@ -1166,8 +1166,9 @@ class DevController {
             const where = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
 
             const [escolas] = await db.query(
-                `SELECT esc_id, esc_nome, esc_dominio, esc_max_usuarios,
+                `SELECT esc_id, esc_nome, esc_endereco, esc_dominio, esc_max_usuarios,
                         esc_contrato_duracao, esc_contrato_inicio, esc_contrato_expira,
+                        esc_contrato_arquivo,
                         DATEDIFF(esc_contrato_expira, CURDATE()) AS dias_restantes,
                         CASE
                             WHEN esc_contrato_expira IS NULL THEN 'sem_contrato'
