@@ -471,10 +471,12 @@ class AdminController {
                 }
 
                 if (filtroEsc) {
-                    const params = [filtroEsc, ...filtroParams];
+                    // LEFT JOIN: inclui admins (ligados via PERFIL.per_escola_id) além dos
+                    // alunos matriculados em cursos da escola (CURSOS_USUARIOS).
+                    const params = [filtroEsc, filtroEsc, ...filtroParams];
                     [usuarios] = await db.query(
                         `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status,
-                                u.usu_verificacao, u.usu_foto, p.per_tipo,
+                                u.usu_verificacao, u.usu_foto, p.per_tipo, p.per_habilitado,
                                 (SELECT c2.cur_nome FROM CURSOS_USUARIOS cu2
                                  INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
                                  WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS cur_nome,
@@ -483,10 +485,10 @@ class AdminController {
                                  INNER JOIN ESCOLAS e2 ON c2.esc_id = e2.esc_id
                                  WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS esc_nome
                          FROM USUARIOS u
-                         INNER JOIN PERFIL p           ON u.usu_id  = p.usu_id
-                         INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
-                         INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
-                         WHERE c.esc_id = ? AND ${whereBase}
+                         INNER JOIN PERFIL p            ON u.usu_id  = p.usu_id
+                         LEFT  JOIN CURSOS_USUARIOS cu  ON u.usu_id  = cu.usu_id
+                         LEFT  JOIN CURSOS c            ON cu.cur_id = c.cur_id
+                         WHERE (c.esc_id = ? OR p.per_escola_id = ?) ${whereBase ? 'AND ' + whereBase : ''}
                          ORDER BY u.usu_id ASC
                          LIMIT ? ${cursor !== null ? '' : 'OFFSET ?'}`,
                         cursor !== null ? [...params, limit] : [...params, limit, offset]
@@ -494,9 +496,10 @@ class AdminController {
                     [[{ totalGeral }]] = await db.query(
                         `SELECT COUNT(DISTINCT u.usu_id) AS totalGeral
                          FROM USUARIOS u
-                         INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
-                         INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
-                         WHERE c.esc_id = ? AND ${whereBase}`,
+                         INNER JOIN PERFIL p           ON u.usu_id  = p.usu_id
+                         LEFT  JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                         LEFT  JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                         WHERE (c.esc_id = ? OR p.per_escola_id = ?) ${whereBase ? 'AND ' + whereBase : ''}`,
                         params
                     );
                 } else {
@@ -524,10 +527,10 @@ class AdminController {
                 }
             } else {
                 // PASSO 5: Administrador — apenas usuários da sua escola
-                const params = [per_escola_id, ...filtroParams];
+                const params = [per_escola_id, per_escola_id, ...filtroParams];
                 [usuarios] = await db.query(
                     `SELECT DISTINCT u.usu_id, u.usu_nome, u.usu_email, u.usu_status,
-                            u.usu_verificacao, u.usu_foto, p.per_tipo,
+                            u.usu_verificacao, u.usu_foto, p.per_tipo, p.per_habilitado,
                             (SELECT c2.cur_nome FROM CURSOS_USUARIOS cu2
                              INNER JOIN CURSOS c2 ON cu2.cur_id = c2.cur_id
                              WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS cur_nome,
@@ -536,10 +539,10 @@ class AdminController {
                              INNER JOIN ESCOLAS e2 ON c2.esc_id = e2.esc_id
                              WHERE cu2.usu_id = u.usu_id ORDER BY cu2.cur_id DESC LIMIT 1) AS esc_nome
                      FROM USUARIOS u
-                     INNER JOIN PERFIL p           ON u.usu_id  = p.usu_id
-                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
-                     INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
-                     WHERE c.esc_id = ? AND ${whereBase}
+                     INNER JOIN PERFIL p            ON u.usu_id  = p.usu_id
+                     LEFT  JOIN CURSOS_USUARIOS cu  ON u.usu_id  = cu.usu_id
+                     LEFT  JOIN CURSOS c            ON cu.cur_id = c.cur_id
+                     WHERE (c.esc_id = ? OR p.per_escola_id = ?) ${whereBase ? 'AND ' + whereBase : ''}
                      ORDER BY u.usu_id ASC
                      LIMIT ? ${cursor !== null ? '' : 'OFFSET ?'}`,
                     cursor !== null ? [...params, limit] : [...params, limit, offset]
@@ -547,9 +550,10 @@ class AdminController {
                 [[{ totalGeral }]] = await db.query(
                     `SELECT COUNT(DISTINCT u.usu_id) AS totalGeral
                      FROM USUARIOS u
-                     INNER JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
-                     INNER JOIN CURSOS c           ON cu.cur_id = c.cur_id
-                     WHERE c.esc_id = ? AND ${whereBase}`,
+                     INNER JOIN PERFIL p           ON u.usu_id  = p.usu_id
+                     LEFT  JOIN CURSOS_USUARIOS cu ON u.usu_id  = cu.usu_id
+                     LEFT  JOIN CURSOS c           ON cu.cur_id = c.cur_id
+                     WHERE (c.esc_id = ? OR p.per_escola_id = ?) ${whereBase ? 'AND ' + whereBase : ''}`,
                     params
                 );
             }

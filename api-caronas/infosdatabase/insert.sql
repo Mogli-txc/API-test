@@ -492,8 +492,8 @@
     -- =====================================================
     INSERT INTO MENSAGENS (car_id, usu_id_remetente, usu_id_destinatario, men_texto, men_status, men_id_resposta) VALUES
         -- Conversa Mariana ↔ Carlos na Carona 1 (todas lidas)
-        (1, 2, 1, 'Olá Carlos! Você passa perto do metrô Consolação?',          3, NULL),  -- men_id=1: Lida por Carlos
-        (1, 1, 2, 'Oi Mariana! Sim, passo lá por volta das 07h40.',             3, 1),     -- men_id=2: Lida por Mariana, responde à msg 1
+        (1, 2, 1, 'Olá, Carlos! Você passa perto do metrô Consolação?',          3, NULL),  -- men_id=1: Lida por Carlos
+        (1, 1, 2, 'Oi, Mariana! Sim, passo lá por volta das 07h40.',             3, 1),     -- men_id=2: Lida por Mariana, responde à msg 1
         (1, 2, 1, 'Ótimo! Estarei lá te esperando. Obrigada!',                  3, 2),     -- men_id=3: Lida por Carlos, responde à msg 2
 
         -- Lucas manda mensagem para Carlos, ainda não lida
