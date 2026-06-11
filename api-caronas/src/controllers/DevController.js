@@ -198,11 +198,11 @@ class DevController {
             const params  = [];
 
             if (req.query.acao) {
-                filtros.push('acao = ?');
+                filtros.push('al.acao = ?');
                 params.push(req.query.acao.toUpperCase());
             }
             if (req.query.tabela) {
-                filtros.push('tabela = ?');
+                filtros.push('al.tabela = ?');
                 params.push(req.query.tabela.toUpperCase());
             }
             if (req.query.usu_id !== undefined) {
@@ -210,25 +210,51 @@ class DevController {
                 if (isNaN(usuFiltro)) {
                     return res.status(400).json({ error: "usu_id deve ser um número inteiro." });
                 }
-                filtros.push('usu_id = ?');
+                filtros.push('al.usu_id = ?');
                 params.push(usuFiltro);
+            }
+            if (req.query.data_inicio) {
+                filtros.push('DATE(al.criado_em) >= ?');
+                params.push(req.query.data_inicio);
+            }
+            if (req.query.data_fim) {
+                filtros.push('DATE(al.criado_em) <= ?');
+                params.push(req.query.data_fim);
             }
 
             const whereClause = filtros.length > 0 ? 'WHERE ' + filtros.join(' AND ') : '';
 
-            // PASSO 3: Busca os registros
+            // PASSO 3: Busca os registros com nome do administrador, escola e do registro afetado
             const [logs] = await db.query(
-                `SELECT audit_id, tabela, registro_id, acao,
-                        dados_anteriores, dados_novos, usu_id, ip, criado_em
-                 FROM AUDIT_LOG
+                `SELECT al.audit_id, al.tabela, al.registro_id, al.acao,
+                        al.dados_anteriores, al.dados_novos, al.usu_id,
+                        u_admin.usu_nome AS admin_nome,
+                        e_admin.esc_nome AS admin_escola,
+                        CASE al.tabela
+                          WHEN 'USUARIOS'               THEN u_reg.usu_nome
+                          WHEN 'CARONAS'                THEN DATE_FORMAT(c_reg.car_data, '%d/%m/%Y')
+                          WHEN 'ESCOLAS'                THEN e_reg.esc_nome
+                          WHEN 'VEICULOS'               THEN v_reg.vei_placa
+                          WHEN 'DOCUMENTOS_VERIFICACAO' THEN u_doc.usu_nome
+                        END AS registro_nome,
+                        al.criado_em
+                 FROM AUDIT_LOG al
+                 LEFT JOIN USUARIOS u_admin ON al.usu_id          = u_admin.usu_id
+                 LEFT JOIN PERFIL   p_admin ON al.usu_id          = p_admin.usu_id
+                 LEFT JOIN ESCOLAS  e_admin ON p_admin.per_escola_id = e_admin.esc_id
+                 LEFT JOIN USUARIOS u_reg   ON al.tabela = 'USUARIOS'               AND al.registro_id = u_reg.usu_id
+                 LEFT JOIN CARONAS  c_reg   ON al.tabela = 'CARONAS'                AND al.registro_id = c_reg.car_id
+                 LEFT JOIN ESCOLAS  e_reg   ON al.tabela = 'ESCOLAS'                AND al.registro_id = e_reg.esc_id
+                 LEFT JOIN VEICULOS v_reg   ON al.tabela = 'VEICULOS'               AND al.registro_id = v_reg.vei_id
+                 LEFT JOIN USUARIOS u_doc   ON al.tabela = 'DOCUMENTOS_VERIFICACAO' AND al.registro_id = u_doc.usu_id
                  ${whereClause}
-                 ORDER BY audit_id DESC
+                 ORDER BY al.audit_id DESC
                  LIMIT ? OFFSET ?`,
                 [...params, limit, offset]
             );
 
             const [[{ totalGeral }]] = await db.query(
-                `SELECT COUNT(*) AS totalGeral FROM AUDIT_LOG ${whereClause}`,
+                `SELECT COUNT(*) AS totalGeral FROM AUDIT_LOG al ${whereClause}`,
                 params
             );
 

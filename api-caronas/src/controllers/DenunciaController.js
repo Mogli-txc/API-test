@@ -469,7 +469,6 @@ class DenunciaController {
                 'SELECT den_status FROM DENUNCIAS WHERE den_id = ? AND den_deletado_em IS NULL', [den_id]
             );
             if (!atual.length) return res.status(404).json({ error: "Denúncia não encontrada." });
-            if (atual[0].den_status === 0) return res.status(409).json({ error: "Não é possível arquivar uma denúncia já fechada." });
             if (atual[0].den_status === 2) return res.status(409).json({ error: "Denúncia já está arquivada." });
 
             // PASSO 3: Arquiva
