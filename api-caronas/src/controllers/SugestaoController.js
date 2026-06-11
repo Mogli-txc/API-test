@@ -325,7 +325,6 @@ class SugestaoController {
                 [sug_id]
             );
             if (atual.length === 0) return res.status(404).json({ error: "Sugestão não encontrada." });
-            if (atual[0].sug_status === 0) return res.status(409).json({ error: "Não é possível arquivar uma sugestão já fechada." });
             if (atual[0].sug_status === 2) return res.status(409).json({ error: "Sugestão já está arquivada." });
 
             // PASSO 2: Arquiva (sug_status = 2)
