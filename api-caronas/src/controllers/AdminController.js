@@ -2284,6 +2284,192 @@ class AdminController {
             return res.status(500).json({ error: "Erro ao enviar notificação em massa." });
         }
     }
+    // ═══════════════════════════════════════════════════════════════════════
+    // SUPORTE — Chat bidirecional Admin ↔ Desenvolvedor  [v30]
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * MÉTODO: listarMensagensSuporte
+     * GET /api/admin/suporte/mensagens
+     * Admin: retorna a própria thread. Dev: retorna a thread de ?usu_id=<adminId>.
+     */
+    async listarMensagensSuporte(req, res) {
+        try {
+            // PASSO 1: Resolve qual admin é o foco
+            let adminId;
+            if (req.user.per_tipo === 1) {
+                adminId = req.user.id;
+            } else {
+                adminId = parseInt(req.query.usu_id);
+                if (!adminId || isNaN(adminId)) {
+                    return res.status(400).json({ error: "Parâmetro ?usu_id obrigatório para Desenvolvedor." });
+                }
+            }
+
+            // PASSO 2: Busca mensagens cronológicas
+            const [mensagens] = await db.query(
+                `SELECT spm_id        AS msg_id,
+                        spm_texto     AS texto,
+                        spm_remetente AS remetente,
+                        spm_criada_em AS criado_em
+                 FROM   SUPORTE_MENSAGENS
+                 WHERE  usu_id_admin = ?
+                 ORDER  BY spm_criada_em ASC`,
+                [adminId]
+            );
+
+            return res.status(200).json({ mensagens });
+
+        } catch (error) {
+            console.error('[ERRO] listarMensagensSuporte:', error.message);
+            return res.status(500).json({ error: "Erro ao carregar mensagens de suporte." });
+        }
+    }
+
+    /**
+     * MÉTODO: enviarMensagemSuporte
+     * POST /api/admin/suporte/mensagens
+     * Admin: { spm_texto } — Dev: { spm_texto, usu_id: <adminId> }.
+     * Persiste e faz broadcast via Socket.io + notificação de badge.
+     */
+    async enviarMensagemSuporte(req, res) {
+        try {
+            const { spm_texto, usu_id } = req.body;
+
+            // PASSO 1: Valida e sanitiza texto
+            if (!spm_texto?.trim()) {
+                return res.status(400).json({ error: "Campo obrigatório: spm_texto." });
+            }
+            const textoLimpo = stripHtml(spm_texto.trim());
+            if (!textoLimpo) return res.status(400).json({ error: "Mensagem vazia após sanitização." });
+
+            // PASSO 2: Resolve IDs e remetente conforme papel
+            let adminId, devId, remetente;
+
+            if (req.user.per_tipo === 1) {
+                adminId   = req.user.id;
+                remetente = 'admin';
+                const [[dev]] = await db.query(
+                    'SELECT usu_id FROM PERFIL WHERE per_tipo = 2 ORDER BY usu_id ASC LIMIT 1'
+                );
+                if (!dev) return res.status(404).json({ error: "Nenhum Desenvolvedor encontrado no sistema." });
+                devId = dev.usu_id;
+            } else {
+                if (!usu_id) return res.status(400).json({ error: "Campo obrigatório para Dev: usu_id." });
+                adminId   = parseInt(usu_id);
+                devId     = req.user.id;
+                remetente = 'dev';
+                if (isNaN(adminId)) return res.status(400).json({ error: "usu_id inválido." });
+            }
+
+            // PASSO 3: Persiste no banco
+            const [result] = await db.query(
+                `INSERT INTO SUPORTE_MENSAGENS (usu_id_admin, usu_id_dev, spm_remetente, spm_texto)
+                 VALUES (?, ?, ?, ?)`,
+                [adminId, devId, remetente, textoLimpo]
+            );
+
+            const mensagem = {
+                spm_id:        result.insertId,
+                spm_remetente: remetente,
+                spm_texto:     textoLimpo,
+                spm_criada_em: new Date().toISOString()
+            };
+
+            // PASSO 4: Broadcast em tempo real para a sala suporte-{adminId}
+            const { getIo } = require('../sockets/io');
+            const io = getIo();
+            if (io) io.of('/suporte').to(`suporte-${adminId}`).emit('mensagem_suporte_recebida', mensagem);
+
+            // PASSO 5: Notificação de badge para o destinatário  [v30]
+            const destinatario = remetente === 'admin' ? devId : adminId;
+            notificar({
+                usu_id:       destinatario,
+                tipo:         TIPOS.SUPORTE_MENSAGEM,
+                titulo:       'Nova mensagem de suporte',
+                mensagem:     textoLimpo.substring(0, 100),
+                remetente_id: req.user.id
+            }).catch(() => {});
+
+            return res.status(201).json(mensagem);
+
+        } catch (error) {
+            console.error('[ERRO] enviarMensagemSuporte:', error.message);
+            return res.status(500).json({ error: "Erro ao enviar mensagem de suporte." });
+        }
+    }
+
+    /**
+     * MÉTODO: marcarLidasSuporte
+     * POST /api/admin/suporte/mensagens/lidas
+     * Admin: marca mensagens do Dev como lidas.
+     * Dev:   marca mensagens do Admin como lidas — body: { usu_id: <adminId> }.
+     */
+    async marcarLidasSuporte(req, res) {
+        try {
+            let adminId, remetenteParaMarcar;
+
+            if (req.user.per_tipo === 1) {
+                adminId             = req.user.id;
+                remetenteParaMarcar = 'dev';
+            } else {
+                const { usu_id } = req.body;
+                if (!usu_id) return res.status(400).json({ error: "Campo obrigatório para Dev: usu_id." });
+                adminId             = parseInt(usu_id);
+                remetenteParaMarcar = 'admin';
+                if (isNaN(adminId)) return res.status(400).json({ error: "usu_id inválido." });
+            }
+
+            // PASSO 1: Marca como lidas
+            await db.query(
+                `UPDATE SUPORTE_MENSAGENS
+                 SET    spm_lida = 1
+                 WHERE  usu_id_admin  = ?
+                   AND  spm_lida      = 0
+                   AND  spm_remetente = ?`,
+                [adminId, remetenteParaMarcar]
+            );
+
+            return res.status(204).send();
+
+        } catch (error) {
+            console.error('[ERRO] marcarLidasSuporte:', error.message);
+            return res.status(500).json({ error: "Erro ao marcar mensagens como lidas." });
+        }
+    }
+
+    /**
+     * MÉTODO: contarNaoLidasSuporte
+     * GET /api/admin/suporte/nao-lidas
+     * Admin: não lidas do Dev nesta thread.
+     * Dev:   total de não lidas de todos os admins.
+     */
+    async contarNaoLidasSuporte(req, res) {
+        try {
+            let total;
+
+            if (req.user.per_tipo === 1) {
+                const [[row]] = await db.query(
+                    `SELECT COUNT(*) AS total FROM SUPORTE_MENSAGENS
+                     WHERE usu_id_admin = ? AND spm_lida = 0 AND spm_remetente = 'dev'`,
+                    [req.user.id]
+                );
+                total = row.total;
+            } else {
+                const [[row]] = await db.query(
+                    `SELECT COUNT(*) AS total FROM SUPORTE_MENSAGENS
+                     WHERE spm_lida = 0 AND spm_remetente = 'admin'`
+                );
+                total = row.total;
+            }
+
+            return res.status(200).json({ total });
+
+        } catch (error) {
+            console.error('[ERRO] contarNaoLidasSuporte:', error.message);
+            return res.status(500).json({ error: "Erro ao contar mensagens não lidas." });
+        }
+    }
 }
 
 module.exports = new AdminController();

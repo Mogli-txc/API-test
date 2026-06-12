@@ -186,4 +186,18 @@ router.get('/contrato', ...adminGuard, AdminController.obterContrato);
 // POST /api/admin/notificacoes/escola — broadcast de notificação para todos os usuários da escola
 router.post('/notificacoes/escola', ...adminGuard, AdminController.notificarEscola);
 
+// ── Suporte (chat Admin ↔ Dev)  [v30] ────────────────────────────────────────
+
+// GET  /api/admin/suporte/mensagens         — thread da conversa (Admin: própria; Dev: ?usu_id=)
+router.get('/suporte/mensagens',        ...adminGuard, AdminController.listarMensagensSuporte);
+
+// POST /api/admin/suporte/mensagens         — envia mensagem (Admin: body={spm_texto}; Dev: body={spm_texto,usu_id})
+router.post('/suporte/mensagens',       ...adminGuard, AdminController.enviarMensagemSuporte);
+
+// POST /api/admin/suporte/mensagens/lidas   — marca thread como lida
+router.post('/suporte/mensagens/lidas', ...adminGuard, AdminController.marcarLidasSuporte);
+
+// GET  /api/admin/suporte/nao-lidas         — badge: contagem de não lidas
+router.get('/suporte/nao-lidas',        ...adminGuard, AdminController.contarNaoLidasSuporte);
+
 module.exports = router;

@@ -204,4 +204,12 @@ router.post('/jobs/auto-close-caronas', ...devGuard, async (req, res) => {
     }
 });
 
+// ── Suporte — visão Dev  [v30] ────────────────────────────────────────────────
+
+/**
+ * GET /api/dev/suporte/conversas
+ * Lista todos os admins com thread de suporte ativa (última mensagem + não lidas).
+ */
+router.get('/suporte/conversas', ...devGuard, DevController.listarConversasSuporte);
+
 module.exports = router;

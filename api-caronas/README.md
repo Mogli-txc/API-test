@@ -235,6 +235,25 @@ Conecte-se a `ws://localhost:3000` com `Authorization: Bearer <access_token>` no
 | `entrou_carona`           | `{ car_id }`                                                                            | Confirmação de entrada          |
 | `erro`                    | `{ message }`                                                                           | Erro de validação               |
 
+#### WebSocket — Canal de Suporte
+
+Conecte-se ao namespace `/suporte` com o mesmo JWT:
+
+```js
+const socket = io('http://localhost:3000/suporte', {
+    auth: { token: '<access_token>' }
+});
+```
+
+| Evento cliente → servidor | Payload                          | Descrição                                         |
+|---------------------------|----------------------------------|---------------------------------------------------|
+| `entrar_suporte`          | `{ admin_usu_id }`               | Entra na sala `suporte-{admin_usu_id}`            |
+| `sair_suporte`            | `{ admin_usu_id }`               | Sai da sala (Dev ao trocar de conversa)           |
+
+| Evento servidor → cliente        | Payload                                                            | Descrição                          |
+|----------------------------------|--------------------------------------------------------------------|------------------------------------|
+| `mensagem_suporte_recebida`      | `{ spm_id, spm_texto, spm_remetente, spm_criada_em, usu_id_admin }` | Nova mensagem broadcast na sala  |
+
 #### WebSocket — Canal de Notificações
 
 Conecte-se ao namespace `/notificacoes` com o mesmo JWT:
@@ -412,6 +431,15 @@ Exige JWT + Admin (1) ou Desenvolvedor (2). **Admin** tem escopo restrito à sua
 | GET    | `/cursos`                            | Admin/Dev | Lista cursos (Admin: escola; Dev: todos; `?esc_id=`)            |
 | GET    | `/contrato`                          | Admin     | Detalhes do contrato da própria escola (status, dias restantes) |
 
+#### Suporte — Chat Admin ↔ Dev
+
+| Método | Rota                        | Acesso    | Descrição                                                                       |
+|--------|-----------------------------|-----------|---------------------------------------------------------------------------------|
+| GET    | `/suporte/mensagens`        | Admin/Dev | Carrega thread de suporte (Admin: própria conversa; Dev: por `?usu_id=`)        |
+| POST   | `/suporte/mensagens`        | Admin/Dev | Envia mensagem (Admin → Dev ou Dev → Admin identificado pelo `selectedId`)      |
+| POST   | `/suporte/mensagens/lidas`  | Admin/Dev | Marca mensagens como lidas (zera badge de não lidas)                            |
+| GET    | `/suporte/nao-lidas`        | Admin/Dev | Contagem de mensagens não lidas da conversa do Admin autenticado                |
+
 #### Notificações
 
 | Método | Rota                   | Acesso    | Descrição                                                                          |
@@ -453,6 +481,12 @@ Exclusivo para Desenvolvedor (`per_tipo = 2`). Admins recebem 403. O Dev também
 | POST   | `/cadastrar`                        | Dev    | Cria conta Admin/Dev sem OTP — login imediato com e-mail+senha           |
 | PUT    | `/usuarios/:usu_id/perfil`          | Dev    | Atualiza papel e escola do usuário                                       |
 | POST   | `/usuarios/:usu_id/redefinir-senha` | Dev    | Redefine senha de Admin/Dev sem e-mail, invalida sessões                 |
+
+#### Suporte — lista de conversas (Dev)
+
+| Método | Rota                      | Acesso | Descrição                                                                              |
+|--------|---------------------------|--------|----------------------------------------------------------------------------------------|
+| GET    | `/suporte/conversas`      | Dev    | Lista todos os Admins com thread ativa: nome, escola, última mensagem, badge não lidas |
 
 #### CRUD de Escolas e Cursos
 
@@ -529,6 +563,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | `SUGESTOES`              | Sugestões de melhoria (gerenciado por Dev)                         |
 | `DENUNCIAS`              | Denúncias de caronas e usuários (gerenciado por Admin/Dev)         |
 | `NOTIFICACOES`           | Notificações persistidas (automáticas e manuais)                   |
+| `SUPORTE_MENSAGENS`      | Mensagens do chat de suporte Admin ↔ Dev (persistência + badge de não lidas) |
 
 ### Audit Log — Códigos de ação registrados
 
@@ -569,6 +604,7 @@ Após a aprovação, o OCR extrai automaticamente matrícula/RA, nome do curso e
 | v27    | Bugfix de upload de contrato: `MulterError` não possuía `.status`, causando 500 em erros de upload (arquivo grande, campo errado, tipo inválido) — handler específico adicionado em `server.js` retorna 400 com mensagem legível; novo endpoint `GET /api/admin/escolas/:esc_id/contrato/arquivo` para download do PDF do contrato (Dev: qualquer escola; Admin: apenas a própria) |
 | v28    | Novo endpoint `GET /api/admin/escolas/:esc_id/ocr-base/arquivo` para download do PDF de template OCR por escola — mesmo padrão RBAC do contrato (Dev: qualquer escola; Admin: apenas a própria) |
 | v29    | OCR automático por escola: nova coluna `ESCOLAS.esc_ocr_keywords` (JSON) armazena índice normalizado de keywords (nome da escola, sigla detectada e cursos ativos). `DevController._atualizarKeywordsEscola()` reconstrói o índice fire-and-forget após qualquer CRUD de escola ou curso. `ocrValidator` injeta as keywords da escola no grupo `instituicao` antes da avaliação de critérios, tornando a detecção de instituição precisa por escola sem configuração manual. |
+| v30    | Chat de suporte Admin ↔ Dev: tabela `SUPORTE_MENSAGENS`; namespace Socket.io `/suporte` com salas `suporte-{admin_usu_id}`; 4 endpoints em `/api/admin/suporte/*` (listar, enviar, marcar lidas, contar não lidas) + 1 Dev-only em `/api/dev/suporte/conversas`; envio via HTTP com broadcast Socket.io fire-and-forget; tipo de notificação `SUPORTE_MENSAGEM` adicionado ao ENUM; página `/suporte` liberada para Admin (antes era Dev-only). |
 
 ---
 

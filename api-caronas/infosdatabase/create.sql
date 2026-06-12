@@ -736,6 +736,33 @@
                 FOREIGN KEY (usu_id) REFERENCES USUARIOS (usu_id)
                 ON DELETE CASCADE ON UPDATE CASCADE;
 
+        -- =====================================================
+        -- 21. Tabela SUPORTE_MENSAGENS  [v30 — migration-suporte-mensagens.sql]
+        -- Chat bidirecional entre Admin (escola) e Desenvolvedor.
+        -- spm_remetente resolve quem escreveu sem comparar IDs.
+        -- Índice composto serve às duas queries mais frequentes:
+        --   lista de conversas do Dev (agrupa por usu_id_admin) e
+        --   thread de um admin específico (filtra + ordena por spm_criada_em).
+        -- =====================================================
+        DROP TABLE IF EXISTS SUPORTE_MENSAGENS;
+        CREATE TABLE SUPORTE_MENSAGENS (
+            spm_id        INT               NOT NULL AUTO_INCREMENT  COMMENT 'PK',
+            usu_id_admin  INT               NOT NULL                 COMMENT 'FK → USUARIOS (Admin da escola)',
+            usu_id_dev    INT               NOT NULL                 COMMENT 'FK → USUARIOS (Desenvolvedor)',
+            spm_remetente ENUM('admin','dev') NOT NULL               COMMENT 'Quem escreveu esta mensagem',
+            spm_texto     TEXT              NOT NULL                 COMMENT 'Corpo da mensagem (sanitizado)',
+            spm_lida      TINYINT(1)        NOT NULL DEFAULT 0       COMMENT '0 = não lida pelo destinatário',
+            spm_criada_em DATETIME          NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (spm_id),
+            INDEX idx_spm_admin_tempo (usu_id_admin, spm_criada_em)
+        ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci
+        COMMENT = 'Mensagens de suporte entre Admin (escola) e Desenvolvedor  [v30]';
+
+        -- SUPORTE_MENSAGENS → USUARIOS  [v30]
+        ALTER TABLE SUPORTE_MENSAGENS
+            ADD CONSTRAINT FK_spm_admin FOREIGN KEY (usu_id_admin) REFERENCES USUARIOS(usu_id) ON DELETE CASCADE,
+            ADD CONSTRAINT FK_spm_dev   FOREIGN KEY (usu_id_dev)   REFERENCES USUARIOS(usu_id) ON DELETE CASCADE;
+
         SET FOREIGN_KEY_CHECKS = 1;
 
         -- =====================================================
@@ -796,7 +823,8 @@
                 'DOCUMENTO_APROVADO','DOCUMENTO_REPROVADO',
                 'COMPROVANTE_APROVADO','COMPROVANTE_REPROVADO',
                 'CNH_APROVADA','CNH_REPROVADA',
-                'CARONA_PROXIMA_SAIDA'
+                'CARONA_PROXIMA_SAIDA',
+                'SUPORTE_MENSAGEM'
             ) NOT NULL COMMENT 'Tipo de notificação — ENUM garante integridade  [v14 — DB-06]';
 
         ALTER TABLE DENUNCIAS
@@ -821,8 +849,9 @@
         ALTER TABLE SOLICITACOES_CARONA CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
         ALTER TABLE CARONA_PESSOAS    CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
         ALTER TABLE MENSAGENS         CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-        ALTER TABLE SUGESTOES      CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-        ALTER TABLE DENUNCIAS      CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        ALTER TABLE SUGESTOES         CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        ALTER TABLE DENUNCIAS         CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        ALTER TABLE SUPORTE_MENSAGENS CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
         -- =====================================================
         -- v28 — migration-alerta-saida.sql
@@ -856,4 +885,25 @@
         --
         -- Após rodar o ALTER, repovoar as keywords das escolas existentes via
         -- DevController._atualizarKeywordsEscola(esc_id) ou manualmente via UPDATE.
+        -- =====================================================
+
+        -- =====================================================
+        -- v30 — migration-suporte-mensagens.sql
+        -- Chat bidirecional Admin ↔ Desenvolvedor.
+        -- Para bancos já existentes, rode manualmente:
+        --
+        --   CREATE TABLE SUPORTE_MENSAGENS ( ... );  -- ver bloco CREATE acima
+        --
+        --   ALTER TABLE NOTIFICACOES
+        --       MODIFY COLUMN noti_tipo ENUM(
+        --           'SOLICITACAO_NOVA','SOLICITACAO_ACEITA','SOLICITACAO_RECUSADA',
+        --           'CARONA_CANCELADA','CARONA_FINALIZADA','AVALIACAO_RECEBIDA',
+        --           'PENALIDADE_APLICADA','PENALIDADE_REMOVIDA','ADMIN_MANUAL',
+        --           'EXCLUSAO_CANCELADA','SISTEMA',
+        --           'DOCUMENTO_APROVADO','DOCUMENTO_REPROVADO',
+        --           'COMPROVANTE_APROVADO','COMPROVANTE_REPROVADO',
+        --           'CNH_APROVADA','CNH_REPROVADA',
+        --           'CARONA_PROXIMA_SAIDA',
+        --           'SUPORTE_MENSAGEM'
+        --       ) NOT NULL;
         -- =====================================================

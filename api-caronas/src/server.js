@@ -39,7 +39,7 @@ const { Server: SocketIOServer } = require('socket.io');
 
 const { registrarMensagensSocket }    = require('./sockets/mensagensSocket');
 const { setIo }                       = require('./sockets/io');
-const { registrarNotificacoesSocket } = require('./sockets/notificacoesSocket');
+const { registrarNotificacoesSocket, registrarSuporteSocket } = require('./sockets/notificacoesSocket');
 const { iniciarAutoCloseCaronas }     = require('./jobs/autoCloseCaronas');
 const { iniciarAvisarVerificacaoExpirando } = require('./jobs/avisarVerificacaoExpirando');
 const { iniciarVerificarReceiptsPush } = require('./jobs/verificarReceiptsPush');
@@ -441,6 +441,7 @@ if (process.env.NODE_ENV !== 'test') {
     registrarMensagensSocket(io);
     setIo(io);
     registrarNotificacoesSocket(io);
+    registrarSuporteSocket(io);        // namespace /suporte — chat Admin ↔ Dev  [v30]
 
     httpServer.listen(PORT, () => {
         console.log(`

@@ -44,6 +44,7 @@ const TIPOS = Object.freeze({
     COMPROVANTE_REPROVADO:  'COMPROVANTE_REPROVADO',
     CNH_APROVADA:           'CNH_APROVADA',
     CNH_REPROVADA:          'CNH_REPROVADA',
+    SUPORTE_MENSAGEM:       'SUPORTE_MENSAGEM',  // mensagem no chat de suporte Admin ↔ Dev  [v30]
 });
 
 // ── Push: mapeamento tipo → toggle de preferência (espelha PERFIL.per_notif_tipos

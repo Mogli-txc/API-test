@@ -1557,6 +1557,63 @@ class DevController {
             return res.status(500).json({ error: "Erro ao salvar template OCR da escola." });
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // SUPORTE — Visão exclusiva do Desenvolvedor  [v30]
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * MÉTODO: listarConversasSuporte
+     * GET /api/dev/suporte/conversas
+     * Exclusivo do Desenvolvedor (per_tipo=2).
+     * Retorna todos os Admins que já trocaram mensagens, com última mensagem
+     * e contagem de não lidas (mensagens do admin não lidas pelo dev).
+     */
+    async listarConversasSuporte(req, res) {
+        try {
+            if (req.user.per_tipo !== 2) {
+                return res.status(403).json({ error: "Apenas Desenvolvedores podem listar conversas de suporte." });
+            }
+
+            // PASSO 1: Busca admins com pelo menos uma mensagem
+            const [conversas] = await db.query(
+                `SELECT
+                    u.usu_id,
+                    u.usu_nome AS admin_nome,
+                    e.esc_nome,
+                    (
+                        SELECT spm_texto FROM SUPORTE_MENSAGENS
+                        WHERE  usu_id_admin = u.usu_id
+                        ORDER  BY spm_criada_em DESC LIMIT 1
+                    ) AS ultima_mensagem,
+                    (
+                        SELECT spm_criada_em FROM SUPORTE_MENSAGENS
+                        WHERE  usu_id_admin = u.usu_id
+                        ORDER  BY spm_criada_em DESC LIMIT 1
+                    ) AS ultima_em,
+                    (
+                        SELECT COUNT(*) FROM SUPORTE_MENSAGENS
+                        WHERE  usu_id_admin = u.usu_id
+                          AND  spm_lida     = 0
+                          AND  spm_remetente = 'admin'
+                    ) AS nao_lidas
+                FROM   USUARIOS u
+                INNER  JOIN PERFIL  p ON p.usu_id      = u.usu_id
+                LEFT   JOIN ESCOLAS e ON e.esc_id       = p.per_escola_id
+                WHERE  p.per_tipo = 1
+                  AND  EXISTS (
+                    SELECT 1 FROM SUPORTE_MENSAGENS sm WHERE sm.usu_id_admin = u.usu_id
+                  )
+                ORDER  BY ultima_em DESC`
+            );
+
+            return res.status(200).json(conversas);
+
+        } catch (error) {
+            console.error('[ERRO] listarConversasSuporte:', error.message);
+            return res.status(500).json({ error: "Erro ao listar conversas de suporte." });
+        }
+    }
 }
 
 module.exports = new DevController();

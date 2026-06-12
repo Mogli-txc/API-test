@@ -95,7 +95,16 @@ info:
     `instituicao` dos critérios antes da avaliação, tornando a detecção de instituição
     precisa para cada escola sem necessidade de configuração manual.
     `NULL` = escola sem keywords geradas (usa apenas os critérios genéricos).
-  version: 1.16.0
+
+    **Chat de suporte Admin ↔ Dev [v30]:** tabela `SUPORTE_MENSAGENS` armazena o
+    histórico de mensagens entre cada Administrador de escola e o Desenvolvedor.
+    Endpoints REST em `/api/admin/suporte/*` (Admin + Dev) e
+    `/api/dev/suporte/conversas` (Dev). Entrega em tempo real via namespace Socket.io
+    `/suporte` com salas `suporte-{admin_usu_id}`. O painel web exibe a página de
+    suporte para ambos os papéis (Admin vê apenas a própria thread; Dev vê a lista
+    de todas as conversas). Tipo de notificação `SUPORTE_MENSAGEM` adicionado ao
+    canal de badges via `notificar()`.
+  version: 1.17.0
   contact:
     email: gm.monteiro@unesp.br
 
