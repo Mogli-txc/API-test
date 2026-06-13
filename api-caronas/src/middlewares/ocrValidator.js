@@ -122,11 +122,23 @@ function avaliarCriterios(texto, criterios) {
 }
 
 /**
+ * Converte string em Title Case preservando preposições minúsculas comuns.
+ * @param {string} str — string em lowercase (texto normalizado pelo OCR)
+ * @returns {string}
+ */
+function titleCaseNome(str) {
+    const PREPS = new Set(['da', 'de', 'di', 'do', 'das', 'dos', 'e']);
+    return str.trim().split(/\s+/).map((w, i) =>
+        i > 0 && PREPS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)
+    ).join(' ');
+}
+
+/**
  * Extrai dados estruturados do texto do comprovante de matrícula.
  * Roda após a validação de critérios (apenas para documentos aprovados).
  *
  * @param {string} texto — texto normalizado (sem acentos, minúsculas)
- * @returns {{ matricula: string|null, curso: string|null, periodo: string|null }}
+ * @returns {{ matricula: string|null, curso: string|null, periodo: string|null, nome: string|null }}
  */
 function extrairDados(texto) {
     // ── Matrícula / RA ───────────────────────────────────────────────────────
@@ -154,7 +166,24 @@ function extrairDados(texto) {
     const mPeriodo  = texto.match(rePeriodo);
     const periodo   = mPeriodo ? mPeriodo[1].trim() : null;
 
-    return { matricula, curso, periodo };
+    // ── Nome do aluno ────────────────────────────────────────────────────────
+    // Padrões (texto já normalizado — lowercase, sem acentos):
+    //   "nome: maria silva santos", "aluno: joao da silva",
+    //   "nome do aluno: pedro henrique", "discente: ana paula"
+    // Requer início de linha (^) ou newline antes do rótulo para não capturar
+    // "aluno" como palavra dentro de frases ("matriculado como aluno do curso...").
+    const reNome = /(?:^|\n|\r)(?:nome(?:\s+do\s+(?:aluno|discente|estudante))?|nome\s+completo|aluno|discente)[\s:]+([a-z][a-z ]{3,59})/im;
+    const mNome  = texto.match(reNome);
+    let nome     = mNome ? mNome[1] : null;
+    if (nome) {
+        // Remove rótulos subsequentes que possam ter sido capturados antes do \n
+        nome = nome.replace(/\s+(?:cpf|rg|curso|periodo|modulo|matricula|turma|data|nascimento|ra)[:\s].*$/i, '').trim();
+        nome = titleCaseNome(nome);
+        // Descarta se parecer inválido (menos de 2 palavras ou muito longo)
+        if (nome.split(' ').length < 2 || nome.length > 80) nome = null;
+    }
+
+    return { matricula, curso, periodo, nome };
 }
 
 /**

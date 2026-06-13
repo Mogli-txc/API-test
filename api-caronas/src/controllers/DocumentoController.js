@@ -219,13 +219,17 @@ class DocumentoController {
                 );
 
                 // Opção B — perfil do usuário atualizado
+                // COALESCE: usu_nome só é substituído quando o OCR extraiu um nome;
+                // se nome vier nulo, mantém o valor existente.
                 await conn.query(
                     `UPDATE USUARIOS
                      SET usu_verificacao = ?, usu_verificacao_expira = ?,
-                         usu_matricula   = ?, usu_curso_nome = ?, usu_periodo = ?
+                         usu_matricula   = ?, usu_curso_nome = ?, usu_periodo = ?,
+                         usu_nome        = COALESCE(?, usu_nome)
                      WHERE usu_id = ?`,
                     [novoNivel, novaExpira,
                      dados.matricula || null, melhorCurso?.cur_nome || null, dados.periodo || null,
+                     dados.nome || null,
                      usu_id]
                 );
 
@@ -258,6 +262,7 @@ class DocumentoController {
                 expira:      novaExpira,
                 curso:       melhorCurso?.cur_nome || null,
                 escola:      melhorEscola,
+                nome:        dados.nome || null,
                 ocr: {
                     confianca:          ocr.confianca,
                     criteriosAtingidos: ocr.criteriosAtingidos,
