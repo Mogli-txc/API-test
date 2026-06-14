@@ -342,6 +342,38 @@ class SugestaoController {
     }
 
     /**
+     * MÉTODO: desarquivar
+     * Restaura uma sugestão arquivada para status Aberto (sug_status = 1).
+     *
+     * Tabela: SUGESTOES (UPDATE sug_status = 1)
+     * Parâmetro: sug_id (via URL)
+     */
+    async desarquivar(req, res) {
+        try {
+            const { sug_id } = req.params;
+            if (!sug_id || isNaN(sug_id)) return res.status(400).json({ error: "ID inválido." });
+
+            const [atual] = await db.query(
+                'SELECT sug_status FROM SUGESTOES WHERE sug_id = ? AND sug_deletado_em IS NULL',
+                [sug_id]
+            );
+            if (atual.length === 0) return res.status(404).json({ error: "Sugestão não encontrada." });
+            if (atual[0].sug_status !== 2) return res.status(409).json({ error: "Sugestão não está arquivada." });
+
+            await db.query('UPDATE SUGESTOES SET sug_status = 1 WHERE sug_id = ?', [sug_id]);
+
+            return res.status(200).json({
+                message:  "Sugestão restaurada.",
+                sugestao: { sug_id: parseInt(sug_id), sug_status: 1 }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] desarquivar sugestão:", error);
+            return res.status(500).json({ error: "Erro ao restaurar sugestão." });
+        }
+    }
+
+    /**
      * MÉTODO: deletar
      * Soft delete de uma sugestão. Apenas Dev pode usar.
      *

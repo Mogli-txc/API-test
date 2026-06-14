@@ -43,6 +43,9 @@ router.put('/:sug_id/responder', auth, checkRole([2]), controller.responder.bind
 // Arquiva — apenas Dev
 router.post('/:sug_id/arquivar', auth, checkRole([2]), controller.arquivar.bind(controller));
 
+// Desarquiva — apenas Dev
+router.post('/:sug_id/desarquivar', auth, checkRole([2]), controller.desarquivar.bind(controller));
+
 // Soft delete — apenas Dev
 router.delete('/:sug_id', auth, checkRole([2]), controller.deletar.bind(controller));
 

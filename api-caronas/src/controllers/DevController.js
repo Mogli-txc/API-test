@@ -226,7 +226,32 @@ class DevController {
 
             // PASSO 3: Busca os registros com nome do administrador, escola e do registro afetado
             const [logs] = await db.query(
-                `SELECT al.audit_id, al.tabela, al.registro_id, al.acao,
+                `SELECT al.audit_id, al.tabela, al.registro_id,
+                        CASE al.acao
+                          WHEN 'LOGIN'                  THEN 'Login'
+                          WHEN 'LOGIN_FALHA'            THEN 'Login Falhado'
+                          WHEN 'CADASTRO_USU'           THEN 'Cadastro de Usuário'
+                          WHEN 'OTP_FALHA'              THEN 'Falha de OTP'
+                          WHEN 'OTP_BLOQUEIO'           THEN 'Bloqueio por OTP'
+                          WHEN 'SENHA_RESET'            THEN 'Redefinição de Senha'
+                          WHEN 'DELETAR_USU'            THEN 'Exclusão de Usuário'
+                          WHEN 'CRIAR_CARONA'           THEN 'Criação de Carona'
+                          WHEN 'CARONA_CANCEL'          THEN 'Cancelamento de Carona'
+                          WHEN 'RESTAURAR_CARONA'       THEN 'Restauração de Carona'
+                          WHEN 'SOL_ACEITAR'            THEN 'Aceitação de Solicitação'
+                          WHEN 'SOL_RECUSAR'            THEN 'Recusa de Solicitação'
+                          WHEN 'PENALIDADE_APLICAR'     THEN 'Aplicação de Penalidade'
+                          WHEN 'PENALIDADE_REMOVER'     THEN 'Remoção de Penalidade'
+                          WHEN 'PENALIDADE_SUSPENSAO'   THEN 'Suspensão por Penalidade'
+                          WHEN 'STATUS_USU'             THEN 'Alteração de Status'
+                          WHEN 'USU_ATIVAR'             THEN 'Ativação de Usuário'
+                          WHEN 'USU_INATIVAR'           THEN 'Inativação de Usuário'
+                          WHEN 'ESCOLA_CRIAR'           THEN 'Criação de Escola'
+                          WHEN 'ESCOLA_DELETAR'         THEN 'Exclusão de Escola'
+                          WHEN 'CONTRATO_CRIAR'         THEN 'Criação de Contrato'
+                          WHEN 'CONTRATO_DELETAR'       THEN 'Exclusão de Contrato'
+                          ELSE al.acao
+                        END AS acao,
                         al.dados_anteriores, al.dados_novos, al.usu_id,
                         u_admin.usu_nome AS admin_nome,
                         e_admin.esc_nome AS admin_escola,
@@ -236,6 +261,16 @@ class DevController {
                           WHEN 'ESCOLAS'                THEN e_reg.esc_nome
                           WHEN 'VEICULOS'               THEN v_reg.vei_placa
                           WHEN 'DOCUMENTOS_VERIFICACAO' THEN u_doc.usu_nome
+                          WHEN 'PENALIDADES'            THEN CONCAT(
+                            CASE p_reg.pen_tipo
+                              WHEN 1 THEN 'Não pode oferecer caronas'
+                              WHEN 2 THEN 'Não pode solicitar caronas'
+                              WHEN 3 THEN 'Não pode oferecer nem solicitar'
+                              WHEN 4 THEN 'Conta suspensa'
+                              ELSE 'Penalidade desconhecida'
+                            END,
+                            IF(p_reg.pen_motivo, CONCAT(' — ', p_reg.pen_motivo), '')
+                          )
                         END AS registro_nome,
                         al.criado_em
                  FROM AUDIT_LOG al
@@ -247,6 +282,7 @@ class DevController {
                  LEFT JOIN ESCOLAS  e_reg   ON al.tabela = 'ESCOLAS'                AND al.registro_id = e_reg.esc_id
                  LEFT JOIN VEICULOS v_reg   ON al.tabela = 'VEICULOS'               AND al.registro_id = v_reg.vei_id
                  LEFT JOIN USUARIOS u_doc   ON al.tabela = 'DOCUMENTOS_VERIFICACAO' AND al.registro_id = u_doc.usu_id
+                 LEFT JOIN PENALIDADES p_reg ON al.tabela = 'PENALIDADES'           AND al.registro_id = p_reg.pen_id
                  ${whereClause}
                  ORDER BY al.audit_id DESC
                  LIMIT ? OFFSET ?`,

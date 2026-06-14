@@ -43,6 +43,9 @@ router.put('/:den_id/responder', auth, checkRole([1, 2]), controller.responder.b
 // Arquiva — Admin ou Dev
 router.post('/:den_id/arquivar', auth, checkRole([1, 2]), controller.arquivar.bind(controller));
 
+// Desarquiva — Admin ou Dev
+router.post('/:den_id/desarquivar', auth, checkRole([1, 2]), controller.desarquivar.bind(controller));
+
 // Soft delete — apenas Dev
 router.delete('/:den_id', auth, checkRole([2]), controller.deletar.bind(controller));
 

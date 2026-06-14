@@ -486,6 +486,41 @@ class DenunciaController {
     }
 
     /**
+     * MÉTODO: desarquivar
+     * Restaura uma denúncia arquivada para status Aberto (den_status = 1).
+     *
+     * Tabela: DENUNCIAS (UPDATE den_status = 1)
+     * Parâmetro: den_id (via URL)
+     */
+    async desarquivar(req, res) {
+        try {
+            const { den_id } = req.params;
+            if (!den_id || isNaN(den_id)) return res.status(400).json({ error: "ID inválido." });
+
+            await this._verificarEscopoAdmin(req, den_id, res);
+            if (res.headersSent) return;
+
+            const [atual] = await db.query(
+                'SELECT den_status FROM DENUNCIAS WHERE den_id = ? AND den_deletado_em IS NULL',
+                [den_id]
+            );
+            if (atual.length === 0) return res.status(404).json({ error: "Denúncia não encontrada." });
+            if (atual[0].den_status !== 2) return res.status(409).json({ error: "Denúncia não está arquivada." });
+
+            await db.query('UPDATE DENUNCIAS SET den_status = 1 WHERE den_id = ?', [den_id]);
+
+            return res.status(200).json({
+                message:  "Denúncia restaurada.",
+                denuncia: { den_id: parseInt(den_id), den_status: 1 }
+            });
+
+        } catch (error) {
+            console.error("[ERRO] desarquivar denúncia:", error);
+            return res.status(500).json({ error: "Erro ao restaurar denúncia." });
+        }
+    }
+
+    /**
      * MÉTODO: deletar
      * Soft delete de uma denúncia. Apenas Dev pode usar.
      *
