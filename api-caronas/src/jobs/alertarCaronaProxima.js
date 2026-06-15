@@ -17,6 +17,17 @@ const cron = require('node-cron');
 const db   = require('../config/database');
 const { notificar, TIPOS } = require('../utils/notificar');
 
+/**
+ * Formata um TIME do MySQL ("HH:MM:SS" ou objeto Date) como "HH:MM".
+ * Usado para exibir o horário de saída no texto da notificação push.
+ */
+function formatHora(horaSaida) {
+    const str = String(horaSaida);
+    // MySQL2 retorna TIME como string "HH:MM:SS"
+    const match = str.match(/(\d{2}:\d{2})/);
+    return match ? match[1] : str;
+}
+
 async function executarAlertarCaronaProxima() {
     // PASSO 1: Busca caronas que partem nos próximos 15–45 min e ainda não foram alertadas
     const [caronas] = await db.query(
@@ -58,24 +69,31 @@ async function executarAlertarCaronaProxima() {
 
     console.log(`[alertarCaronaProxima] ${caronas.length} carona(s) com alerta de saída enviado.`);
 
+    // Mapeia car_id → horário formatado para uso nas mensagens
+    const horarioPorCarona = Object.fromEntries(
+        caronas.map((c) => [c.car_id, formatHora(c.car_hor_saida)])
+    );
+
     // PASSO 4: Notifica motoristas — fire-and-forget, falha não quebra o job
     for (const c of caronas) {
+        const hora = horarioPorCarona[c.car_id];
         notificar({
             usu_id:   c.motorista_id,
             tipo:     TIPOS.CARONA_PROXIMA_SAIDA,
             titulo:   'Sua carona parte em breve',
-            mensagem: 'Sua carona sai em aproximadamente 30 minutos. Prepare-se!',
+            mensagem: `Saída às ${hora}. Prepare-se para buscar seus passageiros!`,
             dados:    { car_id: c.car_id },
         }).catch(() => {});
     }
 
     // PASSO 5: Notifica passageiros confirmados — fire-and-forget, falha não quebra o job
     for (const p of passageiros) {
+        const hora = horarioPorCarona[p.car_id];
         notificar({
             usu_id:   p.usu_id,
             tipo:     TIPOS.CARONA_PROXIMA_SAIDA,
             titulo:   'Carona parte em breve',
-            mensagem: 'Sua carona sai em aproximadamente 30 minutos. Prepare-se!',
+            mensagem: `Saída às ${hora}. Prepare-se para embarcar!`,
             dados:    { car_id: p.car_id },
         }).catch(() => {});
     }
