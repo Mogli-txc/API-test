@@ -76,6 +76,10 @@ web_modules/
 public/usuarios/
 public/documentos/
 
+# Backups do banco de dados — arquivos gerados pelo job backupBancoDados.js
+backups/*.sql
+backups/*.sql.gz
+
 # dotenv environment variable files
 .env
 .env.development.local

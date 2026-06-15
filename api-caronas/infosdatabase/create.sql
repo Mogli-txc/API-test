@@ -42,6 +42,8 @@
         --           5 novos endpoints: GET /caronas/buscar/mapa, GET /caronas/:id/participantes,
         --           POST /mensagens/carona/:id/ler-todas, GET /notificacoes/resumo,
         --           PATCH /usuarios/me/config
+        --   v31  — usu_matricula UNIQUE em USUARIOS: impede que dois usuários sejam aprovados com o mesmo
+        --           número de matrícula/RA. NULL permitido (múltiplos NULL em UNIQUE são aceitos pelo MySQL).
         -- =====================================================
 
         USE bd_tcc_des_125_caronas;
@@ -118,7 +120,7 @@
             usu_nome              VARCHAR(80)                         COMMENT 'Nome do Usuário (NULL no cadastro temporário)',
             usu_foto              VARCHAR(256)                        COMMENT 'Caminho/URL da Foto do Usuário (NULL)',
             usu_telefone          VARCHAR(11)                         COMMENT 'Telefone sem máscara (ex: 11999990000) (NULL no cadastro temporário)',
-            usu_matricula         VARCHAR(100)                        COMMENT 'Número de matrícula/RA extraído pelo OCR (NULL no cadastro temporário)  [v13]',
+            usu_matricula         VARCHAR(100)                        COMMENT 'Número de matrícula/RA extraído pelo OCR (NULL no cadastro temporário). UNIQUE impede dois usuários com mesmo RA  [v13, v31]',
             usu_curso_nome        VARCHAR(255) NULL DEFAULT NULL      COMMENT 'Nome do curso extraído pelo OCR do comprovante  [v13]',
             usu_periodo           VARCHAR(50)  NULL DEFAULT NULL      COMMENT 'Período/semestre/módulo extraído pelo OCR do comprovante  [v13]',
             usu_senha             VARCHAR(256) NOT NULL               COMMENT 'Senha de acesso (hash bcrypt custo 12)',
@@ -161,6 +163,7 @@
             usu_exclusao_agendada DATETIME     NULL DEFAULT NULL      COMMENT 'Data-limite para exclusão agendada pelo usuário (NULL = sem exclusão pendente)  [v22]',
 
             PRIMARY KEY (usu_id),
+            UNIQUE KEY UQ_usu_matricula    (usu_matricula),             -- impede matrícula/RA duplicado entre usuários; NULL aceito pelo MySQL  [v31]
             INDEX idx_usu_refresh_hash (usu_refresh_hash),  -- lookup O(1) na rota /refresh  [v4]
             INDEX idx_usu_deletado_em  (usu_deletado_em)    -- filtro de registros ativos     [v3]
         ) ENGINE = InnoDB;

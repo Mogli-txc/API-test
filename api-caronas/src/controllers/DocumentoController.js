@@ -201,6 +201,24 @@ class DocumentoController {
             }
             const novaExpira = proximaFronteiraSemestral();
 
+            // PASSO 7.5: Bloqueia matrícula duplicada
+            // Antes de gravar, verifica se outro usuário já tem o mesmo número de matrícula.
+            // Cobre fraudes onde dois usuários enviam o mesmo comprovante.
+            // Skippado em test-bypass (dados.matricula é null nesse caminho).
+            if (dados.matricula) {
+                const [duplicatas] = await db.query(
+                    'SELECT usu_id FROM USUARIOS WHERE usu_matricula = ? AND usu_id != ?',
+                    [dados.matricula, usu_id]
+                );
+                if (duplicatas.length > 0) {
+                    await fsp.unlink(req.file.path).catch(() => {});
+                    return res.status(409).json({
+                        error: "Matrícula já vinculada a outra conta.",
+                        detalhes: "O número de matrícula extraído do comprovante já está registrado no sistema. Se acredita que isso é um erro, entre em contato com o suporte."
+                    });
+                }
+            }
+
             // PASSO 8: Salva documento + atualiza usuário em transação atômica
             // Opção A: histórico em DOCUMENTOS_VERIFICACAO (doc_matricula, doc_curso, doc_periodo)
             // Opção B: dados atualizados em USUARIOS (usu_matricula, usu_curso_nome, usu_periodo)

@@ -44,6 +44,7 @@ const { iniciarAutoCloseCaronas }     = require('./jobs/autoCloseCaronas');
 const { iniciarAvisarVerificacaoExpirando } = require('./jobs/avisarVerificacaoExpirando');
 const { iniciarVerificarReceiptsPush } = require('./jobs/verificarReceiptsPush');
 const { iniciarAlertarCaronaProxima } = require('./jobs/alertarCaronaProxima');
+const { iniciarBackupBancoDados }     = require('./jobs/backupBancoDados');
 const db = require('./config/database'); // Pool MySQL — usado no health check
 
 // Importação das rotas
@@ -429,6 +430,7 @@ iniciarAutoCloseCaronas();
 iniciarAvisarVerificacaoExpirando();
 iniciarVerificarReceiptsPush();
 iniciarAlertarCaronaProxima();
+iniciarBackupBancoDados();
 
 if (process.env.NODE_ENV !== 'test') {
     const io = new SocketIOServer(httpServer, {
