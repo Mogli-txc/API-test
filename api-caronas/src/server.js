@@ -130,13 +130,16 @@ app.use(cors(corsOptions)); // app.use global já trata preflight OPTIONS automa
  * Middleware 2: Rate Limiting global
  * Limita cada IP a 100 requisições por janela de 15 minutos.
  */
+const skipRateLimit = () =>
+    process.env.NODE_ENV === 'test' || process.env.DISABLE_RATE_LIMIT === 'true';
+
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Muitas requisições. Tente novamente em alguns minutos." },
-    skip: () => process.env.NODE_ENV === 'test' // Desabilitado em testes para não bloquear seeds
+    skip: skipRateLimit,
 });
 app.use(limiter);
 
@@ -151,7 +154,7 @@ const authLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Muitas tentativas de autenticação. Tente novamente em 15 minutos." },
-    skip: () => process.env.NODE_ENV === 'test' // Desabilitado em testes para não bloquear seeds
+    skip: skipRateLimit,
 });
 app.use('/api/usuarios/login', authLimiter);
 app.use('/api/usuarios/cadastro', authLimiter);
@@ -172,7 +175,7 @@ const writeLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Muitas requisições. Aguarde um momento antes de tentar novamente." },
-    skip: () => process.env.NODE_ENV === 'test'
+    skip: skipRateLimit,
 });
 app.use('/api/solicitacoes/criar', writeLimiter);
 app.use('/api/mensagens/enviar', writeLimiter);
@@ -191,7 +194,7 @@ const geocodeLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Muitas buscas de endereço. Aguarde um momento." },
-    skip: () => process.env.NODE_ENV === 'test'
+    skip: skipRateLimit,
 });
 app.use('/api/pontos/geocode', geocodeLimiter);
 
