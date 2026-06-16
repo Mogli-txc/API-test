@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "jest"
+    "test": "jest",
+    "ngrok": "ngrok http --domain=showy-slapstick-escapade.ngrok-free.dev 3000"
   },
   "keywords": [
     "caronas",
