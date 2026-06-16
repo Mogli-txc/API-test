@@ -489,7 +489,7 @@ class AdminController {
                          LEFT  JOIN CURSOS_USUARIOS cu  ON u.usu_id  = cu.usu_id
                          LEFT  JOIN CURSOS c            ON cu.cur_id = c.cur_id
                          WHERE (c.esc_id = ? OR p.per_escola_id = ?) ${whereBase ? 'AND ' + whereBase : ''}
-                         ORDER BY u.usu_id ASC
+                         ORDER BY u.usu_id DESC
                          LIMIT ? ${cursor !== null ? '' : 'OFFSET ?'}`,
                         cursor !== null ? [...params, limit] : [...params, limit, offset]
                     );
@@ -516,7 +516,7 @@ class AdminController {
                          FROM USUARIOS u
                          INNER JOIN PERFIL p ON u.usu_id = p.usu_id
                          WHERE ${whereBase}
-                         ORDER BY u.usu_id ASC
+                         ORDER BY u.usu_id DESC
                          LIMIT ? ${cursor !== null ? '' : 'OFFSET ?'}`,
                         cursor !== null ? [...filtroParams, limit] : [...filtroParams, limit, offset]
                     );
@@ -543,7 +543,7 @@ class AdminController {
                      LEFT  JOIN CURSOS_USUARIOS cu  ON u.usu_id  = cu.usu_id
                      LEFT  JOIN CURSOS c            ON cu.cur_id = c.cur_id
                      WHERE (c.esc_id = ? OR p.per_escola_id = ?) ${whereBase ? 'AND ' + whereBase : ''}
-                     ORDER BY u.usu_id ASC
+                     ORDER BY u.usu_id DESC
                      LIMIT ? ${cursor !== null ? '' : 'OFFSET ?'}`,
                     cursor !== null ? [...params, limit] : [...params, limit, offset]
                 );
