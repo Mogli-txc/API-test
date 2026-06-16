@@ -254,7 +254,15 @@ class DevController {
                         END AS acao,
                         al.dados_anteriores, al.dados_novos, al.usu_id,
                         u_admin.usu_nome AS admin_nome,
-                        e_admin.esc_nome AS admin_escola,
+                        COALESCE(
+                          e_admin.esc_nome,
+                          (SELECT e.esc_nome
+                           FROM CURSOS_USUARIOS cu
+                           JOIN CURSOS  c ON cu.cur_id  = c.cur_id
+                           JOIN ESCOLAS e ON c.esc_id   = e.esc_id
+                           WHERE cu.usu_id = al.usu_id
+                           LIMIT 1)
+                        ) AS admin_escola,
                         CASE al.tabela
                           WHEN 'USUARIOS'               THEN u_reg.usu_nome
                           WHEN 'CARONAS'                THEN DATE_FORMAT(c_reg.car_data, '%d/%m/%Y')
