@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "dev:tunnel": "concurrently --kill-others \"npm run dev\" \"npm run ngrok\"",
     "test": "jest",
     "ngrok": "ngrok http --domain=showy-slapstick-escapade.ngrok-free.dev 3000"
   },
@@ -42,6 +43,7 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "concurrently": "^10.0.3",
     "jest": "^30.3.0",
     "nodemon": "^3.1.14",
     "supertest": "^7.2.2"
