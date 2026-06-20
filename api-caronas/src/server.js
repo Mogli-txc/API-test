@@ -156,6 +156,7 @@ const authLimiter = rateLimit({
     message: { error: "Muitas tentativas de autenticação. Tente novamente em 15 minutos." },
     skip: skipRateLimit,
 });
+
 app.use('/api/usuarios/login', authLimiter);
 app.use('/api/usuarios/cadastro', authLimiter);
 app.use('/api/usuarios/verificar-email', authLimiter);
@@ -450,13 +451,13 @@ if (process.env.NODE_ENV !== 'test') {
 
     httpServer.listen(PORT, () => {
         console.log(`
-╔════════════════════════════════════════════╗
-║  API DE SISTEMA DE CARONAS INICIADA        ║
-║  URL: http://localhost:${PORT}              ║
-║  Ambiente: ${process.env.NODE_ENV || 'development'}             ║
-║  WebSocket: ativo (Socket.io)              ║
-║  Timestamp: ${new Date().toISOString()}     ║
-╚════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════╗
+║  API DE SISTEMA DE CARONAS INICIADA                  ║
+║  URL: http://localhost:${PORT}                       ║
+║  Ambiente: ${process.env.NODE_ENV || 'development'}  ║
+║  WebSocket: ativo (Socket.io)                        ║
+║  Timestamp: ${new Date().toISOString()}              ║
+╚══════════════════════════════════════════════════════╝
         `);
         console.log("Aguardando requisições...\n");
     });
