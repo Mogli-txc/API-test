@@ -208,11 +208,11 @@ class AdminController {
                 const whereClause = filtros.length > 0 ? `WHERE ${filtros.join(' AND ')}` : '';
 
                 [rows] = await db.query(
-                    `SELECT COUNT(*)              AS total,
-                            SUM(c.car_status = 1) AS abertas,
-                            SUM(c.car_status = 2) AS em_espera,
-                            SUM(c.car_status = 3) AS finalizadas,
-                            SUM(c.car_status = 0) AS canceladas
+                    `SELECT COUNT(DISTINCT c.car_id)                                        AS total,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 1 THEN c.car_id END)   AS abertas,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 2 THEN c.car_id END)   AS em_espera,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 3 THEN c.car_id END)   AS finalizadas,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 0 THEN c.car_id END)   AS canceladas
                      FROM CARONAS c ${joinClause} ${whereClause}`,
                     params
                 );
@@ -223,11 +223,11 @@ class AdminController {
                 if (fim)    { filtros.push('c.car_data <= ?'); params.push(fim); }
 
                 [rows] = await db.query(
-                    `SELECT COUNT(*)              AS total,
-                            SUM(c.car_status = 1) AS abertas,
-                            SUM(c.car_status = 2) AS em_espera,
-                            SUM(c.car_status = 3) AS finalizadas,
-                            SUM(c.car_status = 0) AS canceladas
+                    `SELECT COUNT(DISTINCT c.car_id)                                        AS total,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 1 THEN c.car_id END)   AS abertas,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 2 THEN c.car_id END)   AS em_espera,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 3 THEN c.car_id END)   AS finalizadas,
+                            COUNT(DISTINCT CASE WHEN c.car_status = 0 THEN c.car_id END)   AS canceladas
                      FROM CARONAS c
                      INNER JOIN VEICULOS        v  ON c.vei_id  = v.vei_id
                      INNER JOIN CURSOS_USUARIOS cu ON v.usu_id  = cu.usu_id
