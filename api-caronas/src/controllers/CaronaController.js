@@ -1071,7 +1071,7 @@ class CaronaController {
                     usu_id:   p.usu_id,
                     tipo:     TIPOS.CARONA_FINALIZADA,
                     titulo:   'Carona finalizada',
-                    mensagem: 'O motorista finalizou a carona. Que tal deixar uma avaliação?',
+                    mensagem: 'O motorista finalizou a carona.',
                     dados:    { car_id: parseInt(car_id) }
                 }).catch(() => {}));
             }).catch(() => {});
