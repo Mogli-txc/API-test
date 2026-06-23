@@ -87,6 +87,22 @@ class UsuarioController {
             return res.status(400).json({ error: "A senha deve ter no mínimo 8 caracteres." });
         }
 
+        // Validação de domínio institucional: o domínio do e-mail precisa pertencer
+        // a uma escola cadastrada (ESCOLAS.esc_dominio). Sem isso, qualquer e-mail
+        // (gmail, yahoo, etc.) conseguiria criar conta. Mesma regra aplicada na
+        // verificação de documentos (DocumentoController) e matrícula (MatriculaController).
+        const dominioEmail = usu_email.split('@')[1]?.toLowerCase();
+        const [escolasDominio] = await db.query(
+            'SELECT esc_id FROM ESCOLAS WHERE LOWER(esc_dominio) = ?',
+            [dominioEmail]
+        );
+        if (escolasDominio.length === 0) {
+            return res.status(422).json({
+                error: "Cadastro restrito a e-mails institucionais.",
+                detalhes: `Nenhuma escola com o domínio @${dominioEmail} está cadastrada no sistema.`
+            });
+        }
+
         let conn;
         try {
             // Verifica duplicidade de email antes de abrir transação
