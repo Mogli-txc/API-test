@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "dev:tunnel": "concurrently --kill-others \"npm run dev\" \"npm run ngrok\"",
     "test": "jest",
+    "db:reset": "powershell -ExecutionPolicy Bypass -File ./scripts/reset-db.ps1",
     "ngrok": "ngrok http --url=showy-slapstick-escapade.ngrok-free.dev 3000"
   },
   "keywords": [
