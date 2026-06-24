@@ -49,7 +49,11 @@ if (-not $mysql) {
 if (-not $mysql) { throw "mysql.exe nao encontrado. Adicione-o ao PATH." }
 
 # ---- Argumentos comuns de conexao ----
-$connArgs = @("-h", $dbHost, "-P", $dbPort, "-u", $dbUser)
+# --default-character-set=utf8mb4 e ESSENCIAL: os .sql sao UTF-8, mas o mysql.exe
+# no Windows assume o code page do console (cp850/latin1) ao ler o arquivo via
+# `source`, dupla-codificando os acentos (ex.: "Tecnico" -> "T├®cnico"). Forcar
+# utf8mb4 no cliente faz os bytes do arquivo serem gravados sem reinterpretacao.
+$connArgs = @("-h", $dbHost, "-P", $dbPort, "-u", $dbUser, "--default-character-set=utf8mb4")
 if ($dbPass) { $connArgs += "-p$dbPass" }
 
 function Invoke-MySql([string[]]$extraArgs) {
