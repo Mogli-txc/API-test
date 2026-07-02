@@ -144,7 +144,12 @@ function extrairDados(texto) {
     // ── Matrícula / RA ───────────────────────────────────────────────────────
     // Padrões: "RA 123456", "RA: 123456", "Matrícula: 123456", "nº 123456",
     //          "registro: 123456-X", "matricula 123456"
-    const reMatricula = /(?:ra[:\s]+|matricula[:\s]+|registro[:\s]+|n[°º][:\s]*|numero de matricula[:\s]*)([a-z0-9][\w\-./]{3,30})/i;
+    // O rótulo precisa ser palavra isolada (\b) — sem isso "para"/"bezerra" casavam
+    // o "ra" interno — e o valor capturado precisa COMEÇAR com dígito, pois RA/matrícula
+    // são numéricos (ex: "RA 106649849-0/SP"). Sem a âncora de dígito, o título
+    // "DECLARAÇÃO DE MATRÍCULA" era seguido de "Declaramos" e o valor virava a palavra
+    // "declaramos" (capturada antes do RA real, que aparece mais adiante no texto).
+    const reMatricula = /\b(?:ra|matricula|registro|numero de matricula|n[°º])[:\s]+(\d[\w\-./]{2,30})/i;
     const mMatricula  = texto.match(reMatricula);
     const matricula   = mMatricula ? mMatricula[1].trim() : null;
 
