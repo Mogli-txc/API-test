@@ -719,13 +719,13 @@ class CaronaController {
     async atualizar(req, res) {
         try {
             const { car_id } = req.params;
-            const { car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status, car_capacete } = req.body;
+            const { car_desc, car_data, car_hor_saida, car_vagas_dispo, car_status, car_capacete, vei_id } = req.body;
 
             if (!car_id || isNaN(car_id)) {
                 return res.status(400).json({ error: "ID de carona inválido." });
             }
 
-            if (!car_desc && !car_data && !car_hor_saida && !car_vagas_dispo && car_status === undefined && car_capacete === undefined) {
+            if (!car_desc && !car_data && !car_hor_saida && !car_vagas_dispo && car_status === undefined && car_capacete === undefined && !vei_id) {
                 return res.status(400).json({ error: "Nenhum campo para atualizar fornecido." });
             }
 
@@ -739,7 +739,7 @@ class CaronaController {
             // Usa VEICULOS porque cur_usu_id pode ser NULL [v13]
             const [dono] = await db.query(
                 `SELECT v.usu_id, c.car_data AS data_atual, c.car_hor_saida AS hora_atual,
-                        c.car_status AS status_atual
+                        c.car_status AS status_atual, c.car_vagas_dispo AS vagas_atuais
                  FROM CARONAS c
                  INNER JOIN VEICULOS v ON c.vei_id = v.vei_id
                  WHERE c.car_id = ?`,
@@ -816,10 +816,38 @@ class CaronaController {
             if (car_status !== undefined)   { campos.push('car_status = ?');   valores.push(parseInt(car_status)); }
             if (car_capacete !== undefined) { campos.push('car_capacete = ?'); valores.push(car_capacete ? 1 : 0); }
 
+            // Troca de veículo — exige que o novo veículo pertença ao mesmo motorista
+            // e comporte as vagas já configuradas na carona (evita, ex., trocar pra
+            // uma moto com car_vagas_dispo ainda em 4).
+            if (vei_id) {
+                const [veiNovo] = await db.query(
+                    'SELECT usu_id, vei_vagas FROM VEICULOS WHERE vei_id = ?',
+                    [vei_id]
+                );
+                if (veiNovo.length === 0) {
+                    return res.status(404).json({ error: "Veículo não encontrado." });
+                }
+                if (veiNovo[0].usu_id !== req.user.id) {
+                    return res.status(403).json({ error: "Este veículo não pertence a você." });
+                }
+
+                const vagasParaChecar = car_vagas_dispo
+                    ? parseInt(car_vagas_dispo)
+                    : parseInt(dono[0].vagas_atuais);
+                if (vagasParaChecar > veiNovo[0].vei_vagas) {
+                    return res.status(400).json({
+                        error: `O veículo selecionado suporta no máximo ${veiNovo[0].vei_vagas} vaga(s). Ajuste as vagas antes de trocar de veículo.`
+                    });
+                }
+
+                campos.push('vei_id = ?');
+                valores.push(parseInt(vei_id));
+            }
+
             valores.push(car_id); // WHERE car_id = ?
 
             // Whitelist: apenas colunas conhecidas podem entrar na query (car_status=3 bloqueado acima)
-            const COLUNAS_PERMITIDAS = ['car_desc = ?', 'car_data = ?', 'car_hor_saida = ?', 'car_vagas_dispo = ?', 'car_status = ?', 'car_capacete = ?'];
+            const COLUNAS_PERMITIDAS = ['car_desc = ?', 'car_data = ?', 'car_hor_saida = ?', 'car_vagas_dispo = ?', 'car_status = ?', 'car_capacete = ?', 'vei_id = ?'];
             if (!campos.every(c => COLUNAS_PERMITIDAS.includes(c))) {
                 return res.status(400).json({ error: "Campo inválido detectado." });
             }
