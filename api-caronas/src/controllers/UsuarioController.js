@@ -38,6 +38,7 @@ const { checkDevOrOwner, verificarContratoEscola } = require('../utils/authHelpe
 const { registrarAudit } = require('../utils/auditLog');
 const { notificar, TIPOS } = require('../utils/notificar');
 const { stripHtml } = require('../utils/sanitize');
+const { removerArquivo } = require('../utils/removerArquivo');
 
 // Geocodificação do endereço do usuário via Nominatim  [v10]
 // Importado aqui para manter o serviço centralizado em geocodingService.js
@@ -797,10 +798,23 @@ class UsuarioController {
                 return res.status(400).json({ error: "Nenhuma imagem enviada." });
             }
 
+            // Guarda o nome do arquivo antigo para remover do disco depois de
+            // confirmar a troca — evita que fotos substituídas fiquem órfãs
+            // em /public/usuarios (SEC-6).
+            const [usuarioAtual] = await db.query(
+                'SELECT usu_foto FROM USUARIOS WHERE usu_id = ?',
+                [id]
+            );
+            const fotoAntiga = usuarioAtual[0]?.usu_foto || null;
+
             await db.query(
                 'UPDATE USUARIOS SET usu_foto = ? WHERE usu_id = ?',
                 [req.file.filename, id]
             );
+
+            if (fotoAntiga && fotoAntiga !== req.file.filename) {
+                await removerArquivo(fotoAntiga, 'usuarios');
+            }
 
             const urlFoto = gerarUrl(req.file.filename, 'usuarios', 'perfil.png');
 

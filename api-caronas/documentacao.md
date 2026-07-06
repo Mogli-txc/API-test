@@ -1461,6 +1461,9 @@ paths:
     put:
       tags: [Usuários]
       summary: Atualizar foto de perfil
+      description: >-
+        Ao trocar a foto, o arquivo anterior é removido de /public/usuarios
+        (SEC-6) — evita fotos órfãs acumulando em disco a cada substituição.
       security:
         - bearerAuth: []
       parameters:
