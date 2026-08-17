@@ -18,6 +18,7 @@
 
 const db  = require('../config/database');
 const fsp = require('fs').promises;
+const path = require('path');
 const { registrarAudit } = require('../utils/auditLog');
 const { proximaFronteiraSemestral } = require('../utils/queryHelpers');
 const { notificar, TIPOS } = require('../utils/notificar');
@@ -565,6 +566,62 @@ class DocumentoController {
             return res.status(500).json({ error: "Erro ao listar documentos." });
         }
     }
+
+    /**
+     * MÉTODO: baixarArquivo
+     * GET /api/documentos/arquivo/:nome
+     *
+     * Entrega o arquivo só para o dono do documento ou para admin (nível 1/2).
+     * Substitui o acesso público por /public/documentos/<nome>.
+     */
+    baixarArquivo = async (req, res) => {
+        try {
+            const { nome } = req.params;
+
+            // Path traversal: o nome vem da URL, então nunca pode conter
+            // separador nem "..". Rejeitar antes de tocar no disco.
+            // path.basename devolve o nome sem diretório: se difere do original,
+            // veio separador ou ".." embutido. Idiomático e sem escapar barra.
+            if (!nome || nome !== path.basename(nome)) {
+                return res.status(400).json({ error: 'Nome de arquivo inválido.' });
+            }
+
+            // A autorização é pela LINHA do banco, não pelo nome: só existe
+            // acesso se houver um documento com esse arquivo, e o solicitante
+            // for o dono dele ou admin.
+            const [linhas] = await db.query(
+                'SELECT usu_id FROM DOCUMENTOS_VERIFICACAO WHERE doc_arquivo = ? LIMIT 1',
+                [nome]
+            );
+            if (linhas.length === 0) {
+                return res.status(404).json({ error: 'Documento não encontrado.' });
+            }
+
+            const [perfil] = await db.query(
+                'SELECT per_tipo FROM PERFIL WHERE usu_id = ?',
+                [req.user.id]
+            );
+            const ehAdmin = [1, 2].includes(Number(perfil[0]?.per_tipo));
+            const ehDono  = Number(linhas[0].usu_id) === Number(req.user.id);
+
+            if (!ehAdmin && !ehDono) {
+                // 404 e não 403: responder "existe mas você não pode" confirmaria
+                // a existência do arquivo para quem não deveria saber.
+                return res.status(404).json({ error: 'Documento não encontrado.' });
+            }
+
+            const caminho = path.join(process.cwd(), 'public', 'documentos', nome);
+            return res.sendFile(caminho, (err) => {
+                if (err && !res.headersSent) {
+                    res.status(404).json({ error: 'Documento não encontrado.' });
+                }
+            });
+        } catch (error) {
+            console.error('[ERRO] baixarArquivo:', error);
+            return res.status(500).json({ error: 'Erro ao recuperar documento.' });
+        }
+    }
+
 }
 
 module.exports = new DocumentoController();

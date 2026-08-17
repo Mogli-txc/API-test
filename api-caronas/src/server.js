@@ -212,6 +212,27 @@ app.use(express.urlencoded({ extended: true }));
  * Imagens enviadas via upload ficam acessíveis em /public/<pasta>/<arquivo>
  * Ex: http://localhost:3000/public/usuarios/foto.jpg
  */
+// SEC-8: documentos e contratos NAO podem sair pelo estatico. Sao CNH e
+// comprovante de matricula -- documento de identidade. Antes qualquer um com a
+// URL lia o arquivo, sem token, e o nome (timestamp + Math.random) nao e
+// controle de acesso: a URL vaza pelo uso normal (log de proxy, cache de
+// imagem, HTML do painel) e valia para sempre.
+//
+// Este guard vem ANTES do express.static de proposito -- depois nao adiantaria,
+// o static ja teria respondido. Fotos de perfil (usuarios/) seguem publicas:
+// sao exibidas a outros usuarios por design.
+const PASTAS_PRIVADAS = ['documentos', 'contratos'];
+app.use('/public', (req, res, next) => {
+    const primeiraPasta = req.path.split('/').filter(Boolean)[0];
+    if (PASTAS_PRIVADAS.includes(primeiraPasta)) {
+        return res.status(404).json({
+            error: 'Nao encontrado.',
+            dica: 'Documentos so pelo endpoint autenticado GET /api/documentos/arquivo/:nome'
+        });
+    }
+    return next();
+});
+
 app.use('/public', express.static('public'));
 
 /**

@@ -1,0 +1,20 @@
+# Arquivos que o Claude Code nunca deve ler, buscar ou editar.
+# Diferente do .gitignore: aqui a leitura e a escrita são bloqueadas de fato,
+# e o Glob (que ignora o .gitignore por padrão) também passa a respeitar.
+
+# Dependências e artefatos de build
+node_modules/
+dist/
+build/
+coverage/
+
+# Lockfiles: enormes e sem informação útil para leitura
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Logs, cache e uploads
+*.log
+logs/
+.cache/
+uploads/

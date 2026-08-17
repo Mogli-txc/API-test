@@ -35,6 +35,19 @@ const adminGuard           = [auth, checkRole([1, 2])];
 router.get('/historico', auth, controller.listarHistorico.bind(controller));
 
 /**
+ * ROTA: GET /api/documentos/arquivo/:nome
+ * Descrição: Entrega o arquivo de um documento (CNH ou comprovante).
+ * Acesso: PROTEGIDO — só o dono do documento ou admin (nível 1/2).
+ *
+ * Substitui o acesso direto por /public/documentos/<nome>, que era servido pelo
+ * express.static SEM autenticação nenhuma: qualquer um com a URL lia um
+ * documento de identidade. O nome do arquivo (timestamp + Math.random) não é
+ * controle de acesso — a URL vaza pelo uso normal (log de proxy, cache de
+ * imagem, HTML do painel) e valia para sempre.
+ */
+router.get('/arquivo/:nome', auth, controller.baixarArquivo.bind(controller));
+
+/**
  * ROTA: GET /api/documentos/admin
  * Descrição: Lista todos os documentos enviados (para revisão manual).
  * Acesso: RESTRITO — Admin (per_tipo=1) e Desenvolvedor (per_tipo=2)
