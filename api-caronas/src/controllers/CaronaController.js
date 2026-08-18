@@ -226,9 +226,11 @@ class CaronaController {
 
             // JOIN entre várias tabelas para trazer informações completas da carona.
             // req.user.id adicionado para excluir as próprias caronas do motorista autenticado.
+            // Ordem dos params tem que casar com a ordem dos "?" no SQL: "v.usu_id != ?"
+            // vem antes de "${filtroExtra}" no WHERE, então req.user.id vem antes de filtroParams.
             const params = cursor !== null
-                ? [...filtroParams, req.user.id, cursor, limit]
-                : [...filtroParams, req.user.id, limit, offset];
+                ? [req.user.id, ...filtroParams, cursor, limit]
+                : [req.user.id, ...filtroParams, limit, offset];
 
             const [caronas] = await db.query(
                 `SELECT c.car_id, c.car_desc, c.car_data, c.car_hor_saida,
@@ -295,6 +297,7 @@ class CaronaController {
             // (pode ser ligeiramente maior que o resultado Haversine — é uma aproximação intencional,
             // pois calcular o total exato exigiria buscar todos os registros e aplicar Haversine em memória).
             // Quando proximidade não está ativa, o COUNT é exato.
+            // Ordem dos params casa com a ordem dos "?" no SQL — ver comentário acima em `params`.
             const [[{ totalGeral }]] = await db.query(
                 `SELECT COUNT(*) AS totalGeral
                  FROM CARONAS c
@@ -308,7 +311,7 @@ class CaronaController {
                         OR (c.car_data = CURDATE() AND c.car_hor_saida >= CURTIME()))
                    AND v.usu_id != ?
                    ${filtroExtra}`,
-                [...filtroParams, req.user.id]
+                [req.user.id, ...filtroParams]
             );
 
             return res.status(200).json({
